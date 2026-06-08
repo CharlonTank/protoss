@@ -1040,10 +1040,28 @@ let () =
   let web_canon_graph =
     Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-canon-graph.json"))
   in
+  let web_app_json = Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-app.json")) in
+  let embedded_program = json_field "program" web_app_json in
   assert_equal "web canonical graph version" Kernel.canonical_graph_version
     (json_string_field "version" web_canon_graph);
   assert_equal "web canonical graph hash" (Kernel.hash_program web_a.Web.build.Workspace.checked)
     (json_string_field "programHash" web_canon_graph);
+  assert_equal "web embedded canonical graph version" Kernel.canonical_graph_version
+    (json_string_field "version" embedded_program);
+  assert_equal "web embedded canonical graph hash" (Kernel.hash_program web_a.Web.build.Workspace.checked)
+    (json_string_field "programHash" embedded_program);
+  assert_true "web app embeds canonical node graph"
+    (List.length (json_array_field "nodes" (json_field "nodeGraph" embedded_program)) > 0);
+  assert_true "web embedded graph matches artifact" (web_canon_graph = embedded_program);
+  let web_runtime_js = Store.read_file (Filename.concat web_dist_a "protoss-runtime.js") in
+  assert_true "web runtime interprets canonical graph"
+    (contains_substring web_runtime_js "evalProgram(app.program)");
+  assert_true "web runtime exposes suspended requests"
+    (contains_substring web_runtime_js "protoss:request");
+  assert_true "web runtime is not Todo hardcoded"
+    (not (contains_substring web_runtime_js "applyMsg")
+    && not (contains_substring web_runtime_js "NewTodoChanged")
+    && not (contains_substring web_runtime_js "AddTodo"));
   let web_capabilities =
     Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-capabilities.json"))
   in

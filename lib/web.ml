@@ -251,19 +251,6 @@ let runtime_js =
     span.textContent = s || "";
     return span;
   }
-  function valueToJs(v) {
-    if (!v) return null;
-    if (v.tag === "String" || v.tag === "Nat" || v.tag === "Bool") return v.value;
-    if (v.tag === "Unit") return null;
-    if (v.tag === "List") return v.items.map(valueToJs);
-    if (v.tag === "Record") {
-      var out = {};
-      Object.keys(v.fields).forEach(function (k) { out[k] = valueToJs(v.fields[k]); });
-      return out;
-    }
-    if (v.tag === "Variant") return { constructor: v.constructor, payload: valueToJs(v.payload) };
-    return v;
-  }
   function jsToStringValue(s) { return { tag: "String", value: String(s) }; }
   function unitValue() { return { tag: "Unit" }; }
   function hashString(s) {
@@ -274,7 +261,238 @@ let runtime_js =
     }
     return "web:" + (h >>> 0).toString(16).padStart(8, "0");
   }
-  function renderView(node, model, dispatch) {
+  function defMaps(program) {
+    var byId = {};
+    var byName = {};
+    (program.defs || []).forEach(function (d) {
+      byId[d.defId] = d;
+      byName[d.name] = d;
+    });
+    return { byId: byId, byName: byName };
+  }
+  function variantValue(constructor, payload) {
+    return { tag: "Variant", constructor: constructor, payload: payload || unitValue() };
+  }
+  function listValue(items) {
+    return { tag: "List", items: items || [] };
+  }
+  function viewValue(view) {
+    return { tag: "View", view: view };
+  }
+  function requestExpected(req) {
+    if (!req) return "Unit";
+    if (req.tag === "SaveLocal") return "Unit";
+    return "String";
+  }
+  function requestPayload(req) {
+    if (!req) return {};
+    if (req.tag === "AskHuman") return { prompt: req.prompt };
+    if (req.tag === "HttpGet") return { url: req.url };
+    if (req.tag === "SaveLocal") return { key: req.key, value: req.value };
+    if (req.tag === "LoadLocal") return { key: req.key };
+    if (req.tag === "ServerRequest") return { route: req.route, payload: req.payload };
+    return {};
+  }
+  function evalProgram(program) {
+    var maps = defMaps(program);
+    var values = {};
+    var recurStack = [];
+    function expectDef(ref) {
+      var d = maps.byId[ref] || maps.byName[ref];
+      if (!d) throw new Error("unknown Protoss definition: " + ref);
+      return d;
+    }
+    function nth(env, index) {
+      if (index < env.length) return env[index];
+      throw new Error("unbound canonical variable #" + index);
+    }
+    function evalDef(ref) {
+      var d = expectDef(ref);
+      if (values[d.defId]) return values[d.defId];
+      var v = evalTerm(d.term, []);
+      values[d.defId] = v;
+      return v;
+    }
+    function apply(fn, arg) {
+      if (!fn) throw new Error("application of empty value");
+      if (fn.tag === "BuiltinSucc") {
+        if (!arg || arg.tag !== "Nat") throw new Error("succ expects Nat");
+        return { tag: "Nat", value: arg.value + 1 };
+      }
+      if (fn.tag === "BuiltinPrim") {
+        if (fn.name === "prim.Nat.eq") {
+          if (!fn.args.length) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
+          return { tag: "Bool", value: fn.args[0].value === arg.value };
+        }
+        if (fn.name === "prim.String.concat") {
+          if (!fn.args.length) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
+          return { tag: "String", value: String(fn.args[0].value) + String(arg.value) };
+        }
+        if (fn.name === "prim.String.eq") {
+          if (!fn.args.length) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
+          return { tag: "Bool", value: String(fn.args[0].value) === String(arg.value) };
+        }
+      }
+      if (fn.tag === "Closure") return evalTerm(fn.body, [arg].concat(fn.env));
+      throw new Error("application of non-function: " + JSON.stringify(fn));
+    }
+    function branchFor(branches, pred) {
+      for (var i = 0; i < branches.length; i++) if (pred(branches[i])) return branches[i];
+      throw new Error("missing case branch");
+    }
+    function foldVariant(term, env) {
+      function fold(value) {
+        if (!value || value.tag !== "Variant") throw new Error("foldVariant expects Variant");
+        var b = branchFor(term.branches || [], function (br) {
+          return br.tag === "VariantBranch" && br.constructor === value.constructor;
+        });
+        recurStack.push(fold);
+        try { return evalTerm(b.body, [value.payload].concat(env)); }
+        finally { recurStack.pop(); }
+      }
+      return fold(evalTerm(term.scrutinee, env));
+    }
+    function evalTerm(term, env) {
+      if (!term) return unitValue();
+      switch (term.tag) {
+        case "Unit": return unitValue();
+        case "Bool": return { tag: "Bool", value: !!term.value };
+        case "Nat": return { tag: "Nat", value: term.value || 0 };
+        case "String": return { tag: "String", value: term.value || "" };
+        case "Var": return nth(env, term.index || 0);
+        case "Builtin":
+          if (term.name === "succ") return { tag: "BuiltinSucc" };
+          return { tag: "BuiltinPrim", name: term.name, args: [] };
+        case "Ref": return evalDef(term.defId);
+        case "Lambda": return { tag: "Closure", body: term.body, env: env.slice() };
+        case "App": return apply(evalTerm(term.fn, env), evalTerm(term.arg, env));
+        case "Let": return evalTerm(term.body, [evalTerm(term.value, env)].concat(env));
+        case "Record": {
+          var fields = {};
+          (term.fields || []).forEach(function (f) { fields[f.name] = evalTerm(f.value, env); });
+          return { tag: "Record", fields: fields };
+        }
+        case "Field": return evalTerm(term.record, env).fields[term.field];
+        case "Variant": return variantValue(term.constructor, evalTerm(term.payload, env));
+        case "Inst": return evalDef(term.defId);
+        case "Case": {
+          var s = evalTerm(term.scrutinee, env);
+          if (s.tag === "Bool") {
+            return evalTerm(branchFor(term.branches || [], function (b) {
+              return b.tag === "BoolBranch" && b.value === s.value;
+            }).body, env);
+          }
+          if (s.tag === "Variant") {
+            return evalTerm(branchFor(term.branches || [], function (b) {
+              return b.tag === "VariantBranch" && b.constructor === s.constructor;
+            }).body, [s.payload].concat(env));
+          }
+          throw new Error("case expects Bool or Variant");
+        }
+        case "FoldNat": {
+          var count = evalTerm(term.index, env).value || 0;
+          var acc = evalTerm(term.zero, env);
+          var step = evalTerm(term.step, env);
+          for (var i = 0; i < count; i++) acc = apply(step, acc);
+          return acc;
+        }
+        case "FoldVariant": return foldVariant(term, env);
+        case "Recur": {
+          if (!recurStack.length) throw new Error("recur outside foldVariant");
+          return recurStack[recurStack.length - 1](evalTerm(term.value, env));
+        }
+        case "Nil": return listValue([]);
+        case "Cons": {
+          var tail = evalTerm(term.tail, env);
+          return listValue([evalTerm(term.head, env)].concat(tail.items || []));
+        }
+        case "FoldList": {
+          var items = evalTerm(term.list, env).items || [];
+          var zero = evalTerm(term.zero, env);
+          var stepFn = evalTerm(term.step, env);
+          for (var j = items.length - 1; j >= 0; j--) zero = apply(apply(stepFn, items[j]), zero);
+          return zero;
+        }
+        case "Text": return viewValue({ kind: "text", text: evalTerm(term.value, env).value || "" });
+        case "Image": return viewValue({
+          kind: "image",
+          src: evalTerm(term.src, env).value || "",
+          alt: evalTerm(term.alt, env).value || ""
+        });
+        case "Button": return viewValue({
+          kind: "button",
+          label: evalTerm(term.label, env).value || "",
+          message: evalTerm(term.message, env)
+        });
+        case "Input": return viewValue({
+          kind: "input",
+          value: evalTerm(term.value, env).value || "",
+          handler: evalTerm(term.handler, env)
+        });
+        case "Column":
+        case "Row": {
+          var children = (evalTerm(term.children, env).items || []).map(function (v) { return v.view; });
+          return viewValue({ kind: term.tag === "Column" ? "column" : "row", children: children });
+        }
+        case "ListView": {
+          var render = evalTerm(term.render, env);
+          var listItems = evalTerm(term.items, env).items || [];
+          return viewValue({
+            kind: "column",
+            children: listItems.map(function (item) { return apply(render, item).view; })
+          });
+        }
+        case "WhenView":
+          return evalTerm(term.condition, env).value
+            ? evalTerm(term.view, env)
+            : viewValue({ kind: "column", children: [] });
+        case "Done": return { tag: "Done", value: evalTerm(term.value, env) };
+        case "Request": {
+          var request = term.request || {};
+          return {
+            tag: "Request",
+            request: request,
+            requestId: hashString("request:" + JSON.stringify(request)),
+            expected: requestExpected(request),
+            continuation: { tag: "Done" }
+          };
+        }
+        case "Bind": {
+          var p = evalTerm(term.process, env);
+          if (p.tag === "Done") return evalTerm(term.body, [p.value].concat(env));
+          if (p.tag === "Request") {
+            return {
+              tag: "Request",
+              request: p.request,
+              requestId: p.requestId,
+              expected: p.expected,
+              continuation: { tag: "Bind", previous: p.continuation, body: term.body, env: env.slice() }
+            };
+          }
+          throw new Error("bind expects Process");
+        }
+        default: throw new Error("unsupported canonical term: " + term.tag);
+      }
+    }
+    function resume(process, response) {
+      var cont = process.continuation || { tag: "Done" };
+      if (cont.tag === "Done") return { tag: "Done", value: response };
+      if (cont.tag === "Bind") {
+        var previousDone = resume({ continuation: cont.previous || { tag: "Done" } }, response);
+        if (previousDone.tag === "Request") return previousDone;
+        return evalTerm(cont.body, [previousDone.value].concat(cont.env || []));
+      }
+      throw new Error("unknown continuation");
+    }
+    return {
+      def: evalDef,
+      apply: apply,
+      update: function (updateRef, msg, model) { return apply(apply(evalDef(updateRef), msg), model); },
+      view: function (viewRef, model) { return apply(evalDef(viewRef), model); },
+      resume: resume
+    };
+  }
+  function renderView(node, dispatch) {
     if (!node) return text("");
     if (node.kind === "text") return text(node.text || "");
     if (node.kind === "image") {
@@ -287,9 +505,9 @@ let runtime_js =
     }
     if (node.kind === "input") {
       var input = document.createElement("input");
-      input.value = model && model.draft !== undefined ? model.draft : (node.value || "");
+      input.value = node.value || "";
       input.addEventListener("input", function () {
-        dispatch({ constructor: node.onInput, payload: jsToStringValue(input.value) });
+        dispatch({ inputHandler: node.handler, value: input.value });
       });
       return input;
     }
@@ -302,45 +520,19 @@ let runtime_js =
     if (node.kind === "row" || node.kind === "column") {
       var div = document.createElement("div");
       div.className = "protoss-" + node.kind;
-      (node.children || []).forEach(function (child) { div.appendChild(renderView(child, model, dispatch)); });
+      (node.children || []).forEach(function (child) { div.appendChild(renderView(child, dispatch)); });
       return div;
     }
     return text("");
   }
-  function appView(model, app, dispatch) {
-    var root = document.createElement("div");
-    root.className = "protoss-app";
-    root.appendChild(renderView(app.initialView, model, dispatch));
-    if (model && Array.isArray(model.items)) {
-      var ul = document.createElement("ul");
-      model.items.forEach(function (item) {
-        var li = document.createElement("li");
-        li.textContent = item;
-        ul.appendChild(li);
-      });
-      root.appendChild(ul);
-    }
-    return root;
-  }
-  function applyMsg(model, msg) {
-    if (!msg) return model;
-    if (msg.constructor === "NewTodoChanged") {
-      model.draft = valueToJs(msg.payload);
-    } else if (msg.constructor === "AddTodo") {
-      if (model.draft && model.draft.length > 0) {
-        model.items = [model.draft].concat(model.items || []);
-        model.draft = "";
-        model.next = (model.next || 0) + 1;
-      }
-    }
-    return model;
-  }
   window.ProtossRuntime = {
     start: function (app) {
       var mount = document.getElementById("app");
-      var model = valueToJs(app.initialModel);
+      var machine = evalProgram(app.program);
+      var modelValue = app.initialModel;
       var worldRef = app.worldRef;
       var ledger = [];
+      var pending = {};
       function record(kind, payload) {
         var body = JSON.stringify({ world: worldRef, kind: kind, payload: payload });
         var eventRef = hashString("event:" + body);
@@ -349,30 +541,68 @@ let runtime_js =
         try { localStorage.setItem("protoss-ledger", JSON.stringify(ledger)); } catch (_) {}
         return eventRef;
       }
-      function resume(request, response) {
-        if (request.expected !== response.tag) throw new Error("protocol response type mismatch");
-        record("resume", { requestId: request.requestId, response: response });
+      function typedResponse(request, response) {
+        if (response && response.tag) return response;
+        return request.expected === "Unit" ? unitValue() : jsToStringValue(response || "");
       }
-      function dispatch(msg) {
-        record("message", msg);
-        if (msg && msg.constructor === "AddTodo") {
-          var request = {
-            requestId: hashString("request:SaveLocal:todos:updated"),
-            capability: "Local.storage",
-            expected: "Unit",
-            payload: { key: "todos", value: "updated" }
-          };
-          record("request", request);
-          resume(request, unitValue());
+      function resumeRequest(requestId, response) {
+        var request = pending[requestId];
+        if (!request) throw new Error("unknown pending request: " + requestId);
+        var typed = typedResponse(request, response);
+        if (request.expected !== typed.tag) throw new Error("protocol response type mismatch");
+        delete pending[requestId];
+        record("resume", { requestId: requestId, response: typed });
+        handleProcess(machine.resume(request.process, typed));
+      }
+      function handleProcess(process) {
+        if (process.tag === "Done") {
+          modelValue = process.value;
+          render();
+          return;
         }
-        model = applyMsg(model, msg);
-        render();
+        if (process.tag === "Request") {
+          var request = {
+            requestId: process.requestId,
+            capability: process.request.capability,
+            request: process.request,
+            payload: requestPayload(process.request),
+            expected: process.expected,
+            process: process
+          };
+          pending[request.requestId] = request;
+          record("request", request);
+          window.dispatchEvent(new CustomEvent("protoss:request", { detail: request }));
+          return;
+        }
+        throw new Error("update returned non-process");
+      }
+      function dispatch(rawMsg) {
+        var msg = rawMsg && rawMsg.inputHandler
+          ? machine.apply(rawMsg.inputHandler, jsToStringValue(rawMsg.value))
+          : rawMsg;
+        record("message", msg);
+        handleProcess(machine.update(app.update, msg, modelValue));
       }
       function render() {
         mount.innerHTML = "";
-        mount.appendChild(appView(model, app, dispatch));
+        var view = machine.view(app.view, modelValue);
+        mount.appendChild(renderView(view.view, dispatch));
       }
       render();
+      window.ProtossRuntime._active = {
+        pending: pending,
+        resume: resumeRequest,
+        model: function () { return modelValue; },
+        world: function () { return worldRef; }
+      };
+    },
+    resume: function (requestId, response) {
+      if (!window.ProtossRuntime._active) throw new Error("Protoss runtime is not started");
+      return window.ProtossRuntime._active.resume(requestId, response);
+    },
+    pending: function () {
+      if (!window.ProtossRuntime._active) return {};
+      return window.ProtossRuntime._active.pending;
     },
     ledger: function () {
       try { return JSON.parse(localStorage.getItem("protoss-ledger") || "[]"); }
@@ -576,6 +806,7 @@ let build ?out project =
         json_field "init" (json_string contract.init_def.def_id);
         json_field "update" (json_string contract.update_def.def_id);
         json_field "view" (json_string contract.view_def.def_id);
+        json_field "program" (Kernel.checked_to_graph_json build.checked);
         json_field "worldRef" (json_string Ledger.initial_world);
         json_field "initialModel" (value_to_json model);
         json_field "initialView" (view_to_json (Some contract.checked) view);
