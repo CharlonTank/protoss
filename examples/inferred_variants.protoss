@@ -1,23 +1,6 @@
-(variant Maybe (params A)
-  (None Unit)
-  (Some A))
-
-(record Box
-  (value (Maybe Nat)))
-
-(def value (Maybe Nat)
-  (variant Some 4))
-
-(def boxed Box
-  (record
-    (value (variant Some 1))))
-
-(def selected (Maybe Nat)
-  (case true
-    (true (variant Some 2))
-    (false (variant None unit))))
-
-(def out Nat
-  (case value
-    (None _ 0)
-    (Some n n)))
+(type Maybe (A) (Variant (None Unit) (Some A)))
+(type Box (Record (value (Maybe Nat))))
+(def value (Maybe Nat) (variant Some 4))
+(def boxed Box (record (value (variant Some 1))))
+(def selected (Maybe Nat) (case true (true (variant Some 2)) (false (variant None unit))))
+(def out Nat (case value (None 0) (Some n n)))

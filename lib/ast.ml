@@ -62,6 +62,7 @@ type expr =
 and branch =
   | BBool of bool * expr
   | BVariant of string * string * expr
+  | BVariantUnit of string * expr
 
 type def = {
   name : string;
@@ -267,6 +268,7 @@ and string_of_branch_with_params params = function
   | BBool (false, e) -> "(false " ^ string_of_expr_with_params params e ^ ")"
   | BVariant (con, x, e) ->
       "(" ^ con ^ " " ^ x ^ " " ^ string_of_expr_with_params params e ^ ")"
+  | BVariantUnit (con, e) -> "(" ^ con ^ " " ^ string_of_expr_with_params params e ^ ")"
 
 let string_of_expr e = string_of_expr_with_params [] e
 

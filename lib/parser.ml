@@ -169,6 +169,7 @@ and parse_branch = function
   | Sexp.List [ Sexp.Atom "true"; e ] -> BBool (true, parse_expr e)
   | Sexp.List [ Sexp.Atom "false"; e ] -> BBool (false, parse_expr e)
   | Sexp.List [ Sexp.Atom con; Sexp.Atom x; e ] -> BVariant (con, x, parse_expr e)
+  | Sexp.List [ Sexp.Atom con; e ] -> BVariantUnit (con, parse_expr e)
   | x -> fail ("invalid case branch: " ^ Sexp.to_string x)
 
 let defrec_error name =
@@ -374,6 +375,8 @@ and qualify_branch local_defs local_types type_params bound = function
   | BBool (b, e) -> BBool (b, qualify_expr local_defs local_types type_params bound e)
   | BVariant (con, x, e) ->
       BVariant (con, x, qualify_expr local_defs local_types type_params (x :: bound) e)
+  | BVariantUnit (con, e) ->
+      BVariantUnit (con, qualify_expr local_defs local_types type_params bound e)
 
 let qualify_program module_name exports aliases defs =
   let local_defs = List.map (fun d -> (d.name, qualify module_name d.name)) defs in

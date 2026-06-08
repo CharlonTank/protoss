@@ -449,14 +449,42 @@ let () =
        (variant (Variant (None Unit) (Some Nat)) Some 4))\n\
        (def out Nat (case value (None _ 0) (Some n n)))"
   in
+  let maybe_unit_branch_shorthand =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (def value (Maybe Nat) (variant Some 4))\n\
+       (def out Nat (case value (None 0) (Some n n)))"
+  in
   assert_equal "parametric type alias transparent hash" (Kernel.hash_program maybe_expanded)
     (Kernel.hash_program maybe_alias);
   assert_equal "inferred variant constructor transparent hash" (Kernel.hash_program maybe_expanded)
     (Kernel.hash_program maybe_inferred_ctor);
   assert_equal "named variant transparent hash" (Kernel.hash_program maybe_expanded)
     (Kernel.hash_program maybe_variant_decl);
+  assert_equal "unit variant branch shorthand hash" (Kernel.hash_program maybe_inferred_ctor)
+    (Kernel.hash_program maybe_unit_branch_shorthand);
   let maybe_out, _ = Runtime.normalize_def maybe_alias "out" in
   assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
+  let maybe_short_out, _ = Runtime.normalize_def maybe_unit_branch_shorthand "out" in
+  assert_equal "unit variant branch shorthand runtime" "4" (Runtime.value_to_string maybe_short_out);
+  let fold_variant_unit_short =
+    check
+      "(variant Maybe (params A) (None Unit) (Some A))\n\
+       (def value (Maybe Nat) (variant None unit))\n\
+       (def out Nat (foldVariant (Maybe Nat) Nat value (None 0) (Some n n)))"
+  in
+  let fold_variant_unit_explicit =
+    check
+      "(variant Maybe (params A) (None Unit) (Some A))\n\
+       (def value (Maybe Nat) (variant None unit))\n\
+       (def out Nat (foldVariant (Maybe Nat) Nat value (None _ 0) (Some n n)))"
+  in
+  assert_equal "foldVariant unit branch shorthand hash"
+    (Kernel.hash_program fold_variant_unit_explicit)
+    (Kernel.hash_program fold_variant_unit_short);
+  let fold_variant_out, _ = Runtime.normalize_def fold_variant_unit_short "out" in
+  assert_equal "foldVariant unit branch shorthand runtime" "0"
+    (Runtime.value_to_string fold_variant_out);
   let inferred_ctor_contexts =
     check
       "(variant Maybe (params A) (None Unit) (Some A))\n\
@@ -477,6 +505,10 @@ let () =
     "(variant Maybe (params A) (None Unit) (Some A))\n(def bad (Maybe Nat) (variant Nope 1))";
   expect_check_error
     "(variant Maybe (params A) (None Unit) (Some A))\n(def bad (Maybe Nat) (variant Some true))";
+  expect_check_error
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (case value (None 0) (Some 1)))";
   expect_check_error
     "(variant Maybe (params A) (None Unit) (Some A))\n\
      (def bad (Maybe Nat) (variant (Variant (None Unit) (Some Bool)) Some true))";
@@ -897,6 +929,23 @@ let () =
   let inferred_list_patch_value, _ = Runtime.normalize_def inferred_list_patch_checked "xs" in
   assert_equal "patch inferred list normalizes" "[1, 2]"
     (Runtime.value_to_string inferred_list_patch_value);
+  let unit_branch_patch_store = temp_dir "patch-unit-branch" in
+  let unit_branch_patch =
+    patch_file "protoss-unit-branch-patch.json"
+      "{ \"ops\": [\
+       { \"op\":\"AddDef\", \"name\":\"value\", \"deps\":[], \
+       \"type\":{\"source\":\"(Variant (None Unit) (Some Nat))\"}, \
+       \"expr\":{\"source\":\"(variant (Variant (None Unit) (Some Nat)) Some 4)\"} },\
+       { \"op\":\"AddDef\", \"name\":\"out\", \"deps\":[\"value\"], \
+       \"type\":\"Nat\", \
+       \"expr\":{\"source\":\"(case value (None 0) (Some n n))\"} }\
+       ] }"
+  in
+  ignore (Patch.apply unit_branch_patch_store unit_branch_patch);
+  let unit_branch_patch_checked = Store.load_program unit_branch_patch_store |> Kernel.check_program in
+  let unit_branch_patch_value, _ = Runtime.normalize_def unit_branch_patch_checked "out" in
+  assert_equal "patch unit branch shorthand normalizes" "4"
+    (Runtime.value_to_string unit_branch_patch_value);
   let before = count_objects store in
   let ledger = temp_dir "patch-ledger" in
   let _ =
