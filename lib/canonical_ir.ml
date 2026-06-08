@@ -715,6 +715,68 @@ let describe_graph_dependencies deps =
   ^ String.concat "\n" (List.map line deps)
   ^ (if deps = [] then "" else "\n")
 
+type graph_capability_request = {
+  graph_cap_req_ref : string;
+  graph_cap_req_tag : string;
+  graph_cap_req_payload_type : Ast.typ;
+  graph_cap_req_response_type : Ast.typ;
+}
+
+type graph_capability = {
+  graph_cap_name : string;
+  graph_cap_ref : string;
+  graph_cap_requests : graph_capability_request list;
+}
+
+let graph_capability_request_of_json req =
+  {
+    graph_cap_req_ref = json_string_field "ref" req;
+    graph_cap_req_tag = json_string_field "tag" req;
+    graph_cap_req_payload_type = type_of_graph_json (json_field "payloadType" req);
+    graph_cap_req_response_type = type_of_graph_json (json_field "responseType" req);
+  }
+
+let graph_capability_of_json desc =
+  {
+    graph_cap_name = json_string_field "name" desc;
+    graph_cap_ref = json_string_field "ref" desc;
+    graph_cap_requests =
+      json_array_field "requests" desc |> List.map graph_capability_request_of_json;
+  }
+
+let graph_capabilities input =
+  ignore (checked_of_graph input);
+  let graph = Json.parse input in
+  json_array_field "capabilityDescriptors" graph |> List.map graph_capability_of_json
+
+let graph_capability input id =
+  match
+    List.find_opt
+      (fun cap -> String.equal id cap.graph_cap_name || String.equal id cap.graph_cap_ref)
+      (graph_capabilities input)
+  with
+  | Some cap -> cap
+  | None -> fail ("canonical graph capability not found: " ^ id)
+
+let describe_graph_capabilities caps =
+  let request_line cap req =
+    "capability=" ^ cap.graph_cap_name ^ " capability_ref=" ^ cap.graph_cap_ref
+    ^ " request=" ^ req.graph_cap_req_tag ^ " request_ref=" ^ req.graph_cap_req_ref
+    ^ " payload_type=" ^ Kernel.type_to_canonical req.graph_cap_req_payload_type
+    ^ " response_type=" ^ Kernel.type_to_canonical req.graph_cap_req_response_type
+  in
+  let request_count =
+    List.fold_left (fun count cap -> count + List.length cap.graph_cap_requests) 0 caps
+  in
+  let lines =
+    caps
+    |> List.concat_map (fun cap -> List.map (request_line cap) cap.graph_cap_requests)
+  in
+  "Graph capabilities\ncount=" ^ string_of_int (List.length caps) ^ "\nrequests="
+  ^ string_of_int request_count ^ "\n"
+  ^ String.concat "\n" lines
+  ^ (if lines = [] then "" else "\n")
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program

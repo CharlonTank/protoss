@@ -1445,7 +1445,8 @@ let () =
   let pv, _ = Runtime.eval_entry process "askName" in
   assert_true "process should suspend"
     (match pv with Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true | _ -> false);
-  let process_graph = Json.parse (Canonical_ir.serialize_graph process) in
+  let process_graph_json = Canonical_ir.serialize_graph process in
+  let process_graph = Json.parse process_graph_json in
   let process_capabilities = json_string_array_field "capabilities" process_graph in
   assert_equal "process graph capability list" "Human.ask" (String.concat "," process_capabilities);
   let process_descriptors = json_array_field "capabilityDescriptors" process_graph in
@@ -1464,6 +1465,26 @@ let () =
   in
   assert_equal "process graph capability descriptor ref" human_capability_ref
     (json_string_field "ref" human_descriptor);
+  let graph_capabilities = Canonical_ir.graph_capabilities process_graph_json in
+  assert_equal "process graph inspected capability count" "1"
+    (string_of_int (List.length graph_capabilities));
+  assert_true "process graph inspected capability describes request"
+    (contains_substring (Canonical_ir.describe_graph_capabilities graph_capabilities)
+       "request=AskHuman");
+  let inspected_human_capability = Canonical_ir.graph_capability process_graph_json "Human.ask" in
+  assert_equal "process graph inspected capability ref" human_capability_ref
+    inspected_human_capability.Canonical_ir.graph_cap_ref;
+  let inspected_human_request =
+    match inspected_human_capability.Canonical_ir.graph_cap_requests with
+    | [ request ] -> request
+    | _ -> fail "Human.ask should have one request signature"
+  in
+  assert_equal "process graph inspected capability request ref" human_signature_ref
+    inspected_human_request.Canonical_ir.graph_cap_req_ref;
+  assert_equal "process graph inspected capability payload type" "(Record (prompt String))"
+    (Ast.string_of_typ inspected_human_request.Canonical_ir.graph_cap_req_payload_type);
+  assert_equal "process graph inspected capability response type" "String"
+    (Ast.string_of_typ inspected_human_request.Canonical_ir.graph_cap_req_response_type);
   assert_equal "process graph capability refs" human_capability_ref
     (String.concat "," (json_string_array_field "capabilityRefs" process_graph));
   (try
@@ -2416,6 +2437,19 @@ let () =
   assert_true "project store graph deps include total"
     (contains_substring (Canonical_ir.describe_graph_dependencies store_graph_deps)
        "depends_on=total");
+  let store_graph_caps = Workspace.store_graph_capabilities build_a.store store_graph_hash in
+  assert_true "project store graph capabilities include Human.ask"
+    (contains_substring (Canonical_ir.describe_graph_capabilities store_graph_caps)
+       "capability=Human.ask");
+  let store_graph_human_cap =
+    Workspace.store_graph_capability build_a.store store_graph_hash "Human.ask"
+  in
+  assert_equal "project store graph capability name" "Human.ask"
+    store_graph_human_cap.Canonical_ir.graph_cap_name;
+  assert_true "project store graph capability request"
+    (contains_substring
+       (Canonical_ir.describe_graph_capabilities [ store_graph_human_cap ])
+       "request=AskHuman");
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;

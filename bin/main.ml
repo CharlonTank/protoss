@@ -33,8 +33,8 @@ let usage () =
      \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
-     \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
-     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --node <nodeRef> | --def <nameOrDefId>\n\
+     \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
+     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --node <nodeRef> | --def <nameOrDefId>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
@@ -606,6 +606,14 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_dependencies
            (Protoss.Canonical_ir.graph_dependencies_for (Protoss.Store.read_file file) id))
+  | [ "--capabilities"; file ] ->
+      print_string
+        (Protoss.Canonical_ir.describe_graph_capabilities
+           (Protoss.Canonical_ir.graph_capabilities (Protoss.Store.read_file file)))
+  | [ "--capability"; file; id ] ->
+      print_string
+        (Protoss.Canonical_ir.describe_graph_capabilities
+           [ Protoss.Canonical_ir.graph_capability (Protoss.Store.read_file file) id ])
   | [ "--node"; file; node_ref ] ->
       print_string
         (Protoss.Canonical_ir.describe_graph_node
@@ -642,6 +650,16 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_dependencies
            (Protoss.Workspace.store_graph_dependencies_for store graph_hash id))
+  | [ "--store-graph"; project_or_store; graph_hash; "--capabilities" ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      print_string
+        (Protoss.Canonical_ir.describe_graph_capabilities
+           (Protoss.Workspace.store_graph_capabilities store graph_hash))
+  | [ "--store-graph"; project_or_store; graph_hash; "--capability"; id ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      print_string
+        (Protoss.Canonical_ir.describe_graph_capabilities
+           [ Protoss.Workspace.store_graph_capability store graph_hash id ])
   | [ "--store-graph"; project_or_store; graph_hash; "--node"; node_ref ] ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       print_string

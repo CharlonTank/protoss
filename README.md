@@ -78,6 +78,8 @@ dune exec protoss -- graph --stats graph.json
 dune exec protoss -- graph --roots graph.json
 dune exec protoss -- graph --deps graph.json
 dune exec protoss -- graph --deps graph.json <nameOrDefId>
+dune exec protoss -- graph --capabilities graph.json
+dune exec protoss -- graph --capability graph.json <nameOrCapRef>
 dune exec protoss -- graph --node graph.json <nodeRef>
 dune exec protoss -- graph --def graph.json <nameOrDefId>
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --out graph.json
@@ -86,6 +88,8 @@ dune exec protoss -- graph --store-graph examples/workspace <graphHash> --stats
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --roots
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --deps
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --deps <nameOrDefId>
+dune exec protoss -- graph --store-graph examples/workspace <graphHash> --capabilities
+dune exec protoss -- graph --store-graph examples/workspace <graphHash> --capability <nameOrCapRef>
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --node <nodeRef>
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --def <nameOrDefId>
 dune exec protoss -- canon --graph examples/basic.protoss > /tmp/basic.protoss.graph.json
