@@ -322,6 +322,7 @@ and parse_match_list scrut branches =
     | _ -> fail "list match syntax is (match xs (Nil nilExpr) (Cons head tail consExpr))"
 
 and parse_branch = function
+  | Sexp.List [ Sexp.Atom "_"; e ] -> BWildcard (parse_expr e)
   | Sexp.List [ Sexp.Atom "true"; e ] -> BBool (true, parse_expr e)
   | Sexp.List [ Sexp.Atom "false"; e ] -> BBool (false, parse_expr e)
   | Sexp.List [ Sexp.Atom con; Sexp.List (Sexp.Atom "record" :: fields); body ] ->
@@ -572,6 +573,7 @@ and qualify_branch local_defs local_types type_params bound = function
       BVariant (con, x, qualify_expr local_defs local_types type_params (x :: bound) e)
   | BVariantUnit (con, e) ->
       BVariantUnit (con, qualify_expr local_defs local_types type_params bound e)
+  | BWildcard e -> BWildcard (qualify_expr local_defs local_types type_params bound e)
 
 let qualify_program module_name exports aliases defs =
   let local_defs = List.map (fun d -> (d.name, qualify module_name d.name)) defs in

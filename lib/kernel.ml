@@ -475,6 +475,7 @@ and expand_branch_types recursive_names aliases vars = function
   | BBool (b, e) -> BBool (b, expand_expr_types recursive_names aliases vars e)
   | BVariant (con, x, e) -> BVariant (con, x, expand_expr_types recursive_names aliases vars e)
   | BVariantUnit (con, e) -> BVariantUnit (con, expand_expr_types recursive_names aliases vars e)
+  | BWildcard e -> BWildcard (expand_expr_types recursive_names aliases vars e)
 
 let resolve_program_types program =
   check_duplicate_type_aliases program.type_aliases;
@@ -531,7 +532,8 @@ let collect_deps defs =
           (fun a -> function
             | BBool (_, b) -> expr bound a b
             | BVariant (_, x, b) -> expr (x :: bound) a b
-            | BVariantUnit (_, b) -> expr bound a b)
+            | BVariantUnit (_, b) -> expr bound a b
+            | BWildcard b -> expr bound a b)
           (expr bound acc e) branches
     | EFoldNat (n, z, step) -> expr bound (expr bound (expr bound acc n) z) step
     | EFoldVariant (_, _, scrut, branches) ->
@@ -539,7 +541,8 @@ let collect_deps defs =
           (fun a -> function
             | BBool (_, b) -> expr bound a b
             | BVariant (_, x, b) -> expr (x :: bound) a b
-            | BVariantUnit (_, b) -> expr bound a b)
+            | BVariantUnit (_, b) -> expr bound a b
+            | BWildcard b -> expr bound a b)
           (expr bound acc scrut) branches
     | ERecur e -> expr bound acc e
     | ECons (_, head, tail) | EConsInfer (head, tail) ->
@@ -651,6 +654,7 @@ and branch_names_in_expr = function
   | BBool (_, e) -> expr_names e
   | BVariant (_, x, e) -> x :: expr_names e
   | BVariantUnit (_, e) -> expr_names e
+  | BWildcard e -> expr_names e
 
 let fresh_record_name ctx record fields body =
   let taken =
@@ -745,38 +749,50 @@ let direct_recur_terms ctx target payload_name payload_ty =
                if equal_typ target field_ty then Some (EField (EName payload_name, field)) else None))
   | _ -> base
 
-let branch_names branches =
-  List.map
-    (function
-      | BVariant (con, _, _) -> con
-      | BVariantUnit (con, _) -> con
-      | BBool _ -> fail "Bool branch in foldVariant")
-    branches
+let fresh_wildcard_payload_name body =
+  let taken = expr_names body |> List.sort_uniq String.compare in
+  let rec loop i =
+    let candidate = "__wildcard_payload" ^ string_of_int i in
+    if List.exists (String.equal candidate) taken then loop (i + 1) else candidate
+  in
+  loop 0
 
-let check_variant_branch_coverage cases branches where =
-  let branches = branch_names branches in
-  let seen = Hashtbl.create 8 in
-  List.iter
-    (fun con ->
-      if Hashtbl.mem seen con then fail (where ^ " duplicate branch: " ^ con);
-      Hashtbl.add seen con ())
-    branches;
+let expand_variant_case_branches cases branches where =
   let case_names = List.map fst cases in
+  let seen = Hashtbl.create 8 in
+  let wildcard = ref None in
+  let explicit = ref [] in
   List.iter
-    (fun con ->
-      if not (List.exists (String.equal con) branches) then
-        fail (where ^ " missing branch: " ^ con))
-    case_names;
-  List.iter
-    (fun con ->
-      if not (List.exists (String.equal con) case_names) then
-        fail (where ^ " unknown branch: " ^ con))
-    branches
+    (function
+      | BBool _ -> fail "Bool branch in Variant case"
+      | BWildcard body ->
+          if Option.is_some !wildcard then fail (where ^ " duplicate wildcard branch");
+          wildcard := Some body
+      | (BVariant (con, _, _) | BVariantUnit (con, _)) as branch ->
+          if Hashtbl.mem seen con then fail (where ^ " duplicate branch: " ^ con);
+          if not (List.exists (String.equal con) case_names) then
+            fail (where ^ " unknown branch: " ^ con);
+          Hashtbl.add seen con ();
+          explicit := branch :: !explicit)
+    branches;
+  let missing = List.filter (fun con -> not (Hashtbl.mem seen con)) case_names in
+  let generated =
+    match (missing, !wildcard) with
+    | [], Some _ -> fail (where ^ " wildcard branch is unreachable")
+    | [], None -> []
+    | con :: _, None -> fail (where ^ " missing branch: " ^ con)
+    | missing, Some body ->
+        List.map
+          (fun con -> BVariant (con, fresh_wildcard_payload_name body, body))
+          missing
+  in
+  List.rev !explicit @ generated
 
 let bool_branch_name = function true -> "true" | false -> "false"
 
 let bool_case_branches branches =
   let true_branch = ref None and false_branch = ref None in
+  let wildcard = ref None in
   List.iter
     (function
       | BBool (value, e) ->
@@ -784,10 +800,21 @@ let bool_case_branches branches =
           if Option.is_some !target then
             fail ("Bool case duplicate branch: " ^ bool_branch_name value);
           target := Some e
+      | BWildcard e ->
+          if Option.is_some !wildcard then fail "Bool case duplicate wildcard branch";
+          wildcard := Some e
       | BVariant _ | BVariantUnit _ -> fail "variant branch in Bool case")
     branches;
-  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
-  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  if Option.is_some !wildcard && Option.is_some !true_branch && Option.is_some !false_branch then
+    fail "Bool case wildcard branch is unreachable";
+  let wildcard_or_missing branch name =
+    match (branch, !wildcard) with
+    | Some e, _ -> e
+    | None, Some e -> e
+    | None, None -> fail ("Bool case missing " ^ name ^ " branch")
+  in
+  let t_expr = wildcard_or_missing !true_branch "true" in
+  let f_expr = wildcard_or_missing !false_branch "false" in
   (t_expr, f_expr)
 
 let recur_scope ctx =
@@ -957,7 +984,7 @@ let rec infer ctx = function
       require_type target (infer ctx scrut) "foldVariant scrutinee";
       (match unfold_type ctx target with
       | TVariant cases ->
-          check_variant_branch_coverage cases branches "foldVariant";
+          let branches = expand_variant_case_branches cases branches "foldVariant" in
           List.iter
             (function
               | BBool _ -> assert false
@@ -971,7 +998,8 @@ let rec infer ctx = function
                   let payload_ty = Option.get (assoc_opt con cases) in
                   require_unit_branch_payload con payload_ty;
                   let body_ty = infer ctx body in
-                  require_type result body_ty ("foldVariant branch " ^ con))
+                  require_type result body_ty ("foldVariant branch " ^ con)
+              | BWildcard _ -> assert false)
             branches;
           result
       | t -> fail ("foldVariant target must be Variant, got " ^ string_of_typ t))
@@ -1077,7 +1105,7 @@ and infer_bool_case ctx branches =
   ty
 
 and infer_variant_case ctx cases branches =
-  check_variant_branch_coverage cases branches "Variant case";
+  let branches = expand_variant_case_branches cases branches "Variant case" in
   let result = ref None in
   List.iter
     (function
@@ -1094,7 +1122,8 @@ and infer_variant_case ctx cases branches =
           let ty = infer ctx body in
           (match !result with
           | None -> result := Some ty
-          | Some expected -> require_type expected ty "Variant case branches"))
+          | Some expected -> require_type expected ty "Variant case branches")
+      | BWildcard _ -> assert false)
     branches;
   option_or_fail "empty Variant case" !result
 
@@ -1194,7 +1223,7 @@ let rec infer_elab ctx expr =
       let branches =
         match unfold_type ctx target with
         | TVariant cases ->
-            check_variant_branch_coverage cases branches "foldVariant";
+            let branches = expand_variant_case_branches cases branches "foldVariant" in
             List.map
               (function
                 | BBool _ -> assert false
@@ -1208,7 +1237,8 @@ let rec infer_elab ctx expr =
                     let payload_ty = Option.get (assoc_opt con cases) in
                     require_unit_branch_payload con payload_ty;
                     let _, body = check_elab ctx result body in
-                    BVariant (con, "_", body))
+                    BVariant (con, "_", body)
+                | BWildcard _ -> assert false)
               branches
         | t -> fail ("foldVariant target must be Variant, got " ^ string_of_typ t)
       in
@@ -1591,7 +1621,7 @@ and infer_variant_case_elab ctx cases branches =
   (ty, branches)
 
 and check_variant_case_elab ctx cases expected branches =
-  check_variant_branch_coverage cases branches "Variant case";
+  let branches = expand_variant_case_branches cases branches "Variant case" in
   List.map
     (function
       | BBool _ -> assert false
@@ -1603,7 +1633,8 @@ and check_variant_case_elab ctx cases expected branches =
           let payload_ty = Option.get (assoc_opt con cases) in
           require_unit_branch_payload con payload_ty;
           let _, body = check_elab ctx expected body in
-          BVariant (con, "_", body))
+          BVariant (con, "_", body)
+      | BWildcard _ -> assert false)
     branches
 
 type cterm =
@@ -1707,7 +1738,8 @@ and canonical_branches env branches =
       (function
         | BBool (b, e) -> CBBool (b, canonical_expr env e)
         | BVariant (con, x, e) -> CBVariant (con, canonical_expr (x :: env) e)
-        | BVariantUnit _ -> fail "unelaborated unit variant branch in canonicalization")
+        | BVariantUnit _ -> fail "unelaborated unit variant branch in canonicalization"
+        | BWildcard _ -> fail "unelaborated wildcard branch in canonicalization")
       branches
   in
   List.sort

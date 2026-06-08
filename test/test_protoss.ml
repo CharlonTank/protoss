@@ -334,12 +334,28 @@ let () =
     (Kernel.hash_program bool_match);
   let bool_match_out, _ = Runtime.normalize_def bool_match "out" in
   assert_equal "match Bool normalizes" "1" (Runtime.value_to_string bool_match_out);
+  let bool_wildcard = check "(def out Nat (match true (true 1) (_ 0)))" in
+  assert_equal "match Bool wildcard hashes as explicit case" (Kernel.hash_program bool_case)
+    (Kernel.hash_program bool_wildcard);
+  let bool_wildcard_out, _ = Runtime.normalize_def bool_wildcard "out" in
+  assert_equal "match Bool wildcard normalizes" "1"
+    (Runtime.value_to_string bool_wildcard_out);
+  let bool_wildcard_only = check "(def out Nat (case false (_ 9)))" in
+  let bool_wildcard_only_out, _ = Runtime.normalize_def bool_wildcard_only "out" in
+  assert_equal "Bool wildcard-only branch normalizes" "9"
+    (Runtime.value_to_string bool_wildcard_only_out);
   expect_check_error_contains
     "(def bad Nat (case true (true 1) (true 2) (false 0)))"
     "Bool case duplicate branch: true";
   expect_check_error_contains
     "(def bad Nat (case false (false 0) (true 1) (false 2)))"
     "Bool case duplicate branch: false";
+  expect_check_error_contains
+    "(def bad Nat (case true (true 1) (false 0) (_ 2)))"
+    "Bool case wildcard branch is unreachable";
+  expect_check_error_contains
+    "(def bad Nat (case true (_ 1) (_ 2)))"
+    "Bool case duplicate wildcard branch";
   let list_match =
     check
       "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
@@ -1133,6 +1149,27 @@ let () =
   in
   assert_equal "match Variant hashes as case" (Kernel.hash_program maybe_unit_branch_shorthand)
     (Kernel.hash_program maybe_match);
+  let maybe_wildcard =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (def value (Maybe Nat) (variant Some 4))\n\
+       (def out Nat (match value (Some n n) (_ 0)))"
+  in
+  assert_equal "match Variant wildcard hashes as explicit case"
+    (Kernel.hash_program maybe_unit_branch_shorthand)
+    (Kernel.hash_program maybe_wildcard);
+  let maybe_wildcard_out, _ = Runtime.normalize_def maybe_wildcard "out" in
+  assert_equal "match Variant wildcard normalizes" "4"
+    (Runtime.value_to_string maybe_wildcard_out);
+  let maybe_wildcard_only =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (def value (Maybe Nat) (variant None unit))\n\
+       (def out Nat (case value (_ 7)))"
+  in
+  let maybe_wildcard_only_out, _ = Runtime.normalize_def maybe_wildcard_only "out" in
+  assert_equal "Variant wildcard-only branch normalizes" "7"
+    (Runtime.value_to_string maybe_wildcard_only_out);
   let variant_record_payload_match =
     check
       "(variant LeadEvent (Lead (Record (name String) (status String))))\n\
@@ -1187,6 +1224,21 @@ let () =
      (def value (Maybe Nat) (variant Some 1))\n\
      (def bad Nat (case value (None 0) (Some n n) (Some m m)))"
     "Variant case duplicate branch: Some";
+  expect_check_error_contains
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (case value (None 0) (Some n n) (_ 2)))"
+    "Variant case wildcard branch is unreachable";
+  expect_check_error_contains
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (case value (_ 0) (_ 1)))"
+    "Variant case duplicate wildcard branch";
+  expect_check_error_contains
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (case value (Some n n) (_ _)))"
+    "unknown name: _";
   let fold_variant_unit_short =
     check
       "(variant Maybe (params A) (None Unit) (Some A))\n\
@@ -1205,11 +1257,28 @@ let () =
   let fold_variant_out, _ = Runtime.normalize_def fold_variant_unit_short "out" in
   assert_equal "foldVariant unit branch shorthand runtime" "0"
     (Runtime.value_to_string fold_variant_out);
+  let fold_variant_wildcard =
+    check
+      "(variant Maybe (params A) (None Unit) (Some A))\n\
+       (def value (Maybe Nat) (variant None unit))\n\
+       (def out Nat (foldVariant (Maybe Nat) Nat value (Some n n) (_ 0)))"
+  in
+  assert_equal "foldVariant wildcard hashes as explicit branches"
+    (Kernel.hash_program fold_variant_unit_explicit)
+    (Kernel.hash_program fold_variant_wildcard);
+  let fold_variant_wildcard_out, _ = Runtime.normalize_def fold_variant_wildcard "out" in
+  assert_equal "foldVariant wildcard normalizes" "0"
+    (Runtime.value_to_string fold_variant_wildcard_out);
   expect_check_error_contains
     "(variant Maybe (params A) (None Unit) (Some A))\n\
      (def value (Maybe Nat) (variant Some 1))\n\
      (def bad Nat (foldVariant (Maybe Nat) Nat value (None 0) (Some n n) (Some m m)))"
     "foldVariant duplicate branch: Some";
+  expect_check_error_contains
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (foldVariant (Maybe Nat) Nat value (None 0) (Some n n) (_ 2)))"
+    "foldVariant wildcard branch is unreachable";
   let inferred_ctor_contexts =
     check
       "(variant Maybe (params A) (None Unit) (Some A))\n\

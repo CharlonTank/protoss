@@ -3,6 +3,7 @@
 
 (def maybe (Maybe Nat) (variant Some 4))
 (def selected Nat (match maybe (None 0) (Some n n)))
+(def selectedDefault Nat (match maybe (Some n n) (_ 0)))
 
 (def xs (List Nat) (Cons 1 (Cons 2 Nil)))
 (def first Nat (match xs (Nil 0) (Cons head tail head)))

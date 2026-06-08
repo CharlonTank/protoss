@@ -422,6 +422,7 @@ and branch_type_refs = function
   | BBool (_, e) -> expr_type_refs e
   | BVariant (_, _, e) -> expr_type_refs e
   | BVariantUnit (_, e) -> expr_type_refs e
+  | BWildcard e -> expr_type_refs e
 
 let unit_type_refs (unit : unit_load) =
   let alias_refs =
