@@ -711,25 +711,38 @@ let package_items content =
   | [] -> fail "empty package descriptor"
   | _ -> fail "package descriptor must contain one form"
 
-let package_atom_field name items =
+let package_field name items =
   match
     List.find_opt
       (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
       items
   with
-  | Some (Sexp.List [ Sexp.Atom _; Sexp.Atom value ]) -> value
-  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+  | Some item -> item
   | None -> fail ("package missing field: " ^ name)
 
+let package_atom_field name items =
+  match package_field name items with
+  | Sexp.List [ Sexp.Atom _; Sexp.Atom value ] -> value
+  | item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+
 let package_string_field name items =
-  match
-    List.find_opt
-      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
-      items
-  with
-  | Some (Sexp.List [ Sexp.Atom _; Sexp.Str value ]) -> value
-  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
-  | None -> fail ("package missing field: " ^ name)
+  match package_field name items with
+  | Sexp.List [ Sexp.Atom _; Sexp.Str value ] -> value
+  | item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+
+let package_string_list_field name items =
+  match package_field name items with
+  | Sexp.List (Sexp.Atom _ :: values) ->
+      values
+      |> List.map (function
+           | Sexp.Str value -> value
+           | item -> fail ("invalid package list field " ^ name ^ ": " ^ Sexp.to_string item))
+  | item -> fail ("invalid package list field " ^ name ^ ": " ^ Sexp.to_string item)
+
+let package_list_field name items =
+  match package_field name items with
+  | Sexp.List (Sexp.Atom _ :: values) -> values
+  | item -> fail ("invalid package list field " ^ name ^ ": " ^ Sexp.to_string item)
 
 let relative_to_root manifest path =
   let root = realpath_or manifest.root in
@@ -1104,6 +1117,66 @@ let check_package manifest =
   expect_atom "interface-hash" interface_hash;
   validate_package_interface_constraints manifest interface_hash;
   { package_ref; package_path; lock_hash; build_id = prepared.build_id; store = store_root manifest }
+
+let package_pair_list_field name items =
+  package_string_list_field name items
+  |> List.map (fun item ->
+         match split_once '=' item with
+         | Some (name, value) when trim name <> "" && trim value <> "" -> (trim name, trim value)
+         | _ -> fail ("invalid package pair field " ^ name ^ ": " ^ item))
+
+let assoc_value name pairs =
+  pairs
+  |> List.find_opt (fun (n, _) -> String.equal n name)
+  |> Option.map snd
+  |> Option.value ~default:"-"
+
+let package_interface_entry_text = function
+  | Sexp.List (Sexp.Atom "def" :: fields) ->
+      let name = package_string_field "name" fields in
+      let type_hash = package_atom_field "type-hash" fields in
+      let caps = package_string_list_field "capability-scope" fields in
+      "export def " ^ name ^ " type_hash=" ^ type_hash ^ " capabilities="
+      ^ (match caps with [] -> "-" | _ -> String.concat "," caps)
+  | Sexp.List (Sexp.Atom "type" :: fields) ->
+      let name = package_string_field "name" fields in
+      let params = package_string_list_field "params" fields in
+      let type_hash = package_atom_field "type-hash" fields in
+      "export type " ^ name ^ " params="
+      ^ (match params with [] -> "-" | _ -> String.concat "," params)
+      ^ " type_hash=" ^ type_hash
+  | item -> fail ("invalid package interface item: " ^ Sexp.to_string item)
+
+let package_interface_text manifest =
+  let checked = check_package manifest in
+  let content = read_file checked.package_path in
+  let items = package_items content in
+  let imports = package_pair_list_field "package-imports" items in
+  let import_locks = package_pair_list_field "package-import-locks" items in
+  let import_interfaces = package_pair_list_field "package-import-interfaces" items in
+  let import_lines =
+    imports
+    |> List.map (fun (name, package_ref) ->
+           "import " ^ name ^ " package=" ^ package_ref ^ " lock="
+           ^ assoc_value name import_locks ^ " interface="
+           ^ assoc_value name import_interfaces)
+  in
+  let exports = package_list_field "interface" items |> List.map package_interface_entry_text in
+  String.concat "\n"
+    ([
+       "PackageInterface OK";
+       "project=" ^ manifest.root;
+       "package=" ^ manifest.name;
+       "version=" ^ manifest.version;
+       "package_ref=" ^ checked.package_ref;
+       "lock_hash=" ^ checked.lock_hash;
+       "build_id=" ^ checked.build_id;
+       "interface_hash=" ^ package_atom_field "interface-hash" items;
+       "imports=" ^ string_of_int (List.length imports);
+     ]
+    @ import_lines
+    @ (("exports=" ^ string_of_int (List.length exports)) :: exports))
+  ^ "\n"
 
 let stats_to_string stats =
   "parsed=" ^ string_of_int stats.parsed ^ "\nreused=" ^ string_of_int stats.reused

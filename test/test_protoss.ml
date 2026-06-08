@@ -1675,6 +1675,14 @@ let () =
   let package_checked = Workspace.check_package manifest_a in
   assert_equal "project package check ref" package_a.package_ref package_checked.package_ref;
   assert_equal "project package check lock" lock_hash package_checked.lock_hash;
+  let package_interface_text = Workspace.package_interface_text manifest_a in
+  assert_true "project package interface prints ref"
+    (contains_substring package_interface_text ("package_ref=" ^ package_a.package_ref));
+  assert_true "project package interface prints public def"
+    (contains_substring package_interface_text "export def appMain");
+  assert_true "project package interface prints capability scope"
+    (contains_substring package_interface_text "export def askName"
+    && contains_substring package_interface_text "capabilities=Human.ask");
   assert_equal "project package audit" "Audit OK\n" (Workspace.audit manifest_a);
   let package_again = Workspace.write_package manifest_a in
   assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
@@ -1720,6 +1728,11 @@ let () =
     (contains_substring consumer_package_content ("workspace-a=" ^ package_a.package_ref));
   assert_true "package dependency records interface hash"
     (contains_substring consumer_package_content ("workspace-a=" ^ interface_hash));
+  let consumer_interface_text = Workspace.package_interface_text consumer_manifest in
+  assert_true "package interface prints imported package"
+    (contains_substring consumer_interface_text ("import workspace-a package=" ^ package_a.package_ref));
+  assert_true "package interface prints imported interface"
+    (contains_substring consumer_interface_text ("interface=" ^ interface_hash));
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
   let consumer_package_invariants = Invariants.check_package consumer_ws in
