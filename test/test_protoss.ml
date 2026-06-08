@@ -1002,6 +1002,44 @@ let () =
     (Kernel.hash_program defrec_variant);
   let tree_size, _ = Runtime.normalize_def defrec_variant "out" in
   assert_equal "defrec Variant normalization" "2" (Runtime.value_to_string tree_size);
+  let forest_rec_base =
+    "(variant Forest \
+       (Leaf Nat) \
+       (Many (List Forest)))\n\
+     (def add (-> Nat (-> Nat Nat)) \
+       (lambda (a Nat) (lambda (b Nat) (foldNat a b (lambda (x Nat) (succ x))))))\n\
+     (def leaf Forest (variant Leaf 1))\n\
+     (def forest Forest \
+       (variant Many \
+         (Cons Forest leaf \
+           (Cons Forest (variant Many (Cons Forest leaf Nil)) Nil))))\n"
+  in
+  let forest_rec =
+    check
+      (forest_rec_base
+     ^ "(defrec sizeForest (-> Forest Nat) \
+          (variant value) \
+          (Leaf n 1) \
+          (Many children \
+            (foldList children 0 \
+              (lambda (child Forest) \
+                (lambda (acc Nat) ((add (recur child)) acc))))))\n\
+        (def forestSize Nat (sizeForest forest))")
+  in
+  let forest_size, _ = Runtime.normalize_def forest_rec "forestSize" in
+  assert_equal "defrec Variant list payload recursion" "2"
+    (Runtime.value_to_string forest_size);
+  expect_check_error_contains
+    (forest_rec_base
+   ^ "(def bad Nat \
+        (foldVariant Forest Nat forest \
+          (Leaf n 1) \
+          (Many children \
+            (let (other (Cons Forest leaf Nil)) \
+              (foldList other 0 \
+                (lambda (child Forest) \
+                  (lambda (acc Nat) (recur child))))))))")
+    "recur";
   let defrecpoly_variant =
     check
       (tree_rec_base
@@ -1802,6 +1840,12 @@ let () =
   let sexp_flat_nested, _ = Runtime.normalize_def stdlib_generics "sexpFlatNested" in
   assert_equal "stdlib Sexp.renderFlat nested placeholder" "\"((...) def)\""
     (Runtime.value_to_string sexp_flat_nested);
+  let sexp_render_form, _ = Runtime.normalize_def stdlib_generics "sexpRenderForm" in
+  assert_equal "stdlib Sexp.render list" "\"(def \\\"main\\\")\""
+    (Runtime.value_to_string sexp_render_form);
+  let sexp_render_nested, _ = Runtime.normalize_def stdlib_generics "sexpRenderNested" in
+  assert_equal "stdlib Sexp.render nested list" "\"((def \\\"main\\\") def)\""
+    (Runtime.value_to_string sexp_render_nested);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

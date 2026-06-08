@@ -585,6 +585,7 @@ type fold_scope = {
   fold_target : typ;
   fold_result : typ;
   fold_allowed : expr list;
+  fold_list_allowed : expr list;
 }
 
 type type_ctx = {
@@ -614,6 +615,13 @@ let shadow_fold_scope scope name =
                 | Some root -> not (String.equal root name)
                 | None -> true)
               s.fold_allowed;
+          fold_list_allowed =
+            List.filter
+              (fun e ->
+                match recur_root_name e with
+                | Some root -> not (String.equal root name)
+                | None -> true)
+              s.fold_list_allowed;
         }
 
 let bind_local ctx name typ =
@@ -747,6 +755,23 @@ let direct_recur_terms ctx target payload_name payload_ty =
       @ (fields
         |> List.filter_map (fun (field, field_ty) ->
                if equal_typ target field_ty then Some (EField (EName payload_name, field)) else None))
+  | _ -> base
+
+let direct_recur_list_terms ctx target payload_name payload_ty =
+  let base =
+    match unfold_type ctx payload_ty with
+    | TList item_ty when equal_typ target item_ty -> [ EName payload_name ]
+    | _ -> []
+  in
+  match unfold_type ctx payload_ty with
+  | TRecord fields ->
+      base
+      @ (fields
+        |> List.filter_map (fun (field, field_ty) ->
+               match unfold_type ctx field_ty with
+               | TList item_ty when equal_typ target item_ty ->
+                   Some (EField (EName payload_name, field))
+               | _ -> None))
   | _ -> base
 
 let fresh_wildcard_payload_name body =
@@ -891,8 +916,24 @@ let fold_branch_ctx ctx target result payload_name payload_ty =
           fold_target = target;
           fold_result = result;
           fold_allowed = direct_recur_terms ctx target payload_name payload_ty;
+          fold_list_allowed = direct_recur_list_terms ctx target payload_name payload_ty;
         };
   }
+
+let structural_list_recur_allowed ctx xs item_ty =
+  match ctx.fold_scope with
+  | Some s ->
+      equal_typ item_ty s.fold_target
+      && List.exists (expr_equal xs) s.fold_list_allowed
+  | None -> false
+
+let bind_recur_item ctx name typ =
+  let scope =
+    match shadow_fold_scope ctx.fold_scope name with
+    | None -> None
+    | Some s -> Some { s with fold_allowed = EName name :: s.fold_allowed }
+  in
+  { ctx with locals = (name, typ) :: ctx.locals; fold_scope = scope }
 
 let rec infer ctx = function
   | EUnit -> TUnit
@@ -1026,8 +1067,7 @@ let rec infer ctx = function
       match infer ctx xs with
       | TList item_ty ->
           let result_ty = infer ctx zero in
-          require_type (TFun (item_ty, TFun (result_ty, result_ty))) (infer ctx step)
-            "foldList step";
+          infer_fold_list_step ctx xs item_ty result_ty step;
           result_ty
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
   | ECaseList (xs, nil_body, head, tail, cons_body) -> (
@@ -1097,6 +1137,28 @@ let rec infer ctx = function
           | TProcess _ -> body_ty
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
+
+and infer_fold_list_step ctx xs item_ty result_ty step =
+  let expected = TFun (item_ty, TFun (result_ty, result_ty)) in
+  let infer_structural_step item actual_item_ty acc actual_acc_ty body =
+    require_type item_ty actual_item_ty "foldList step item";
+    require_type result_ty actual_acc_ty "foldList step accumulator";
+    let item_ctx = bind_recur_item ctx item actual_item_ty in
+    let acc_ctx = bind_local item_ctx acc actual_acc_ty in
+    require_type result_ty (infer acc_ctx body) "foldList structural step"
+  in
+  if structural_list_recur_allowed ctx xs item_ty then
+    match step with
+    | ELambda (item, actual_item_ty, ELambda (acc, actual_acc_ty, body)) ->
+        infer_structural_step item actual_item_ty acc actual_acc_ty body
+    | ELambda (item, actual_item_ty, ELambdaInfer (acc, body)) ->
+        infer_structural_step item actual_item_ty acc result_ty body
+    | ELambdaInfer (item, ELambda (acc, actual_acc_ty, body)) ->
+        infer_structural_step item item_ty acc actual_acc_ty body
+    | ELambdaInfer (item, ELambdaInfer (acc, body)) ->
+        infer_structural_step item item_ty acc result_ty body
+    | _ -> require_type expected (infer ctx step) "foldList step"
+  else require_type expected (infer ctx step) "foldList step"
 
 and infer_bool_case ctx branches =
   let t_expr, f_expr = bool_case_branches branches in
@@ -1265,7 +1327,7 @@ let rec infer_elab ctx expr =
       match xs_ty with
       | TList item_ty ->
           let result_ty, zero = infer_elab ctx zero in
-          let _, step = check_elab ctx (TFun (item_ty, TFun (result_ty, result_ty))) step in
+          let _, step = check_fold_list_step_elab ctx xs item_ty result_ty step in
           (result_ty, EFoldList (xs, zero, step))
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
   | ECaseList (xs, nil_body, head, tail, cons_body) -> (
@@ -1403,7 +1465,7 @@ and check_elab ctx expected expr =
       match xs_ty with
       | TList item_ty ->
           let _, zero = check_elab ctx expected zero in
-          let _, step = check_elab ctx (TFun (item_ty, TFun (expected, expected))) step in
+          let _, step = check_fold_list_step_elab ctx xs item_ty expected step in
           (expected, EFoldList (xs, zero, step))
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
   | _, ECaseList (xs, nil_body, head, tail, cons_body) -> (
@@ -1468,6 +1530,29 @@ and check_elab ctx expected expr =
       let actual, expr = infer_elab ctx expr in
       require_type expected actual "expected context";
       (expected, expr)
+
+and check_fold_list_step_elab ctx xs item_ty result_ty step =
+  let expected = TFun (item_ty, TFun (result_ty, result_ty)) in
+  let check_structural_step item actual_item_ty acc actual_acc_ty body =
+    require_type item_ty actual_item_ty "foldList step item";
+    require_type result_ty actual_acc_ty "foldList step accumulator";
+    let item_ctx = bind_recur_item ctx item actual_item_ty in
+    let acc_ctx = bind_local item_ctx acc actual_acc_ty in
+    let _, body = check_elab acc_ctx result_ty body in
+    (expected, ELambda (item, actual_item_ty, ELambda (acc, actual_acc_ty, body)))
+  in
+  if structural_list_recur_allowed ctx xs item_ty then
+    match step with
+    | ELambda (item, actual_item_ty, ELambda (acc, actual_acc_ty, body)) ->
+        check_structural_step item actual_item_ty acc actual_acc_ty body
+    | ELambda (item, actual_item_ty, ELambdaInfer (acc, body)) ->
+        check_structural_step item actual_item_ty acc result_ty body
+    | ELambdaInfer (item, ELambda (acc, actual_acc_ty, body)) ->
+        check_structural_step item item_ty acc actual_acc_ty body
+    | ELambdaInfer (item, ELambdaInfer (acc, body)) ->
+        check_structural_step item item_ty acc result_ty body
+    | _ -> check_elab ctx expected step
+  else check_elab ctx expected step
 
 and poly_app_elab ctx expected expr =
   let root, args = app_spine expr in

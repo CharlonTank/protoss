@@ -290,6 +290,12 @@
 (def sexpFlatNested String
   (Sexp.renderFlat sexpNestedForm))
 
+(def sexpRenderForm String
+  (Sexp.render sexpForm))
+
+(def sexpRenderNested String
+  (Sexp.render sexpNestedForm))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
