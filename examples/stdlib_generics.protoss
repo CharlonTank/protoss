@@ -428,6 +428,21 @@
 (def protossParsedBadFunctionType (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad (-> Nat) x)"))
 
+(def protossParsedTypeAlias (Result String (List ProtossDecl))
+  (Protoss.parseText "(type Maybe (A) (Variant (None Unit) (Some A)))"))
+
+(def protossParsedRecord (Result String (List ProtossDecl))
+  (Protoss.parseText "(record Pair (params A B) (first A) (second B))"))
+
+(def protossParsedVariant (Result String (List ProtossDecl))
+  (Protoss.parseText "(variant Tree (params A) (Leaf A) (Node (Tree A)))"))
+
+(def protossParsedBadField (Result String (List ProtossDecl))
+  (Protoss.parseText "(record Bad (name))"))
+
+(def protossParsedBadParams (Result String (List ProtossDecl))
+  (Protoss.parseText "(record Bad (params A (List String)) (value Nat))"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

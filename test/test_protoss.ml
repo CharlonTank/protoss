@@ -1989,7 +1989,7 @@ let () =
   let protoss_parsed_bad_tag, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadTag"
   in
-  assert_equal "stdlib Protoss.parseText bad tag" "Err \"expected def\""
+  assert_equal "stdlib Protoss.parseText bad tag" "Err \"expected declaration tag\""
     (Runtime.value_to_string protoss_parsed_bad_tag);
   let protoss_parsed_bad_function_type, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadFunctionType"
@@ -1997,6 +1997,32 @@ let () =
   assert_equal "stdlib Protoss.parseText bad function type"
     "Err \"expected function result type\""
     (Runtime.value_to_string protoss_parsed_bad_function_type);
+  let protoss_parsed_type_alias, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedTypeAlias"
+  in
+  assert_equal "stdlib Protoss.parseText type alias"
+    "Ok [PDType {body = PTApply {args = [PTApply {args = [PTName \"Unit\"], name = \"None\"}, PTApply {args = [PTName \"A\"], name = \"Some\"}], name = \"Variant\"}, name = \"Maybe\", typeParams = [\"A\"]}]"
+    (Runtime.value_to_string protoss_parsed_type_alias);
+  let protoss_parsed_record, _ = Runtime.normalize_def stdlib_generics "protossParsedRecord" in
+  assert_equal "stdlib Protoss.parseText record"
+    "Ok [PDRecord {fields = [{name = \"first\", typ = PTName \"A\"}, {name = \"second\", typ = PTName \"B\"}], name = \"Pair\", typeParams = [\"A\", \"B\"]}]"
+    (Runtime.value_to_string protoss_parsed_record);
+  let protoss_parsed_variant, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedVariant"
+  in
+  assert_equal "stdlib Protoss.parseText variant"
+    "Ok [PDVariant {cases = [{name = \"Leaf\", payload = PTName \"A\"}, {name = \"Node\", payload = PTApply {args = [PTName \"A\"], name = \"Tree\"}}], name = \"Tree\", typeParams = [\"A\"]}]"
+    (Runtime.value_to_string protoss_parsed_variant);
+  let protoss_parsed_bad_field, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadField"
+  in
+  assert_equal "stdlib Protoss.parseText bad field" "Err \"expected field type\""
+    (Runtime.value_to_string protoss_parsed_bad_field);
+  let protoss_parsed_bad_params, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadParams"
+  in
+  assert_equal "stdlib Protoss.parseText bad params" "Err \"expected parameter name\""
+    (Runtime.value_to_string protoss_parsed_bad_params);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
