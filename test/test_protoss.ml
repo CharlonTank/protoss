@@ -1685,6 +1685,23 @@ let () =
   assert_equal "stdlib generic Maybe.map2" "Some 42" (Runtime.value_to_string maybe_pair);
   let maybe_result, _ = Runtime.normalize_def stdlib_generics "maybeResult" in
   assert_equal "stdlib generic Maybe.toResult" "Ok 41" (Runtime.value_to_string maybe_result);
+  let option_default, _ = Runtime.normalize_def stdlib_generics "optionDefault" in
+  assert_equal "stdlib generic Option.map/default" "\"known\""
+    (Runtime.value_to_string option_default);
+  let option_has_age, _ = Runtime.normalize_def stdlib_generics "optionHasAge" in
+  assert_equal "stdlib generic Option.isSome" "true" (Runtime.value_to_string option_has_age);
+  let option_missing_age, _ = Runtime.normalize_def stdlib_generics "optionMissingAge" in
+  assert_equal "stdlib generic Option.isNone" "true"
+    (Runtime.value_to_string option_missing_age);
+  let option_next, _ = Runtime.normalize_def stdlib_generics "optionNext" in
+  assert_equal "stdlib generic Option.andThen" "Some 42"
+    (Runtime.value_to_string option_next);
+  let option_pair, _ = Runtime.normalize_def stdlib_generics "optionPair" in
+  assert_equal "stdlib generic Option.map2" "Some 42"
+    (Runtime.value_to_string option_pair);
+  let option_result, _ = Runtime.normalize_def stdlib_generics "optionResult" in
+  assert_equal "stdlib generic Option.toResult" "Ok 41"
+    (Runtime.value_to_string option_result);
   let result_label, _ = Runtime.normalize_def stdlib_generics "resultLabel" in
   assert_equal "stdlib generic Result.map" "Ok \"ok\"" (Runtime.value_to_string result_label);
   let result_default, _ = Runtime.normalize_def stdlib_generics "resultDefault" in

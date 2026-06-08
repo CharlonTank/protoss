@@ -1,6 +1,7 @@
-; Protoss stdlib v0.9. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.10. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
+(type Option (A) (Maybe A))
 (type Result (E A) (Variant (Err E) (Ok A)))
 (type Pair (A B) (Record (first A) (second B)))
 (type Assoc (K V) (List (Pair K V)))
@@ -14,7 +15,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.9")
+(def Stdlib.version String "v0.10")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -207,6 +208,56 @@
       (case m
         (None (variant Err err))
         (Some value (variant Ok value))))))
+
+(defpoly Option.none (params A)
+  (Option A)
+  (variant None unit))
+
+(defpoly Option.some (params A)
+  (-> A (Option A))
+  (lambda (value A)
+    (variant Some value)))
+
+(defpoly Option.withDefault (params A)
+  (-> A (-> (Option A) A))
+  (lambda (fallback A)
+    (lambda (m (Option A))
+      (((inst Maybe.withDefault A) fallback) m))))
+
+(defpoly Option.isSome (params A)
+  (-> (Option A) Bool)
+  (lambda (m (Option A))
+    ((inst Maybe.isSome A) m)))
+
+(defpoly Option.isNone (params A)
+  (-> (Option A) Bool)
+  (lambda (m (Option A))
+    ((inst Maybe.isNone A) m)))
+
+(defpoly Option.map (params A B)
+  (-> (-> A B) (-> (Option A) (Option B)))
+  (lambda (f (-> A B))
+    (lambda (m (Option A))
+      (((inst Maybe.map A B) f) m))))
+
+(defpoly Option.map2 (params A B C)
+  (-> (-> A (-> B C)) (-> (Option A) (-> (Option B) (Option C))))
+  (lambda (f (-> A (-> B C)))
+    (lambda (left (Option A))
+      (lambda (right (Option B))
+        ((((inst Maybe.map2 A B C) f) left) right)))))
+
+(defpoly Option.andThen (params A B)
+  (-> (Option A) (-> (-> A (Option B)) (Option B)))
+  (lambda (m (Option A))
+    (lambda (f (-> A (Option B)))
+      (((inst Maybe.andThen A B) m) f))))
+
+(defpoly Option.toResult (params E A)
+  (-> E (-> (Option A) (Result E A)))
+  (lambda (err E)
+    (lambda (m (Option A))
+      (((inst Maybe.toResult E A) err) m))))
 
 (defpoly Result.map (params E A B)
   (-> (-> A B) (-> (Result E A) (Result E B)))

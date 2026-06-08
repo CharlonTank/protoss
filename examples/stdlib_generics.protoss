@@ -76,6 +76,39 @@
 (def maybeResult (Result String Nat)
   (((inst Maybe.toResult String Nat) "missing age") maybeAge))
 
+(def optionAge (Option Nat)
+  ((inst Option.some Nat) 41))
+
+(def optionMissing (Option Nat)
+  (inst Option.none Nat))
+
+(def optionLabel (Option String)
+  (((inst Option.map Nat String)
+    (lambda (age Nat) "known"))
+    optionAge))
+
+(def optionDefault String
+  (((inst Option.withDefault String) "unknown") optionLabel))
+
+(def optionHasAge Bool
+  ((inst Option.isSome Nat) optionAge))
+
+(def optionMissingAge Bool
+  ((inst Option.isNone Nat) optionMissing))
+
+(def optionNext (Option Nat)
+  (((inst Option.andThen Nat Nat) optionAge)
+    (lambda (age Nat) ((inst Option.some Nat) (succ age)))))
+
+(def optionPair (Option Nat)
+  ((((inst Option.map2 Nat Nat Nat)
+    (lambda (a Nat) (lambda (b Nat) ((Nat.add a) b))))
+    optionAge)
+    ((inst Option.some Nat) 1)))
+
+(def optionResult (Result String Nat)
+  (((inst Option.toResult String Nat) "missing age") optionAge))
+
 (def resultAge (Result String Nat)
   (variant Ok 7))
 
