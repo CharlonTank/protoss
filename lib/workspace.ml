@@ -12,6 +12,23 @@ let has_suffix suffix s =
   let ls = String.length s and lf = String.length suffix in
   ls >= lf && String.sub s (ls - lf) lf = suffix
 
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let has_line_col_prefix s =
+  let len = String.length s in
+  let rec digits i =
+    if i < len && is_digit s.[i] then digits (i + 1) else i
+  in
+  let line_end = digits 0 in
+  if line_end = 0 || line_end >= len || s.[line_end] <> ':' then false
+  else
+    let col_start = line_end + 1 in
+    let col_end = digits col_start in
+    col_end > col_start && col_end < len && s.[col_end] = ':'
+
+let locate path msg =
+  if has_line_col_prefix msg then path ^ ":" ^ msg else path ^ ":1:1: " ^ msg
+
 let trim = String.trim
 
 let split_once ch s =
@@ -471,7 +488,7 @@ let load_units manifest store stats =
         | None ->
             let unit =
               try parse_source_unit path source hash with
-              | Parser.Error msg -> fail (path ^ ":1:1: " ^ msg)
+              | Parser.Error msg -> fail (locate path msg)
             in
             stats.parsed <- stats.parsed + 1;
             unit

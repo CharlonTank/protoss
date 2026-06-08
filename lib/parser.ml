@@ -4,6 +4,23 @@ exception Error of string
 
 let fail msg = raise (Error msg)
 
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let has_line_col_prefix s =
+  let len = String.length s in
+  let rec digits i =
+    if i < len && is_digit s.[i] then digits (i + 1) else i
+  in
+  let line_end = digits 0 in
+  if line_end = 0 || line_end >= len || s.[line_end] <> ':' then false
+  else
+    let col_start = line_end + 1 in
+    let col_end = digits col_start in
+    col_end > col_start && col_end < len && s.[col_end] = ':'
+
+let locate path msg =
+  if has_line_col_prefix msg then path ^ ":" ^ msg else path ^ ":1:1: " ^ msg
+
 let atom = function Sexp.Atom s -> s | x -> fail ("expected atom, got " ^ Sexp.to_string x)
 
 let name = function
@@ -589,4 +606,4 @@ let parse_file path =
     (fun () ->
       let len = in_channel_length ic in
       let input = really_input_string ic len in
-      parse_string input)
+      try parse_string input with Error msg -> fail (locate path msg))

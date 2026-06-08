@@ -11,6 +11,21 @@ let is_delim = function
   | '(' | ')' | '"' | ';' -> true
   | c -> is_space c
 
+let line_col input offset =
+  let limit = min (max 0 offset) (String.length input) in
+  let line = ref 1 and col = ref 1 in
+  for i = 0 to limit - 1 do
+    if input.[i] = '\n' then (
+      incr line;
+      col := 1)
+    else incr col
+  done;
+  (!line, !col)
+
+let error_at input offset msg =
+  let line, col = line_col input offset in
+  raise (Error (string_of_int line ^ ":" ^ string_of_int col ^ ": " ^ msg))
+
 let parse input =
   let len = String.length input in
   let rec skip i =
@@ -25,8 +40,8 @@ let parse input =
           line (i + 1)
       | _ -> i
   in
-  let rec parse_string buf i =
-    if i >= len then raise (Error "unterminated string")
+  let rec parse_string start buf i =
+    if i >= len then error_at input start "unterminated string"
     else
       match input.[i] with
       | '"' -> (Buffer.contents buf, i + 1)
@@ -41,37 +56,37 @@ let parse input =
             | c -> c
           in
           Buffer.add_char buf c;
-          parse_string buf (i + 2)
+          parse_string start buf (i + 2)
       | c ->
           Buffer.add_char buf c;
-          parse_string buf (i + 1)
+          parse_string start buf (i + 1)
   in
   let parse_atom i =
     let j = ref i in
     while !j < len && not (is_delim input.[!j]) do
       incr j
     done;
-    if !j = i then raise (Error ("unexpected character: " ^ String.make 1 input.[i]));
+    if !j = i then error_at input i ("unexpected character: " ^ String.make 1 input.[i]);
     (String.sub input i (!j - i), !j)
   in
   let rec expr i =
     let i = skip i in
-    if i >= len then raise (Error "unexpected end of input")
+    if i >= len then error_at input i "unexpected end of input"
     else
       match input.[i] with
       | '(' ->
-          let rec items acc j =
+          let rec items start acc j =
             let j = skip j in
-            if j >= len then raise (Error "unterminated list")
+            if j >= len then error_at input start "unterminated list"
             else if input.[j] = ')' then (List (List.rev acc), j + 1)
             else
               let item, k = expr j in
-              items (item :: acc) k
+              items start (item :: acc) k
           in
-          items [] (i + 1)
-      | ')' -> raise (Error "unexpected )")
+          items i [] (i + 1)
+      | ')' -> error_at input i "unexpected )"
       | '"' ->
-          let s, j = parse_string (Buffer.create 16) (i + 1) in
+          let s, j = parse_string i (Buffer.create 16) (i + 1) in
           (Str s, j)
       | _ ->
           let a, j = parse_atom i in

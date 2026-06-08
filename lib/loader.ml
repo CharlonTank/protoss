@@ -4,7 +4,22 @@ exception Error of string
 
 let fail msg = raise (Error msg)
 
-let locate path msg = path ^ ":1:1: " ^ msg
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let has_line_col_prefix s =
+  let len = String.length s in
+  let rec digits i =
+    if i < len && is_digit s.[i] then digits (i + 1) else i
+  in
+  let line_end = digits 0 in
+  if line_end = 0 || line_end >= len || s.[line_end] <> ':' then false
+  else
+    let col_start = line_end + 1 in
+    let col_end = digits col_start in
+    col_end > col_start && col_end < len && s.[col_end] = ':'
+
+let locate path msg =
+  if has_line_col_prefix msg then path ^ ":" ^ msg else path ^ ":1:1: " ^ msg
 
 let read_file path =
   let ic = open_in path in
@@ -19,8 +34,9 @@ let is_space = function ' ' | '\t' | '\r' | '\n' -> true | _ -> false
 let is_delim c = is_space c || c = '(' || c = ')' || c = ';' || c = '"'
 
 let line_col source offset =
+  let limit = min (max 0 offset) (String.length source) in
   let line = ref 1 and col = ref 1 in
-  for i = 0 to max 0 (offset - 1) do
+  for i = 0 to limit - 1 do
     if source.[i] = '\n' then (
       incr line;
       col := 1)

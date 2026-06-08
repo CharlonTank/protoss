@@ -70,6 +70,14 @@ let expect_parse_error input =
     fail "expected parse error"
   with Parser.Error _ -> ()
 
+let expect_parse_error_contains input needle =
+  try
+    let _ = Parser.parse_string input in
+    fail "expected parse error"
+  with Parser.Error msg ->
+    assert_true ("parse error should contain " ^ needle ^ ", got " ^ msg)
+      (contains_substring msg needle)
+
 let expect_check_error input =
   try
     let p = Parser.parse_string input in
@@ -166,6 +174,9 @@ let () =
   let invalid = "(def main Nat (succ 1)" in
   ignore (Parser.parse_string valid);
   expect_parse_error invalid;
+  expect_parse_error_contains "(def main Nat\n  (succ 1)" "1:1: unterminated list";
+  expect_parse_error_contains "\n)" "2:1: unexpected )";
+  expect_parse_error_contains "(def s String\n  \"oops)" "2:3: unterminated string";
 
   ignore (check valid);
   expect_check_error "(def bad Nat true)";
@@ -1147,6 +1158,14 @@ let () =
      ignore (Loader.check_file bad_file);
      fail "loader error should be localized"
    with Loader.Error msg -> assert_true "loader error has file-ish location" (String.contains msg ':'));
+  let bad_syntax_file = Filename.concat import_root "bad_syntax.protoss" in
+  write_file bad_syntax_file "(def bad Nat\n  (succ 1)\n";
+  (try
+     ignore (Loader.check_file bad_syntax_file);
+     fail "loader syntax error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader syntax error has file line column"
+       (contains_substring msg (bad_syntax_file ^ ":1:1: unterminated list")));
 
   expect_check_error "(def loop Nat loop)";
   expect_check_error "(def a Nat b)\n(def b Nat a)";
@@ -1658,6 +1677,17 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "locked build missing lock leaves .protoss untouched"
     (init_dot_before_locked = snapshot (Filename.concat project_init_root ".protoss"));
+  let bad_project_root = temp_dir "project-bad-syntax" in
+  ignore (Workspace.init bad_project_root);
+  let bad_project_file = Filename.concat bad_project_root "src/main.protoss" in
+  write_file bad_project_file "(def main Nat\n  (succ 1)\n";
+  let bad_project_manifest = Workspace.parse_manifest bad_project_root in
+  (try
+     ignore (Workspace.build bad_project_manifest);
+     fail "project syntax error should be localized"
+   with Workspace.Error msg ->
+     assert_true "project syntax error has file line column"
+       (contains_substring msg (bad_project_file ^ ":1:1: unterminated list")));
 
   let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let make_workspace name base_value bound =
