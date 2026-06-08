@@ -476,11 +476,12 @@ let change_audit_line change =
   | Some d -> " result=" ^ d.hash
   | None -> " result=no-object"
 
-let patch_audit_content patch_source checked_patch =
+let patch_audit_content previous_ref patch_source checked_patch =
   let source_hash = Kernel.hash_string ("protoss-patch-source-v1\n" ^ patch_source) in
   let lines =
     [
       "protoss-patch-audit-v1";
+      "previous-ref=" ^ Option.value previous_ref ~default:"none";
       "source-hash=" ^ source_hash;
       "program-hash=" ^ Kernel.hash_program checked_patch.checked;
       "result=" ^ describe_checked checked_patch;
@@ -491,9 +492,9 @@ let patch_audit_content patch_source checked_patch =
   in
   String.concat "\n" lines
 
-let write_patch_audit store_root patch_path checked_patch =
+let write_patch_audit store_root patch_path previous_ref checked_patch =
   let patch_source = read_file patch_path in
-  let content = patch_audit_content patch_source checked_patch in
+  let content = patch_audit_content previous_ref patch_source checked_patch in
   let patch_ref = Patch_audit.audit_ref_of_content content in
   let dir = patch_audits_dir store_root in
   Store.ensure_dir dir;
@@ -557,6 +558,13 @@ let write_capability_scope store_root (cd : Kernel.checked_def) =
 
 let apply store_root patch_path =
   let checked_patch = check store_root patch_path in
+  let previous_ref =
+    try
+      let previous = Patch_audit.previous_latest_ref store_root in
+      (match previous with Some _ -> ignore (Patch_audit.verify_chain store_root) | None -> ());
+      previous
+    with Patch_audit.Error msg -> fail msg
+  in
   let current =
     try Store.load_program store_root with
     | Store.Error msg -> fail msg
@@ -587,4 +595,4 @@ let apply store_root patch_path =
   (if Sys.file_exists (Filename.concat store_root "web_app") then
      let contract = Web.check_contract checked_patch.checked in
      Web.write_web_marker store_root contract);
-  write_patch_audit store_root patch_path checked_patch
+  write_patch_audit store_root patch_path previous_ref checked_patch

@@ -22,6 +22,7 @@ let source_hash_of_source source =
 type audit = {
   audit_ref : string;
   content : string;
+  previous_ref : string option;
   source_hash : string;
   program_hash : string;
   result : string;
@@ -65,6 +66,13 @@ let parse_audit_fields header =
 let required_audit_field fields name =
   match audit_field name fields with Some value -> value | None -> fail ("patch audit missing field: " ^ name)
 
+let previous_latest_ref store_root =
+  let path = patch_latest_path store_root in
+  if Sys.file_exists path then
+    let value = String.trim (read_file path) in
+    if value = "" then None else Some value
+  else None
+
 let resolve_audit_ref store_root ref_arg =
   if String.equal ref_arg "latest" then
     let path = patch_latest_path store_root in
@@ -98,14 +106,33 @@ let verify_audit ?(ref = "latest") store_root =
   let ops =
     try int_of_string (required_audit_field fields "ops") with Failure _ -> fail "patch audit ops is not an int"
   in
+  let previous_ref =
+    match audit_field "previous-ref" fields with
+    | None | Some "none" | Some "" -> None
+    | Some ref -> Some ref
+  in
   {
     audit_ref;
     content;
+    previous_ref;
     source_hash;
     program_hash = required_audit_field fields "program-hash";
     result = required_audit_field fields "result";
     ops;
   }
+
+let verify_chain ?(ref = "latest") store_root =
+  let rec loop seen ref_arg =
+    let audit = verify_audit ~ref:ref_arg store_root in
+    if List.exists (String.equal audit.audit_ref) seen then
+      fail ("patch audit cycle: " ^ audit.audit_ref);
+    match audit.previous_ref with
+    | None -> audit
+    | Some previous ->
+        ignore (loop (audit.audit_ref :: seen) previous);
+        audit
+  in
+  loop [] ref
 
 let current_store_program_hash store_root =
   let program =
@@ -120,7 +147,7 @@ let current_store_program_hash store_root =
   Kernel.hash_program checked
 
 let verify_latest_matches_store store_root =
-  let audit = verify_audit store_root in
+  let audit = verify_chain store_root in
   let current_hash = current_store_program_hash store_root in
   if not (String.equal audit.program_hash current_hash) then
     fail
@@ -131,6 +158,6 @@ let verify_latest_matches_store store_root =
 let inspect_audit ?(ref = "latest") store_root =
   let audit =
     if String.equal ref "latest" then verify_latest_matches_store store_root
-    else verify_audit ~ref store_root
+    else verify_chain ~ref store_root
   in
   "Patch audit OK " ^ audit.audit_ref ^ "\n" ^ audit.content ^ "\n"
