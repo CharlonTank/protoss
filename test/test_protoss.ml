@@ -1707,6 +1707,42 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "invalid package interface write leaves package store untouched"
     (package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss"));
+  let consumer_ws = make_workspace "workspace-consumer" 5 "z" in
+  let consumer_manifest_path = Filename.concat consumer_ws "protoss.toml" in
+  let consumer_manifest_base = Store.read_file consumer_manifest_path in
+  write_file consumer_manifest_path
+    (consumer_manifest_base ^ "package_imports = [\"workspace-a=" ^ ws_a
+   ^ "\"]\npackage_interfaces = [\"workspace-a=" ^ interface_hash ^ "\"]\n");
+  let consumer_manifest = Workspace.parse_manifest consumer_ws in
+  let consumer_package = Workspace.write_package consumer_manifest in
+  let consumer_package_content = Store.read_file consumer_package.package_path in
+  assert_true "package dependency records package ref"
+    (contains_substring consumer_package_content ("workspace-a=" ^ package_a.package_ref));
+  assert_true "package dependency records interface hash"
+    (contains_substring consumer_package_content ("workspace-a=" ^ interface_hash));
+  assert_equal "package dependency check ref" consumer_package.package_ref
+    (Workspace.check_package consumer_manifest).Workspace.package_ref;
+  let consumer_dot_before_bad = snapshot (Filename.concat consumer_ws ".protoss") in
+  write_file consumer_manifest_path
+    (consumer_manifest_base ^ "package_imports = [\"workspace-a=" ^ ws_a
+   ^ "\"]\npackage_interfaces = [\"workspace-a=p2:bad\"]\n");
+  let consumer_bad_interface = Workspace.parse_manifest consumer_ws in
+  (try
+     ignore (Workspace.write_package consumer_bad_interface);
+     fail "bad imported package interface should reject without mutation"
+   with Workspace.Error _ -> ());
+  assert_true "bad imported package interface leaves package store untouched"
+    (consumer_dot_before_bad = snapshot (Filename.concat consumer_ws ".protoss"));
+  let mismatch_ws = make_workspace "workspace-import-mismatch" 6 "q" in
+  let mismatch_manifest_path = Filename.concat mismatch_ws "protoss.toml" in
+  let mismatch_manifest_base = Store.read_file mismatch_manifest_path in
+  write_file mismatch_manifest_path
+    (mismatch_manifest_base ^ "package_imports = [\"wrong-name=" ^ ws_a ^ "\"]\n");
+  let mismatch_manifest = Workspace.parse_manifest mismatch_ws in
+  (try
+     ignore (Workspace.write_package mismatch_manifest);
+     fail "package import name mismatch should reject"
+   with Workspace.Error _ -> ());
   let capability_interface_ws = temp_dir "workspace-interface-capability" in
   copy_tree ws_a capability_interface_ws;
   let capability_manifest_path = Filename.concat capability_interface_ws "protoss.toml" in

@@ -66,6 +66,7 @@ type manifest = {
   store_dir : string;
   cache_dir : string;
   capabilities : string list;
+  package_imports : (string * string) list;
   package_interfaces : (string * string) list;
 }
 
@@ -114,10 +115,14 @@ let parse_array s =
   in
   loop [] 0
 
-let parse_package_interface s =
+let parse_manifest_pair kind s =
   match split_once '=' s with
   | Some (name, hash) when trim name <> "" && trim hash <> "" -> (trim name, trim hash)
-  | _ -> fail ("package interface constraint expected name=hash: " ^ s)
+  | _ -> fail (kind ^ " expected name=value: " ^ s)
+
+let parse_package_import s = parse_manifest_pair "package import" s
+
+let parse_package_interface s = parse_manifest_pair "package interface constraint" s
 
 let parse_manifest root =
   let root = realpath_or root in
@@ -164,6 +169,7 @@ let parse_manifest root =
     store_dir = string_field "store_dir" ".protoss/store";
     cache_dir = string_field "cache_dir" ".protoss/cache";
     capabilities = array_field "capabilities" [];
+    package_imports = array_field "package_imports" [] |> List.map parse_package_import;
     package_interfaces =
       array_field "package_interfaces" [] |> List.map parse_package_interface;
   }
@@ -199,6 +205,7 @@ let init ?(force = false) root =
      store_dir = \".protoss/store\"\n\
      cache_dir = \".protoss/cache\"\n\
      capabilities = []\n\
+     package_imports = []\n\
      package_interfaces = []\n";
   let main = Filename.concat src "main.protoss" in
   if not (Sys.file_exists main) then write_file main "(def main Nat 0)\n";
@@ -697,6 +704,33 @@ let packages_dir manifest = Filename.concat (Filename.concat manifest.root ".pro
 let package_path_for_ref manifest package_ref =
   Filename.concat (packages_dir manifest) (sanitize_id package_ref ^ ".package")
 
+let package_items content =
+  match Sexp.parse content with
+  | [ Sexp.List (Sexp.Atom "protoss-package-v1" :: items) ] -> items
+  | [ form ] -> fail ("invalid package descriptor: " ^ Sexp.to_string form)
+  | [] -> fail "empty package descriptor"
+  | _ -> fail "package descriptor must contain one form"
+
+let package_atom_field name items =
+  match
+    List.find_opt
+      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
+      items
+  with
+  | Some (Sexp.List [ Sexp.Atom _; Sexp.Atom value ]) -> value
+  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+  | None -> fail ("package missing field: " ^ name)
+
+let package_string_field name items =
+  match
+    List.find_opt
+      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
+      items
+  with
+  | Some (Sexp.List [ Sexp.Atom _; Sexp.Str value ]) -> value
+  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+  | None -> fail ("package missing field: " ^ name)
+
 let relative_to_root manifest path =
   let root = realpath_or manifest.root in
   let path = realpath_or path in
@@ -720,6 +754,60 @@ let lock_pair_list name values =
   |> List.map (fun (k, v) -> k ^ "=" ^ v)
   |> lock_string_list name
 
+type package_import_info = {
+  import_name : string;
+  import_ref : string;
+  import_lock_hash : string;
+  import_interface_hash : string;
+}
+
+let package_import_manifest manifest (name, path) =
+  let root = project_root (normalize_path manifest.root path) in
+  let imported = parse_manifest root in
+  if not (String.equal imported.name name) then
+    fail
+      ("package import name mismatch: expected " ^ name ^ ", got " ^ imported.name ^ " at "
+     ^ root);
+  imported
+
+let read_package_import manifest import =
+  let imported = package_import_manifest manifest import in
+  let pointer = package_current_path imported in
+  if not (Sys.file_exists pointer) then fail ("missing imported package pointer: " ^ pointer);
+  let package_ref = trim (read_file pointer) in
+  if String.equal package_ref "" then fail ("empty imported package pointer: " ^ pointer);
+  let package_path = package_path_for_ref imported package_ref in
+  if not (Sys.file_exists package_path) then
+    fail ("missing imported package descriptor: " ^ package_path);
+  let content = read_file package_path in
+  let actual_ref = Kernel.hash_string content in
+  if not (String.equal actual_ref package_ref) then
+    fail
+      ("imported package hash mismatch for " ^ imported.name ^ ": pointer " ^ package_ref
+     ^ ", content " ^ actual_ref);
+  let items = package_items content in
+  let expect_string field expected =
+    let actual = package_string_field field items in
+    if not (String.equal actual expected) then
+      fail
+        ("imported package " ^ imported.name ^ " " ^ field ^ " mismatch: expected "
+       ^ expected ^ ", got " ^ actual)
+  in
+  expect_string "package" imported.name;
+  expect_string "hash-algorithm" Kernel.hash_algorithm;
+  expect_string "hash-prefix" Kernel.hash_prefix;
+  {
+    import_name = imported.name;
+    import_ref = package_ref;
+    import_lock_hash = package_atom_field "lock-hash" items;
+    import_interface_hash = package_atom_field "interface-hash" items;
+  }
+
+let package_imports manifest =
+  manifest.package_imports
+  |> List.map (read_package_import manifest)
+  |> List.sort (fun a b -> String.compare a.import_name b.import_name)
+
 let unit_lock manifest (unit : unit_load) =
   let rel_import import =
     normalize_path (Filename.dirname unit.path) import |> relative_to_root manifest
@@ -736,6 +824,7 @@ let unit_lock manifest (unit : unit_load) =
 
 let lock_content manifest prepared =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
+  let imports = package_imports manifest in
   String.concat "\n"
     [
       "(protoss-lock-v1";
@@ -751,6 +840,13 @@ let lock_content manifest prepared =
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
+      "  "
+      ^ lock_pair_list "package-import-locks"
+          (List.map (fun i -> (i.import_name, i.import_lock_hash)) imports);
+      "  "
+      ^ lock_pair_list "package-import-interfaces"
+          (List.map (fun i -> (i.import_name, i.import_interface_hash)) imports);
       "  " ^ lock_pair_list "package-interfaces" manifest.package_interfaces;
       "  "
       ^ lock_item "defs"
@@ -863,20 +959,25 @@ let package_interface_hash manifest prepared =
   Kernel.hash_string (lock_item "interface" (package_interface_items manifest prepared))
 
 let validate_package_interface_constraints manifest interface_hash =
+  let available =
+    (manifest.name, interface_hash)
+    :: (package_imports manifest |> List.map (fun i -> (i.import_name, i.import_interface_hash)))
+  in
   List.iter
     (fun (name, expected) ->
-      if String.equal name manifest.name then
-        if not (String.equal expected interface_hash) then
-          fail
-            ("package interface mismatch for " ^ name ^ ": expected " ^ expected ^ ", got "
-           ^ interface_hash)
-        else ()
-      else fail ("unknown package interface constraint: " ^ name))
+      match List.find_opt (fun (n, _) -> String.equal n name) available with
+      | Some (_, actual) ->
+          if not (String.equal expected actual) then
+            fail
+              ("package interface mismatch for " ^ name ^ ": expected " ^ expected ^ ", got "
+             ^ actual)
+      | None -> fail ("unknown package interface constraint: " ^ name))
     manifest.package_interfaces
 
 let package_content manifest prepared lock_hash =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
   let interface_items = package_interface_items manifest prepared in
+  let imports = package_imports manifest in
   String.concat "\n"
     [
       "(protoss-package-v1";
@@ -895,6 +996,13 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
+      "  "
+      ^ lock_pair_list "package-import-locks"
+          (List.map (fun i -> (i.import_name, i.import_lock_hash)) imports);
+      "  "
+      ^ lock_pair_list "package-import-interfaces"
+          (List.map (fun i -> (i.import_name, i.import_interface_hash)) imports);
       "  " ^ lock_pair_list "package-interfaces" manifest.package_interfaces;
       "  " ^ lock_item "interface" interface_items;
       "  " ^ lock_item "types" (List.map package_type_item prepared.checked.program.type_aliases);
@@ -929,33 +1037,6 @@ let write_package ?(locked = false) manifest =
     build_id = build_result.build_id;
     store = build_result.store;
   }
-
-let package_items content =
-  match Sexp.parse content with
-  | [ Sexp.List (Sexp.Atom "protoss-package-v1" :: items) ] -> items
-  | [ form ] -> fail ("invalid package descriptor: " ^ Sexp.to_string form)
-  | [] -> fail "empty package descriptor"
-  | _ -> fail "package descriptor must contain one form"
-
-let package_atom_field name items =
-  match
-    List.find_opt
-      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
-      items
-  with
-  | Some (Sexp.List [ Sexp.Atom _; Sexp.Atom value ]) -> value
-  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
-  | None -> fail ("package missing field: " ^ name)
-
-let package_string_field name items =
-  match
-    List.find_opt
-      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
-      items
-  with
-  | Some (Sexp.List [ Sexp.Atom _; Sexp.Str value ]) -> value
-  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
-  | None -> fail ("package missing field: " ^ name)
 
 let check_package manifest =
   let current_path = package_current_path manifest in
