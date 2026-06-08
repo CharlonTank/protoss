@@ -50,6 +50,7 @@ let rec parse_type = function
       in
       ensure_unique "variant constructor" (List.map fst cases);
       TVariant (sort_fields cases)
+  | Sexp.Atom s when s <> "" -> TNamed s
   | x -> fail ("invalid type: " ^ Sexp.to_string x)
 
 let parse_binding = function
@@ -131,6 +132,9 @@ let parse_toplevel = function
   | Sexp.List [ Sexp.Atom "import"; Sexp.Str path ] -> `Import path
   | Sexp.List (Sexp.Atom "capabilities" :: caps) ->
       `Capabilities (List.map atom caps)
+  | Sexp.List [ Sexp.Atom "type"; Sexp.Atom n; ty ]
+  | Sexp.List [ Sexp.Atom "alias"; Sexp.Atom n; ty ] ->
+      `TypeAlias { type_name = n; type_body = parse_type ty }
   | Sexp.List [ Sexp.Atom "def"; Sexp.Atom n; ty; body ] ->
       `Def { name = n; typ = parse_type ty; body = parse_expr body }
   | Sexp.List (Sexp.Atom "defrec" :: _) ->
@@ -141,18 +145,21 @@ let parse_string input =
   let forms =
     try Sexp.parse input with Sexp.Error msg -> fail msg
   in
-  let imports = ref [] and caps = ref [] and defs = ref [] in
+  let imports = ref [] and caps = ref [] and aliases = ref [] and defs = ref [] in
   List.iter
     (fun form ->
       match parse_toplevel form with
       | `Import path -> imports := path :: !imports
       | `Capabilities xs -> caps := xs @ !caps
+      | `TypeAlias a -> aliases := a :: !aliases
       | `Def d -> defs := d :: !defs)
     forms;
+  ensure_unique "type alias" (List.map (fun a -> a.type_name) !aliases);
   ensure_unique "definition" (List.map (fun d -> d.name) !defs);
   {
     imports = List.rev !imports;
     capabilities = List.sort_uniq String.compare !caps;
+    type_aliases = List.rev !aliases;
     defs = List.rev !defs;
   }
 

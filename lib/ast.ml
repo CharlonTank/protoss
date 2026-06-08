@@ -9,6 +9,7 @@ type typ =
   | TList of typ
   | TView of typ
   | TProcess of typ
+  | TNamed of string
 
 type req =
   | AskHuman of string
@@ -57,9 +58,15 @@ type def = {
   body : expr;
 }
 
+type type_alias = {
+  type_name : string;
+  type_body : typ;
+}
+
 type program = {
   imports : string list;
   capabilities : string list;
+  type_aliases : type_alias list;
   defs : def list;
 }
 
@@ -75,6 +82,7 @@ let rec equal_typ a b =
   | TView TUnit, TView _ | TView _, TView TUnit -> true
   | TView a, TView b -> equal_typ a b
   | TProcess a, TProcess b -> equal_typ a b
+  | TNamed a, TNamed b -> String.equal a b
   | TRecord fs1, TRecord fs2 | TVariant fs1, TVariant fs2 ->
       let fs1 = sort_fields fs1 and fs2 = sort_fields fs2 in
       List.length fs1 = List.length fs2
@@ -121,6 +129,7 @@ let rec string_of_typ = function
   | TList t -> "(List " ^ string_of_typ t ^ ")"
   | TView t -> "(View " ^ string_of_typ t ^ ")"
   | TProcess t -> "(Process " ^ string_of_typ t ^ ")"
+  | TNamed n -> n
 
 let string_of_req = function
   | AskHuman prompt -> "(Human.ask " ^ quote prompt ^ ")"
@@ -193,6 +202,9 @@ and string_of_branch = function
 let string_of_def d =
   "(def " ^ d.name ^ " " ^ string_of_typ d.typ ^ " " ^ string_of_expr d.body ^ ")"
 
+let string_of_type_alias a =
+  "(type " ^ a.type_name ^ " " ^ string_of_typ a.type_body ^ ")"
+
 let string_of_program p =
   let caps =
     match p.capabilities with
@@ -200,4 +212,7 @@ let string_of_program p =
     | caps -> [ "(capabilities " ^ String.concat " " caps ^ ")" ]
   in
   let imports = List.map (fun path -> "(import " ^ quote path ^ ")") p.imports in
-  String.concat "\n" (imports @ caps @ List.map string_of_def p.defs) ^ "\n"
+  String.concat "\n"
+    (imports @ caps @ List.map string_of_type_alias p.type_aliases
+   @ List.map string_of_def p.defs)
+  ^ "\n"

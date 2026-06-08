@@ -71,6 +71,11 @@ let command_parse file =
   if p.capabilities <> [] then
     Printf.printf "Capabilities: %s\n" (String.concat ", " p.capabilities);
   List.iter
+    (fun a ->
+      Printf.printf "type %s = %s\n" a.Protoss.Ast.type_name
+        (Protoss.Ast.string_of_typ a.type_body))
+    p.type_aliases;
+  List.iter
     (fun d ->
       Printf.printf "%s : %s\n" d.Protoss.Ast.name (Protoss.Ast.string_of_typ d.typ))
     p.defs

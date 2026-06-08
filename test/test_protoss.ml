@@ -171,6 +171,23 @@ let () =
   assert_equal "record canonical order" (Kernel.hash_program record_order_a)
     (Kernel.hash_program record_order_b);
 
+  let named_model =
+    check
+      "(type Model (Record (name String) (count Nat)))\n\
+       (def init Model (record (name \"Ada\") (count 1)))"
+  in
+  let expanded_model =
+    check "(def init (Record (name String) (count Nat)) (record (name \"Ada\") (count 1)))"
+  in
+  assert_equal "type alias transparent hash" (Kernel.hash_program expanded_model)
+    (Kernel.hash_program named_model);
+  let named_init, _ = Runtime.normalize_def named_model "init" in
+  assert_equal "type alias runtime"
+    "{count = 1, name = \"Ada\"}" (Runtime.value_to_string named_init);
+  expect_check_error "(def bad MissingType 0)";
+  expect_check_error "(type Loop Loop)\n(def bad Loop 0)";
+  expect_check_error "(type A B)\n(type B A)\n(def bad A 0)";
+
   let variant_order_a =
     check
       "(def v (Variant (None Unit) (Some Nat)) \

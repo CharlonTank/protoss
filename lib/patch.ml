@@ -193,6 +193,7 @@ let rec contains_process_type = function
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
   | TList t | TView t -> contains_process_type t
+  | TNamed _ -> false
   | TUnit | TBool | TNat | TString -> false
 
 let validate_web_patch store_root checked =
@@ -292,13 +293,14 @@ let check store_root patch_path =
       (current.defs, []) patches
   in
   let program =
-    {
-      imports = [];
-      capabilities =
-        List.sort_uniq String.compare
-          (current.capabilities @ List.concat (List.map (fun p -> p.capabilities) patches));
-      defs;
-    }
+	    {
+	      imports = [];
+	      capabilities =
+	        List.sort_uniq String.compare
+	          (current.capabilities @ List.concat (List.map (fun p -> p.capabilities) patches));
+	      type_aliases = current.type_aliases;
+	      defs;
+	    }
   in
   let checked =
     try Kernel.check_program program with Kernel.Error msg -> fail msg

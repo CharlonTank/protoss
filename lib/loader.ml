@@ -96,7 +96,8 @@ type loaded = {
   locations : (string * string) list;
 }
 
-let empty_loaded = { program = { imports = []; capabilities = []; defs = [] }; locations = [] }
+let empty_loaded =
+  { program = { imports = []; capabilities = []; type_aliases = []; defs = [] }; locations = [] }
 
 let merge_loaded acc loaded import_path =
   {
@@ -104,6 +105,7 @@ let merge_loaded acc loaded import_path =
       {
         imports = acc.program.imports @ loaded.program.imports @ [ import_path ];
         capabilities = acc.program.capabilities @ loaded.program.capabilities;
+        type_aliases = acc.program.type_aliases @ loaded.program.type_aliases;
         defs = acc.program.defs @ loaded.program.defs;
       };
     locations = acc.locations @ loaded.locations;
@@ -134,6 +136,7 @@ let rec load_file_with_locations ?(stack = []) path =
     {
       imports = imported.program.imports @ parsed.imports;
       capabilities = List.sort_uniq String.compare (imported.program.capabilities @ parsed.capabilities);
+      type_aliases = imported.program.type_aliases @ parsed.type_aliases;
       defs = imported.program.defs @ parsed.defs;
     }
   in

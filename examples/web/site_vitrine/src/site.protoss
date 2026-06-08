@@ -1,15 +1,20 @@
+(type Model (Record (lead String) (status String)))
+(type Msg (Variant (Contact Unit) (Portfolio Unit)))
+(type MsgView (View Msg))
+(type MsgViews (List MsgView))
+
 (def init
-  (Process (Record (lead String) (status String)))
+  (Process Model)
   (done (record
     (lead "bonjour@studioclair.fr")
     (status "Audit express disponible cette semaine"))))
 
 (def update
-  (-> (Variant (Contact Unit) (Portfolio Unit))
-      (-> (Record (lead String) (status String))
-          (Process (Record (lead String) (status String)))))
-  (lambda (msg (Variant (Contact Unit) (Portfolio Unit)))
-    (lambda (model (Record (lead String) (status String)))
+  (-> Msg
+      (-> Model
+          (Process Model)))
+  (lambda (msg Msg)
+    (lambda (model Model)
       (case msg
         (Contact _
           (done (record
@@ -21,127 +26,127 @@
             (status "References disponibles sur demande"))))))))
 
 (def emptyViews
-  (List (View (Variant (Contact Unit) (Portfolio Unit))))
-  (Nil (View (Variant (Contact Unit) (Portfolio Unit)))))
+  MsgViews
+  (Nil MsgView))
 
 (def contactMsg
-  (Variant (Contact Unit) (Portfolio Unit))
-  (variant (Variant (Contact Unit) (Portfolio Unit)) Contact unit))
+  Msg
+  (variant Msg Contact unit))
 
 (def portfolioMsg
-  (Variant (Contact Unit) (Portfolio Unit))
-  (variant (Variant (Contact Unit) (Portfolio Unit)) Portfolio unit))
+  Msg
+  (variant Msg Portfolio unit))
 
 (def actionRow
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (row
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (button "Demander un audit" contactMsg)
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (button "Voir les offres" portfolioMsg)
         emptyViews))))
 
 (def offerStrategy
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "Positionnement net")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "Une promesse lisible, des preuves visibles et un parcours sans friction.")
         emptyViews))))
 
 (def offerBuild
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "Page rapide")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "Structure courte, responsive, contenu priorise et rendu deterministe.")
         emptyViews))))
 
 (def offerLaunch
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "Lancement propre")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "Livraison testee, source versionnee et base prete pour evoluer.")
         emptyViews))))
 
 (def offersRow
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (row
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       offerStrategy
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         offerBuild
-        (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+        (Cons MsgView
           offerLaunch
           emptyViews)))))
 
 (def metricOne
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "72h")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "pour cadrer le message et sortir une premiere version.")
         emptyViews))))
 
 (def metricTwo
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "1 page")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "concue pour expliquer, rassurer et declencher le contact.")
         emptyViews))))
 
 (def metricThree
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "0 opacite")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "le contenu, le graphe et le bundle restent inspectables.")
         emptyViews))))
 
 (def metricsRow
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (row
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       metricOne
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         metricTwo
-        (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+        (Cons MsgView
           metricThree
           emptyViews)))))
 
 (def page
-  (View (Variant (Contact Unit) (Portfolio Unit)))
+  MsgView
   (column
-    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+    (Cons MsgView
       (text "STUDIO CLAIR")
-      (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+      (Cons MsgView
         (text "Sites vitrines rapides et sobres pour equipes qui vendent du service.")
-        (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+        (Cons MsgView
           (text "On transforme une offre complexe en page claire: message, preuves, appel a l'action et base technique inspectable.")
-          (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+          (Cons MsgView
             actionRow
-            (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+            (Cons MsgView
               (image "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1600&q=80" "Equipe travaillant dans un studio lumineux")
-              (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+              (Cons MsgView
                 offersRow
-                (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+                (Cons MsgView
                   (text "Offre MVP: cadrage, redaction, design responsive et livraison web en une semaine.")
-                  (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+                  (Cons MsgView
                     metricsRow
-                    (Cons (View (Variant (Contact Unit) (Portfolio Unit)))
+                    (Cons MsgView
                       (text "Contact: bonjour@studioclair.fr")
                       emptyViews)))))))))))
 
 (def view
-  (-> (Record (lead String) (status String))
-      (View (Variant (Contact Unit) (Portfolio Unit))))
-  (lambda (model (Record (lead String) (status String)))
+  (-> Model
+      MsgView)
+  (lambda (model Model)
     page))

@@ -92,21 +92,21 @@ let load_program root =
       |> List.filter (fun s -> s <> "")
     else []
   in
-  if not (Sys.file_exists defs_path) then { imports = []; capabilities; defs = [] }
+  if not (Sys.file_exists defs_path) then { imports = []; capabilities; type_aliases = []; defs = [] }
   else
     let files =
       Sys.readdir defs_path |> Array.to_list
       |> List.filter (fun f -> Filename.check_suffix f ".protoss")
       |> List.sort String.compare
     in
-    let defs =
+    let type_aliases, defs =
       List.fold_left
-        (fun acc file ->
+        (fun (aliases, defs) file ->
           let p = Parser.parse_string (read_file (Filename.concat defs_path file)) in
-          acc @ p.defs)
-        [] files
+          (aliases @ p.type_aliases, defs @ p.defs))
+        ([], []) files
     in
-    { imports = []; capabilities; defs }
+    { imports = []; capabilities; type_aliases; defs }
 
 let list_objects root =
   let dir = objects_dir root in

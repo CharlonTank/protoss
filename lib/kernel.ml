@@ -47,6 +47,7 @@ let rec type_to_canonical = function
   | TList t -> "(List " ^ type_to_canonical t ^ ")"
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
   | TProcess t -> "(Process " ^ type_to_canonical t ^ ")"
+  | TNamed n -> fail ("unresolved type alias in canonical type: " ^ n)
 
 let req_capability = function
   | AskHuman _ -> "Human.ask"
@@ -77,6 +78,98 @@ let check_duplicate_names defs =
       if Hashtbl.mem seen d.name then fail ("duplicate definition: " ^ d.name);
       Hashtbl.add seen d.name ())
     defs
+
+let builtin_type_names =
+  [ "Unit"; "Bool"; "Nat"; "String"; "List"; "View"; "Process"; "Record"; "Variant"; "->"; "Fun" ]
+
+let check_duplicate_type_aliases aliases =
+  let seen = Hashtbl.create 32 in
+  List.iter
+    (fun a ->
+      if List.exists (String.equal a.type_name) builtin_type_names then
+        fail ("type alias shadows builtin type: " ^ a.type_name);
+      if Hashtbl.mem seen a.type_name then fail ("duplicate type alias: " ^ a.type_name);
+      Hashtbl.add seen a.type_name ())
+    aliases
+
+let rec expand_type aliases stack = function
+  | TUnit -> TUnit
+  | TBool -> TBool
+  | TNat -> TNat
+  | TString -> TString
+  | TFun (a, b) -> TFun (expand_type aliases stack a, expand_type aliases stack b)
+  | TRecord fields ->
+      TRecord (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases stack t)) fields))
+  | TVariant cases ->
+      TVariant (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases stack t)) cases))
+  | TList t -> TList (expand_type aliases stack t)
+  | TView t -> TView (expand_type aliases stack t)
+  | TProcess t -> TProcess (expand_type aliases stack t)
+  | TNamed n -> (
+      if List.exists (String.equal n) stack then
+        fail ("cyclic type alias: " ^ String.concat " -> " (List.rev (n :: stack)));
+      match assoc_opt n aliases with
+      | Some t -> expand_type aliases (n :: stack) t
+      | None -> fail ("unknown type alias: " ^ n))
+
+let rec expand_expr_types aliases = function
+  | EUnit -> EUnit
+  | EBool b -> EBool b
+  | ENat n -> ENat n
+  | EString s -> EString s
+  | EName n -> EName n
+  | ELambda (x, t, body) -> ELambda (x, expand_type aliases [] t, expand_expr_types aliases body)
+  | EApp (f, x) -> EApp (expand_expr_types aliases f, expand_expr_types aliases x)
+  | ELet (x, e, body) -> ELet (x, expand_expr_types aliases e, expand_expr_types aliases body)
+  | ERecord fields -> ERecord (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types aliases e)) fields))
+  | EField (e, field) -> EField (expand_expr_types aliases e, field)
+  | EVariant (t, con, e) -> EVariant (expand_type aliases [] t, con, expand_expr_types aliases e)
+  | ECase (e, branches) -> ECase (expand_expr_types aliases e, List.map (expand_branch_types aliases) branches)
+  | EFoldNat (n, z, step) ->
+      EFoldNat (expand_expr_types aliases n, expand_expr_types aliases z, expand_expr_types aliases step)
+  | ENil t -> ENil (expand_type aliases [] t)
+  | ECons (t, head, tail) ->
+      ECons (expand_type aliases [] t, expand_expr_types aliases head, expand_expr_types aliases tail)
+  | EFoldList (xs, z, step) ->
+      EFoldList (expand_expr_types aliases xs, expand_expr_types aliases z, expand_expr_types aliases step)
+  | EText e -> EText (expand_expr_types aliases e)
+  | EImage (src, alt) -> EImage (expand_expr_types aliases src, expand_expr_types aliases alt)
+  | EButton (label, msg) -> EButton (expand_expr_types aliases label, expand_expr_types aliases msg)
+  | EInput (value, handler) ->
+      EInput (expand_expr_types aliases value, expand_expr_types aliases handler)
+  | EColumn children -> EColumn (expand_expr_types aliases children)
+  | ERow children -> ERow (expand_expr_types aliases children)
+  | EListView (items, render) ->
+      EListView (expand_expr_types aliases items, expand_expr_types aliases render)
+  | EWhenView (cond, view) -> EWhenView (expand_expr_types aliases cond, expand_expr_types aliases view)
+  | EDone e -> EDone (expand_expr_types aliases e)
+  | ERequest req -> ERequest req
+  | EBind (p, x, t, body) ->
+      EBind (expand_expr_types aliases p, x, expand_type aliases [] t, expand_expr_types aliases body)
+
+and expand_branch_types aliases = function
+  | BBool (b, e) -> BBool (b, expand_expr_types aliases e)
+  | BVariant (con, x, e) -> BVariant (con, x, expand_expr_types aliases e)
+
+let resolve_program_types program =
+  check_duplicate_type_aliases program.type_aliases;
+  let aliases = List.map (fun a -> (a.type_name, a.type_body)) program.type_aliases in
+  let expanded_aliases =
+    List.map
+      (fun a -> { a with type_body = expand_type aliases [ a.type_name ] a.type_body })
+      program.type_aliases
+  in
+  let defs =
+    List.map
+      (fun d ->
+        {
+          d with
+          typ = expand_type aliases [] d.typ;
+          body = expand_expr_types aliases d.body;
+        })
+      program.defs
+  in
+  { program with type_aliases = expanded_aliases; defs }
 
 let collect_deps defs =
   let def_names = List.map (fun d -> d.name) defs in
@@ -182,6 +275,7 @@ let rec contains_process_type = function
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
   | TList t | TView t -> contains_process_type t
+  | TNamed _ -> false
   | TUnit | TBool | TNat | TString -> false
 
 let is_process_type = function TProcess _ -> true | _ -> false
@@ -789,6 +883,7 @@ type checked = {
 }
 
 let check_program (program : program) =
+  let program = resolve_program_types program in
   check_duplicate_names program.defs;
   reject_cycles program.defs;
   let globals = List.map (fun d -> (d.name, d.typ)) program.defs in

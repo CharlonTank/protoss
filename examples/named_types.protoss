@@ -1,0 +1,11 @@
+(type Counter (Record (label String) (value Nat)))
+(type CounterMsg (Variant (Reset Unit) (Set Nat)))
+
+(def initial Counter
+  (record (label "visits") (value 3)))
+
+(def reset CounterMsg
+  (variant CounterMsg Reset unit))
+
+(def label String
+  (get initial label))

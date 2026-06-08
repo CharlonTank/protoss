@@ -263,6 +263,7 @@ type unit_load = {
   source_hash : string;
   imports : string list;
   capabilities : string list;
+  type_aliases : type_alias list;
   defs : def list;
   parsed_from_source : bool;
 }
@@ -290,6 +291,7 @@ let parse_cached_unit store path hash =
           source_hash = hash;
           imports = meta_field "imports" fields |> Option.value ~default:"" |> split_words;
           capabilities = meta_field "capabilities" fields |> Option.value ~default:"" |> split_words;
+          type_aliases = parsed.type_aliases;
           defs = parsed.defs;
           parsed_from_source = false;
         }
@@ -302,14 +304,14 @@ let parse_source_unit path source hash =
     source_hash = hash;
     imports = parsed.imports;
     capabilities = parsed.capabilities;
+    type_aliases = parsed.type_aliases;
     defs = parsed.defs;
     parsed_from_source = true;
   }
 
 let write_unit store unit =
-  let defs_source =
-    String.concat "\n" (List.map string_of_def unit.defs) ^ if unit.defs = [] then "" else "\n"
-  in
+  let forms = List.map string_of_type_alias unit.type_aliases @ List.map string_of_def unit.defs in
+  let defs_source = String.concat "\n" forms ^ if forms = [] then "" else "\n" in
   write_file (unit_defs_path store unit.path) defs_source;
   write_file (unit_meta_path store unit.path)
     ("path=" ^ unit.path ^ "\nsource_hash=" ^ unit.source_hash ^ "\nimports="
@@ -440,13 +442,14 @@ let build ?(write = true) manifest =
   let store = store_root manifest in
   let units = load_units manifest store stats in
   let program =
-    {
-      imports = [];
-      capabilities =
-        List.sort_uniq String.compare
-          (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
-      defs = List.concat (List.map (fun u -> u.defs) units);
-    }
+	    {
+	      imports = [];
+	      capabilities =
+	        List.sort_uniq String.compare
+	          (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
+	      type_aliases = List.concat (List.map (fun u -> u.type_aliases) units);
+	      defs = List.concat (List.map (fun u -> u.defs) units);
+	    }
   in
   stats.typechecked <-
     List.fold_left
