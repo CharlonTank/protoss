@@ -108,6 +108,15 @@ let validate_cap_scope event request cap_scope =
     failwith
       ("maltyped event " ^ event ^ ": cap-scope missing required capability " ^ required)
 
+let cap_scope_ref cap_scope = Kernel.capability_scope_ref (split_cap_scope cap_scope)
+
+let validate_cap_scope_ref event cap_scope declared =
+  let expected = cap_scope_ref cap_scope in
+  if not (String.equal expected declared) then
+    failwith
+      ("maltyped event " ^ event ^ ": cap-scope-ref mismatch: expected " ^ expected
+     ^ ", got " ^ declared)
+
 let request_signature_of_req req =
   {
     capability = Kernel.req_capability req;
@@ -232,6 +241,8 @@ let record_request root world req suspended request_id continuation_id cap_scope
    ^ "\nresponse-codec-ref=" ^ response_codec_ref signature
    ^ "\ncontinuation-id=" ^ continuation_id ^ "\ncap-scope="
    ^ String.concat "," (List.sort_uniq String.compare cap_scope)
+   ^ "\ncap-scope-ref="
+   ^ Kernel.capability_scope_ref (List.sort_uniq String.compare cap_scope)
    ^ "\nsuspended=" ^ String.escaped suspended)
 
 let read_file path =
@@ -281,7 +292,9 @@ let validate_resume_response root event resume response =
   ignore (target_need "request-id");
   ignore (target_need "continuation-id");
   let request = target_need "request" in
-  validate_cap_scope event request (target_need "cap-scope");
+  let cap_scope = target_need "cap-scope" in
+  validate_cap_scope event request cap_scope;
+  validate_cap_scope_ref event cap_scope (target_need "cap-scope-ref");
   let signature = validate_request_signature_fields event target_fields request in
   let suspended =
     target_need "suspended" |> Scanf.unescaped
@@ -343,10 +356,14 @@ let validate_event root event content =
           "response-codec-ref";
           "continuation-id";
           "cap-scope";
+          "cap-scope-ref";
           "suspended";
         ];
       let request = Option.value (field "request" fields) ~default:"" in
-      validate_cap_scope event request (Option.value (field "cap-scope" fields) ~default:"");
+      let cap_scope = Option.value (field "cap-scope" fields) ~default:"" in
+      validate_cap_scope event request cap_scope;
+      validate_cap_scope_ref event cap_scope
+        (Option.value (field "cap-scope-ref" fields) ~default:"");
       ignore (validate_request_signature_fields event fields request);
       let suspended =
         Option.value (field "suspended" fields) ~default:"" |> Scanf.unescaped

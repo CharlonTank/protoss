@@ -33,6 +33,7 @@ type ledger_result = {
   continuation_id : string;
   capability : string;
   capability_ref : string;
+  cap_scope_ref : string;
   request_tag : string;
   request_signature_ref : string;
   response_type : string;
@@ -213,6 +214,7 @@ let check_ledger_process_checked ?ledger source checked entry response =
         continuation_id = Runtime.continuation_id suspended;
         capability = field "capability";
         capability_ref = field "capability-ref";
+        cap_scope_ref = field "cap-scope-ref";
         request_tag = field "request-tag";
         request_signature_ref = field "request-signature-ref";
         response_type = field "response-type";
@@ -332,7 +334,8 @@ let describe_ledger (result : ledger_result) =
   ^ "\nresume_event=" ^ result.resume_event ^ "\nrequest_id="
   ^ result.request_id ^ "\ncontinuation_id=" ^ result.continuation_id
   ^ "\ncapability=" ^ result.capability ^ "\ncapability_ref="
-  ^ result.capability_ref ^ "\nrequest_tag=" ^ result.request_tag
+  ^ result.capability_ref ^ "\ncap_scope_ref=" ^ result.cap_scope_ref
+  ^ "\nrequest_tag=" ^ result.request_tag
   ^ "\nrequest_signature_ref=" ^ result.request_signature_ref
   ^ "\nresponse_type=" ^ result.response_type
   ^ "\nhost_codec_version=" ^ result.host_codec_version

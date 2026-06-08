@@ -385,6 +385,8 @@ let () =
     (contains_substring (Canonical_ir.describe_graph_stats graph_stats) "Graph stats");
   assert_equal "canonical graph version" Kernel.canonical_graph_version
     (json_string_field "version" graph);
+  assert_equal "canonical graph current version" "protoss-canon-graph-v2"
+    (json_string_field "version" graph);
   assert_equal "canonical graph hash algorithm" Kernel.hash_algorithm
     (json_string_field "hashAlgorithm" graph);
   assert_equal "canonical graph hash prefix" Kernel.hash_prefix
@@ -556,6 +558,14 @@ let () =
     (Kernel.hash_program graph_checked);
   assert_equal "canonical graph checked serialization" (Kernel.serialize_checked_program formatted_a)
     (Kernel.serialize_checked_program graph_checked);
+  let legacy_graph_json = Kernel.checked_to_graph_json_legacy_v1 formatted_a in
+  let legacy_graph = Json.parse legacy_graph_json in
+  assert_equal "legacy canonical graph version" Kernel.canonical_graph_legacy_v1
+    (json_string_field "version" legacy_graph);
+  assert_equal "legacy canonical graph to program roundtrip" program_canonical
+    (Canonical_ir.graph_to_program legacy_graph_json);
+  assert_equal "legacy canonical graph checked hash" (Kernel.hash_program formatted_a)
+    (Kernel.hash_program (Canonical_ir.checked_of_graph legacy_graph_json));
   let graph_value, _ = Runtime.normalize_def graph_checked "main" in
   assert_equal "canonical graph eval" "2" (Runtime.value_to_string graph_value);
   let basic_path = find_up (Sys.getcwd ()) "examples/basic.protoss" in
@@ -1562,6 +1572,9 @@ let () =
     (json_string_field "def" process_host_scope);
   assert_equal "process host contract scope capability" "Human.ask"
     (json_string_field "capability" process_host_scope);
+  assert_equal "process host contract scope ref"
+    (Kernel.capability_scope_ref [ "Human.ask" ])
+    (json_string_field "scopeRef" process_host_scope);
   (try
      ignore
        (Canonical_ir.check_graph_host_contract process_graph_json
@@ -1641,6 +1654,9 @@ let () =
   assert_equal "process graph def capability scope refs" human_capability_ref
     (String.concat ","
        (json_string_array_field "capabilityScopeRefs" (graph_def process_graph "askName")));
+  assert_equal "process graph def capability scope ref"
+    (Kernel.capability_scope_ref [ "Human.ask" ])
+    (json_string_field "capabilityScopeRef" (graph_def process_graph "askName"));
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -1655,12 +1671,32 @@ let () =
      ignore
        (Canonical_ir.parse_graph
           (replace_once (Canonical_ir.serialize_graph process)
+             "\"capabilityScopeRef\": " "\"capabilityScopeRefMissing\": "));
+     fail "canonical graph should reject missing capability scope ref"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing capability scope ref"
+       (contains_substring msg "canonical graph missing field: capabilityScopeRef"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
              ("\"capabilityScopeRefs\": [" ^ Ast.quote human_capability_ref ^ "]")
              "\"capabilityScopeRefs\": [\"p2:bad\"]"));
      fail "canonical graph should reject corrupt capability scope refs"
    with Kernel.Error msg ->
      assert_true "canonical graph rejects corrupt capability scope refs"
        (contains_substring msg "canonical graph capabilityScopeRefs mismatch: askName"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             ("\"capabilityScopeRef\": "
+             ^ Ast.quote (Kernel.capability_scope_ref [ "Human.ask" ]))
+             "\"capabilityScopeRef\": \"p2:bad\""));
+     fail "canonical graph should reject corrupt capability scope ref"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt capability scope ref"
+       (contains_substring msg "canonical graph capabilityScopeRef mismatch: askName"));
 
   let scoped_process =
     check
@@ -1678,6 +1714,9 @@ let () =
   let scoped_graph = Json.parse (Canonical_ir.serialize_graph scoped_process) in
   assert_equal "graph def capability scope" "Human.ask"
     (String.concat "," (json_string_array_field "capabilityScope" (graph_def scoped_graph "wrapped")));
+  assert_equal "graph def capability scope ref"
+    (Kernel.capability_scope_ref [ "Human.ask" ])
+    (json_string_field "capabilityScopeRef" (graph_def scoped_graph "wrapped"));
   ignore (Canonical_ir.parse_graph (Canonical_ir.serialize_graph scoped_process));
   (try
      ignore
@@ -1689,13 +1728,17 @@ let () =
      assert_true "canonical graph rejects missing capability scope"
        (contains_substring msg "canonical graph missing field: capabilityScope"));
   (try
+     let human_scope_ref = Kernel.capability_scope_ref [ "Human.ask" ] in
+     let clock_scope_ref = Kernel.capability_scope_ref [ "Clock.read" ] in
      ignore
        (Canonical_ir.parse_graph
           (replace_once (Canonical_ir.serialize_graph scoped_process)
              ("\"capabilityScope\": [\"Human.ask\"], \"capabilityScopeRefs\": ["
-            ^ Ast.quote human_capability_ref ^ "]")
+            ^ Ast.quote human_capability_ref ^ "], \"capabilityScopeRef\": "
+            ^ Ast.quote human_scope_ref)
              ("\"capabilityScope\": [\"Clock.read\"], \"capabilityScopeRefs\": ["
-            ^ Ast.quote clock_capability_ref ^ "]")));
+            ^ Ast.quote clock_capability_ref ^ "], \"capabilityScopeRef\": "
+            ^ Ast.quote clock_scope_ref)));
      fail "canonical graph should reject corrupt capability scope"
    with Kernel.Error msg ->
      assert_true "canonical graph rejects corrupt capability scope"
@@ -1738,6 +1781,12 @@ let () =
     (clock_capability_ref ^ "," ^ human_capability_ref)
     (String.concat ","
        (json_string_array_field "capabilityScopeRefs" (graph_def multi_cap_graph "both")));
+  let multi_cap_scope_ref = Kernel.capability_scope_ref [ "Clock.read"; "Human.ask" ] in
+  assert_equal "graph multi capability scope ref" multi_cap_scope_ref
+    (json_string_field "capabilityScopeRef" (graph_def multi_cap_graph "both"));
+  assert_equal "graph capability scope filter by scope ref" "2"
+    (string_of_int
+       (List.length (Canonical_ir.graph_capability_scopes_for multi_cap_graph_json multi_cap_scope_ref)));
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -1848,6 +1897,9 @@ let () =
     ledger_invariants.Invariants.capability;
   assert_equal "invariants ledger capability ref" human_capability_ref
     ledger_invariants.Invariants.capability_ref;
+  assert_equal "invariants ledger cap scope ref"
+    (Kernel.capability_scope_ref [ "Human.ask" ])
+    ledger_invariants.Invariants.cap_scope_ref;
   assert_equal "invariants ledger request tag" "AskHuman"
     ledger_invariants.Invariants.request_tag;
   assert_equal "invariants ledger request signature ref" human_signature_ref
@@ -3496,6 +3548,7 @@ let () =
     Canonical_ir.host_codec_ref (Ast.TRecord [ ("prompt", Ast.TString) ])
   in
   let string_response_codec_ref = Canonical_ir.host_codec_ref Ast.TString in
+  let human_cap_scope_ref = Kernel.capability_scope_ref [ "Human.ask" ] in
   assert_true "ledger request records capability signature"
     (contains_substring inspected_request_event "capability=Human.ask");
   assert_true "ledger request records capability ref"
@@ -3515,6 +3568,8 @@ let () =
   assert_true "ledger request records response codec ref"
     (contains_substring inspected_request_event
        ("response-codec-ref=" ^ string_response_codec_ref));
+  assert_true "ledger request records cap scope ref"
+    (contains_substring inspected_request_event ("cap-scope-ref=" ^ human_cap_scope_ref));
   assert_true "ledger world inspectable" (String.length (Ledger.inspect_world ledger_root next_world) > 0);
   let resume_event, resume_world =
     Ledger.record_resume ledger_root next_world event "String:Ada" "Done \"Ada\""
@@ -3635,6 +3690,14 @@ let () =
      ignore (Ledger.inspect_event ledger_root bad_response_codec_ref_event);
      fail "ledger request event with bad response codec ref should be rejected"
    with Failure _ -> ());
+  let bad_cap_scope_ref_event = "p2:bad-cap-scope-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_cap_scope_ref_event)
+    (replace_once inspected_request_event ("cap-scope-ref=" ^ human_cap_scope_ref)
+       "cap-scope-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_cap_scope_ref_event);
+     fail "ledger request event with bad cap scope ref should be rejected"
+   with Failure _ -> ());
   let bad_resume_event = "p2:bad-resume-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_event)
     (replace_once inspected_resume_event "response=String:Ada" "response=Nat:1");
@@ -3652,6 +3715,7 @@ let () =
   let http_request_codec_ref =
     Canonical_ir.host_codec_ref (Ast.TRecord [ ("url", Ast.TString) ])
   in
+  let http_cap_scope_ref = Kernel.capability_scope_ref [ "Http.get" ] in
   Store.write_file_atomic (Ledger.event_path ledger_root mismatched_request_event)
     ("world=x\nkind=request\nrequest-id=req\nrequest=HttpGet:https://example.invalid\n\
       capability=Http.get\ncapability-ref="
@@ -3662,7 +3726,8 @@ let () =
     ^ Canonical_ir.host_codec_version
     ^ "\nrequest-codec-ref=" ^ http_request_codec_ref
     ^ "\nresponse-codec-ref=" ^ string_response_codec_ref
-    ^ "\ncontinuation-id=cont\ncap-scope=Http.get\nsuspended="
+    ^ "\ncontinuation-id=cont\ncap-scope=Http.get\ncap-scope-ref=" ^ http_cap_scope_ref
+    ^ "\nsuspended="
     ^ String.escaped suspended ^ "\n");
   let bad_resume_mismatch_event = "p2:bad-resume-mismatch-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_mismatch_event)

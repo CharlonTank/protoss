@@ -183,6 +183,17 @@ let capability_descriptor_ref descriptor =
 let capability_ref name =
   capability_descriptor name |> Option.map capability_descriptor_ref
 
+let capability_scope_canonical caps =
+  let caps = List.sort_uniq String.compare caps in
+  let capability_item cap =
+    match capability_ref cap with
+    | Some ref -> "(capability " ^ Ast.quote cap ^ " " ^ ref ^ ")"
+    | None -> fail ("unknown capability in capability scope: " ^ cap)
+  in
+  "(capability-scope-v1 " ^ String.concat " " (List.map capability_item caps) ^ ")"
+
+let capability_scope_ref caps = hash_string (capability_scope_canonical caps)
+
 let req_signature_ref req =
   capability_request_signature_ref (req_capability req)
     {
@@ -1970,7 +1981,9 @@ let serialize_program_payload caps defs =
 let serialize_program caps defs =
   "(" ^ canonical_version ^ " " ^ serialize_program_payload caps defs ^ ")"
 
-let canonical_graph_version = "protoss-canon-graph-v1"
+let canonical_graph_legacy_v1 = "protoss-canon-graph-v1"
+
+let canonical_graph_version = "protoss-canon-graph-v2"
 
 let canonical_node_graph_version = "protoss-canon-node-graph-v1"
 
@@ -3011,7 +3024,8 @@ let serialize_checked_program checked =
 let hash_program checked =
   hash_string (serialize_checked_program checked)
 
-let checked_to_graph_json_fields checked =
+let checked_to_graph_json_fields ?(version = canonical_graph_version)
+    ?(include_capability_scope_ref = true) checked =
   let defs = checked.defs |> List.sort (fun a b -> String.compare a.def.name b.def.name) in
   let def_id_of name =
     if is_builtin name then "builtin:" ^ name
@@ -3029,23 +3043,33 @@ let checked_to_graph_json_fields checked =
              | Some ref -> ref
              | None -> fail ("unknown capability in canonical graph scope: " ^ cap))
     in
-    json_obj
+    let scope_fields =
       [
-        json_field "name" (json_string d.def.name);
-        json_field "defId" (json_string d.def_id);
-        json_field "hash" (json_string d.hash);
-        json_field "typeRef" (json_string (type_node_id d.def.typ));
-        json_field "termRef" (json_string (term_node_id def_id_of d.cterm));
         json_field "capabilityScope" (json_array json_string d.capabilities);
         json_field "capabilityScopeRefs" (json_array json_string capability_scope_refs);
-        json_field "type" (type_to_graph_json d.def.typ);
-        json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
-        json_field "deps"
-          (json_array json_string
-             (dependencies_of_defs checked.program.defs d.def.name |> List.sort_uniq String.compare));
-        json_field "term" (cterm_to_graph_json def_id_of d.cterm);
-        json_field "termCanonical" (json_string canonical_payload);
       ]
+      @ (if include_capability_scope_ref then
+        [ json_field "capabilityScopeRef" (json_string (capability_scope_ref d.capabilities)) ]
+        else [])
+    in
+    json_obj
+      ([
+         json_field "name" (json_string d.def.name);
+         json_field "defId" (json_string d.def_id);
+         json_field "hash" (json_string d.hash);
+         json_field "typeRef" (json_string (type_node_id d.def.typ));
+         json_field "termRef" (json_string (term_node_id def_id_of d.cterm));
+       ]
+      @ scope_fields
+      @ [
+          json_field "type" (type_to_graph_json d.def.typ);
+          json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
+          json_field "deps"
+            (json_array json_string
+               (dependencies_of_defs checked.program.defs d.def.name |> List.sort_uniq String.compare));
+          json_field "term" (cterm_to_graph_json def_id_of d.cterm);
+          json_field "termCanonical" (json_string canonical_payload);
+        ])
   in
   let declared_capabilities = List.sort_uniq String.compare checked.program.capabilities in
   let declared_capability_refs =
@@ -3056,7 +3080,7 @@ let checked_to_graph_json_fields checked =
            | None -> fail ("unknown capability in canonical graph: " ^ cap))
   in
   [
-    json_field "version" (json_string canonical_graph_version);
+    json_field "version" (json_string version);
     json_field "canonicalVersion" (json_string canonical_version);
     json_field "hashAlgorithm" (json_string hash_algorithm);
     json_field "hashPrefix" (json_string hash_prefix);
@@ -3069,14 +3093,22 @@ let checked_to_graph_json_fields checked =
       (canonical_node_graph_json (hash_program checked) def_id_of (canonical_defs_of_checked checked));
   ]
 
+let checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked =
+  json_obj (checked_to_graph_json_fields ~version ~include_capability_scope_ref checked) ^ "\n"
+
 let checked_to_graph_payload_json checked =
-  json_obj (checked_to_graph_json_fields checked) ^ "\n"
+  checked_to_graph_payload_json_for ~version:canonical_graph_version
+    ~include_capability_scope_ref:true checked
+
+let checked_to_graph_content_hash_for ~version ~include_capability_scope_ref checked =
+  hash_string (checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked)
 
 let checked_to_graph_content_hash checked =
-  hash_string (checked_to_graph_payload_json checked)
+  checked_to_graph_content_hash_for ~version:canonical_graph_version
+    ~include_capability_scope_ref:true checked
 
-let checked_to_graph_json checked =
-  let fields = checked_to_graph_json_fields checked in
+let checked_to_graph_json_for ~version ~include_capability_scope_ref checked =
+  let fields = checked_to_graph_json_fields ~version ~include_capability_scope_ref checked in
   let graph_hash = hash_string (json_obj fields ^ "\n") in
   let program_hash_prefix = "\"programHash\"" in
   let program_hash_prefix_len = String.length program_hash_prefix in
@@ -3089,6 +3121,18 @@ let checked_to_graph_json checked =
     | field :: rest -> field :: insert_graph_hash rest
   in
   json_obj (insert_graph_hash fields) ^ "\n"
+
+let checked_to_graph_json checked =
+  checked_to_graph_json_for ~version:canonical_graph_version
+    ~include_capability_scope_ref:true checked
+
+let checked_to_graph_json_legacy_v1 checked =
+  checked_to_graph_json_for ~version:canonical_graph_legacy_v1
+    ~include_capability_scope_ref:false checked
+
+let checked_to_graph_content_hash_legacy_v1 checked =
+  checked_to_graph_content_hash_for ~version:canonical_graph_legacy_v1
+    ~include_capability_scope_ref:false checked
 
 let checked_def_by_name checked name =
   checked.defs |> List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name)

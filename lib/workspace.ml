@@ -1820,11 +1820,13 @@ let validate_store_graph_json context graph_json =
     try Canonical_ir.checked_of_graph graph_json with
     | Kernel.Error msg -> fail ("invalid stored canonical graph " ^ context ^ ": " ^ msg)
   in
-  let expected_graph_json = Kernel.checked_to_graph_json checked in
-  if not (String.equal graph_json expected_graph_json) then
-    fail ("stored canonical graph is not exact canonical JSON: " ^ context);
-  let expected_graph_hash = Kernel.checked_to_graph_content_hash checked in
-  (expected_graph_hash, graph_json, checked)
+  let graph_hash =
+    try Canonical_ir.graph_content_hash graph_json with
+    | Kernel.Error "canonical graph serialization mismatch" ->
+        fail ("stored canonical graph is not exact canonical JSON: " ^ context)
+    | Kernel.Error msg -> fail ("invalid stored canonical graph " ^ context ^ ": " ^ msg)
+  in
+  (graph_hash, graph_json, checked)
 
 let read_store_graph store graph_hash =
   let path = Store.graph_path store graph_hash in

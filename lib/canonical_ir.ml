@@ -283,7 +283,7 @@ let validate_definition_deps def_objs defs =
       if declared_refs <> actual_refs then fail ("canonical graph deps mismatch: " ^ d.cname))
     def_objs defs
 
-let validate_capability_scopes caps def_objs defs =
+let validate_capability_scopes ~require_scope_ref caps def_objs defs =
   let declared_program_cap cap =
     List.exists (String.equal cap) caps
   in
@@ -334,6 +334,11 @@ let validate_capability_scopes caps def_objs defs =
       in
       if declared_refs <> expected_refs then
         fail ("canonical graph capabilityScopeRefs mismatch: " ^ d.Kernel.cname);
+      if require_scope_ref then (
+        let declared_scope_ref = json_string_field "capabilityScopeRef" obj in
+        let expected_scope_ref = Kernel.capability_scope_ref declared in
+        if not (String.equal declared_scope_ref expected_scope_ref) then
+          fail ("canonical graph capabilityScopeRef mismatch: " ^ d.Kernel.cname));
       let actual = capabilities_of_def d in
       if declared <> actual then
         fail
@@ -435,20 +440,35 @@ let validate_node_graph graph program_hash defs =
         fail ("canonical node graph unreachable node: " ^ id))
     nodes
 
-let validate_exact_serialization graph input caps defs =
+let validate_exact_serialization version ~include_capability_scope_ref graph input caps defs =
   let checked = Kernel.checked_of_canonical caps defs in
   let graph_hash = json_string_field "graphHash" graph in
-  let expected_graph_hash = Kernel.checked_to_graph_content_hash checked in
+  let expected_graph_hash =
+    if String.equal version Kernel.canonical_graph_legacy_v1 then
+      Kernel.checked_to_graph_content_hash_for ~version:Kernel.canonical_graph_legacy_v1
+        ~include_capability_scope_ref checked
+    else Kernel.checked_to_graph_content_hash checked
+  in
   if not (String.equal graph_hash expected_graph_hash) then
     fail ("canonical graph graphHash mismatch: " ^ graph_hash);
-  let expected = String.trim (Kernel.checked_to_graph_json checked) in
+  let expected =
+    if String.equal version Kernel.canonical_graph_legacy_v1 then
+      String.trim
+        (Kernel.checked_to_graph_json_for ~version:Kernel.canonical_graph_legacy_v1
+           ~include_capability_scope_ref checked)
+    else String.trim (Kernel.checked_to_graph_json checked)
+  in
   if not (String.equal (String.trim input) expected) then
     fail "canonical graph serialization mismatch"
 
 let parse_graph input =
   let graph = try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg) in
   let version = json_string_field "version" graph in
-  if not (String.equal version Kernel.canonical_graph_version) then
+  if
+    not
+      (String.equal version Kernel.canonical_graph_version
+      || String.equal version Kernel.canonical_graph_legacy_v1)
+  then
     fail ("canonical graph version mismatch: " ^ version);
   let canonical_version = json_string_field "canonicalVersion" graph in
   if not (String.equal canonical_version Kernel.canonical_version) then
@@ -475,17 +495,40 @@ let parse_graph input =
   let descriptors = json_field "capabilityDescriptors" graph in
   if descriptors <> expected_descriptors then fail "canonical graph capabilityDescriptors mismatch";
   let def_objs = json_array_field "defs" graph in
+  let has_scope_ref_fields =
+    def_objs
+    |> List.map (fun obj -> Json.field "capabilityScopeRef" obj <> None)
+    |> List.sort_uniq Bool.compare
+  in
+  let include_capability_scope_ref =
+    match has_scope_ref_fields with
+    | [] -> String.equal version Kernel.canonical_graph_version
+    | [ value ] -> value || String.equal version Kernel.canonical_graph_version
+    | _ -> fail "canonical graph capabilityScopeRef presence mismatch"
+  in
   let defs = List.map def_of_graph_json def_objs in
   ensure_unique "definition" (List.map (fun d -> d.Kernel.cname) defs);
   validate_definition_deps def_objs defs;
-  validate_capability_scopes caps def_objs defs;
+  validate_capability_scopes
+    ~require_scope_ref:include_capability_scope_ref
+    caps def_objs defs;
   let canonical = Kernel.serialize_program caps defs in
   let program_hash = json_string_field "programHash" graph in
   if not (String.equal program_hash (Kernel.hash_string canonical)) then
     fail ("canonical graph programHash mismatch: " ^ program_hash);
   validate_node_graph graph program_hash defs;
-  validate_exact_serialization graph input caps defs;
+  validate_exact_serialization version ~include_capability_scope_ref graph input caps defs;
   (caps, defs)
+
+let graph_content_hash input =
+  let graph = Json.parse input in
+  let version = json_string_field "version" graph in
+  let caps, defs = parse_graph input in
+  let checked = Kernel.checked_of_canonical caps defs in
+  if not (String.equal version Kernel.canonical_graph_legacy_v1) then (
+    let expected = Kernel.checked_to_graph_json checked in
+    if not (String.equal input expected) then fail "canonical graph serialization mismatch");
+  json_string_field "graphHash" graph
 
 let graph_to_program input =
   let caps, defs = parse_graph input in
@@ -601,9 +644,11 @@ type graph_definition = {
   graph_def_deps : string list;
   graph_def_capability_scope : string list;
   graph_def_capability_scope_refs : string list;
+  graph_def_capability_scope_ref : string;
 }
 
 let graph_definition_of_json def =
+  let capability_scope = json_string_array_field "capabilityScope" def in
   {
     graph_def_name = json_string_field "name" def;
     graph_def_id = json_string_field "defId" def;
@@ -613,8 +658,13 @@ let graph_definition_of_json def =
     graph_def_type_canonical = json_string_field "typeCanonical" def;
     graph_def_term_canonical = json_string_field "termCanonical" def;
     graph_def_deps = json_string_array_field "deps" def;
-    graph_def_capability_scope = json_string_array_field "capabilityScope" def;
+    graph_def_capability_scope = capability_scope;
     graph_def_capability_scope_refs = json_string_array_field "capabilityScopeRefs" def;
+    graph_def_capability_scope_ref =
+      (match Json.field "capabilityScopeRef" def with
+      | Some (Json.String ref) -> ref
+      | Some _ -> fail "canonical graph field must be string: capabilityScopeRef"
+      | None -> Kernel.capability_scope_ref capability_scope);
   }
 
 let graph_definitions input =
@@ -647,6 +697,7 @@ let describe_graph_definition def =
   ^ (match def.graph_def_capability_scope with [] -> "" | caps -> String.concat "," caps)
   ^ "\ncapability_scope_refs="
   ^ (match def.graph_def_capability_scope_refs with [] -> "" | refs -> String.concat "," refs)
+  ^ "\ncapability_scope_ref=" ^ def.graph_def_capability_scope_ref
   ^ "\ntype=" ^ def.graph_def_type_canonical ^ "\nterm="
   ^ def.graph_def_term_canonical ^ "\n"
 
@@ -781,6 +832,7 @@ type graph_capability_scope = {
   graph_scope_def_name : string;
   graph_scope_def_id : string;
   graph_scope_def_hash : string;
+  graph_scope_ref : string;
   graph_scope_capability : string;
   graph_scope_capability_ref : string;
 }
@@ -794,6 +846,7 @@ let graph_capability_scopes_for_def def =
           graph_scope_def_name = def.graph_def_name;
           graph_scope_def_id = def.graph_def_id;
           graph_scope_def_hash = def.graph_def_hash;
+          graph_scope_ref = def.graph_def_capability_scope_ref;
           graph_scope_capability = cap;
           graph_scope_capability_ref = ref;
         }
@@ -819,13 +872,15 @@ let graph_capability_scopes_for input id =
   graph_capability_scopes input
   |> List.filter (fun scope ->
          String.equal id scope.graph_scope_capability
-         || String.equal id scope.graph_scope_capability_ref)
+         || String.equal id scope.graph_scope_capability_ref
+         || String.equal id scope.graph_scope_ref)
 
 let describe_graph_capability_scopes scopes =
   let line scope =
     "def=" ^ scope.graph_scope_def_name ^ " def_id=" ^ scope.graph_scope_def_id
-    ^ " def_hash=" ^ scope.graph_scope_def_hash ^ " capability="
-    ^ scope.graph_scope_capability ^ " capability_ref=" ^ scope.graph_scope_capability_ref
+    ^ " def_hash=" ^ scope.graph_scope_def_hash ^ " scope_ref="
+    ^ scope.graph_scope_ref ^ " capability=" ^ scope.graph_scope_capability
+    ^ " capability_ref=" ^ scope.graph_scope_capability_ref
   in
   "Graph capability scopes\ncount=" ^ string_of_int (List.length scopes) ^ "\n"
   ^ String.concat "\n" (List.map line scopes)
@@ -881,6 +936,7 @@ let graph_capability_scope_to_contract_json scope =
       Kernel.json_field "def" (Kernel.json_string scope.graph_scope_def_name);
       Kernel.json_field "defId" (Kernel.json_string scope.graph_scope_def_id);
       Kernel.json_field "defHash" (Kernel.json_string scope.graph_scope_def_hash);
+      Kernel.json_field "scopeRef" (Kernel.json_string scope.graph_scope_ref);
       Kernel.json_field "capability" (Kernel.json_string scope.graph_scope_capability);
       Kernel.json_field "capabilityRef" (Kernel.json_string scope.graph_scope_capability_ref);
     ]
