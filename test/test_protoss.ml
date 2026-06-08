@@ -1653,6 +1653,14 @@ let () =
   let stdlib_generics = Loader.check_file stdlib_generics_path in
   let bumped, _ = Runtime.normalize_def stdlib_generics "bumped" in
   assert_equal "stdlib generic List.map" "[2, 3]" (Runtime.value_to_string bumped);
+  let greeting, _ = Runtime.normalize_def stdlib_generics "greeting" in
+  assert_equal "stdlib String.append" "\"Ada Lovelace\"" (Runtime.value_to_string greeting);
+  let empty_label, _ = Runtime.normalize_def stdlib_generics "emptyLabel" in
+  assert_equal "stdlib String.isEmpty" "true" (Runtime.value_to_string empty_label);
+  let non_empty_label, _ = Runtime.normalize_def stdlib_generics "nonEmptyLabel" in
+  assert_equal "stdlib String.nonEmpty" "true" (Runtime.value_to_string non_empty_label);
+  let joined_labels, _ = Runtime.normalize_def stdlib_generics "joinedLabels" in
+  assert_equal "stdlib String.join" "\"item,item\"" (Runtime.value_to_string joined_labels);
   let len, _ = Runtime.normalize_def stdlib_generics "len" in
   assert_equal "stdlib generic List.length" "2" (Runtime.value_to_string len);
   let appended, _ = Runtime.normalize_def stdlib_generics "appended" in

@@ -11,6 +11,18 @@
   (((inst List.map Nat String) xs)
     (lambda (x Nat) "item")))
 
+(def greeting String
+  ((String.append "Ada") " Lovelace"))
+
+(def emptyLabel Bool
+  (String.isEmpty String.empty))
+
+(def nonEmptyLabel Bool
+  (String.nonEmpty greeting))
+
+(def joinedLabels String
+  ((String.join ",") labels))
+
 (def len Nat
   ((inst List.length Nat) xs))
 

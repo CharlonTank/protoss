@@ -1,4 +1,4 @@
-; Protoss stdlib v0.11. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.12. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -15,7 +15,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.11")
+(def Stdlib.version String "v0.12")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -46,15 +46,40 @@
     (lambda (b Bool)
       (case a (true true) (false b)))))
 
+(def String.empty String "")
+
 (def String.concat (-> String (-> String String))
   (lambda (a String)
     (lambda (b String)
       ((prim.String.concat a) b))))
 
+(def String.append (-> String (-> String String))
+  (lambda (a String)
+    (lambda (b String)
+      ((String.concat a) b))))
+
 (def String.eqString (-> String (-> String Bool))
   (lambda (a String)
     (lambda (b String)
       ((prim.String.eq a) b))))
+
+(def String.isEmpty (-> String Bool)
+  (lambda (value String)
+    ((String.eqString value) String.empty)))
+
+(def String.nonEmpty (-> String Bool)
+  (lambda (value String)
+    (Bool.not (String.isEmpty value))))
+
+(def String.join (-> String (-> (List String) String))
+  (lambda (separator String)
+    (lambda (items (List String))
+      (foldList items String.empty
+        (lambda (item String)
+          (lambda (acc String)
+            (case (String.isEmpty acc)
+              (true item)
+              (false ((String.concat item) ((String.concat separator) acc))))))))))
 
 (defpoly List.map (params A B)
   (-> (List A) (-> (-> A B) (List B)))
