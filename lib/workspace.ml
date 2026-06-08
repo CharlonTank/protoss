@@ -732,6 +732,9 @@ let prepare_build manifest =
 let prepared_graph_hash prepared =
   Kernel.checked_to_graph_content_hash prepared.checked
 
+let prepared_host_contract_hash prepared =
+  host_contract_hash (Canonical_ir.graph_host_contract prepared.program_graph)
+
 let build ?(write = true) ?lock_hash manifest =
   let prepared = prepare_build manifest in
   let store = store_root manifest in
@@ -1210,6 +1213,7 @@ let read_package_import manifest import =
   expect_atom "program-hash" prepared.build_id;
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (prepared_graph_hash prepared);
+  expect_atom "host-contract-hash" (prepared_host_contract_hash prepared);
   expect_atom "interface-hash" current_interface_hash;
   let current_contract_hash =
     package_interface_contract_hash (package_interface_from_items package_ref items)
@@ -1256,6 +1260,7 @@ let lock_content manifest prepared =
       "  " ^ lock_item "program-hash" [ prepared.build_id ];
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
       "  " ^ lock_item "program-graph-hash" [ prepared_graph_hash prepared ];
+      "  " ^ lock_item "host-contract-hash" [ prepared_host_contract_hash prepared ];
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
@@ -1372,6 +1377,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_item "program-hash" [ prepared.build_id ];
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
       "  " ^ lock_item "program-graph-hash" [ prepared_graph_hash prepared ];
+      "  " ^ lock_item "host-contract-hash" [ prepared_host_contract_hash prepared ];
       "  " ^ lock_item "interface-hash" [ package_interface_hash manifest prepared ];
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
@@ -1480,6 +1486,7 @@ let check_package manifest =
   expect_atom "program-hash" prepared.build_id;
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (prepared_graph_hash prepared);
+  expect_atom "host-contract-hash" (prepared_host_contract_hash prepared);
   let interface_hash = package_interface_hash manifest prepared in
   expect_atom "interface-hash" interface_hash;
   validate_package_interface_constraints manifest interface_hash;

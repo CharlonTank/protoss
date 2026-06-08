@@ -2602,6 +2602,8 @@ let () =
   assert_true "project lock records program hash" (contains_substring lock_before build_a.build_id);
   assert_equal "project lock records canonical graph hash" (json_string_field "graphHash" store_graph)
     (sexp_atom_field "program-graph-hash" lock_before);
+  assert_equal "project lock records host contract hash" store_host_contract_hash
+    (sexp_atom_field "host-contract-hash" lock_before);
   assert_true "project lock records source units" (contains_substring lock_before "(source-hash p2:");
   assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
   let lock_path_again, lock_hash_again = Workspace.write_lock manifest_a in
@@ -2614,6 +2616,8 @@ let () =
   assert_equal "project package records lock hash" lock_hash package_a.lock_hash;
   assert_equal "project package records canonical graph hash" (json_string_field "graphHash" store_graph)
     (sexp_atom_field "program-graph-hash" (Store.read_file package_a.package_path));
+  assert_equal "project package records host contract hash" store_host_contract_hash
+    (sexp_atom_field "host-contract-hash" (Store.read_file package_a.package_path));
   assert_equal "project package current pointer" package_a.package_ref
     (String.trim (Store.read_file (Workspace.package_current_path manifest_a)));
   assert_true "project package writes interface artifact"
@@ -3052,6 +3056,37 @@ let () =
   (try
      ignore (Workspace.check_package package_outdated_manifest);
      fail "package check should reject out-of-date descriptor"
+   with Workspace.Error _ -> ());
+  let package_host_contract_outdated_root = temp_dir "workspace-package-host-contract-outdated" in
+  copy_tree ws_a package_host_contract_outdated_root;
+  let package_host_contract_outdated_manifest =
+    Workspace.parse_manifest package_host_contract_outdated_root
+  in
+  let package_host_contract_outdated_ref =
+    String.trim
+      (Store.read_file
+         (Workspace.package_current_path package_host_contract_outdated_manifest))
+  in
+  let package_host_contract_outdated_content =
+    Store.read_file
+      (Filename.concat (Workspace.packages_dir package_host_contract_outdated_manifest)
+         (Workspace.sanitize_id package_host_contract_outdated_ref ^ ".package"))
+    |> fun content -> replace_once content "(host-contract-hash p2:" "(host-contract-hash p2:bad"
+  in
+  let package_host_contract_outdated_ref =
+    Kernel.hash_string package_host_contract_outdated_content
+  in
+  let package_host_contract_outdated_path =
+    Filename.concat (Workspace.packages_dir package_host_contract_outdated_manifest)
+      (Workspace.sanitize_id package_host_contract_outdated_ref ^ ".package")
+  in
+  write_file package_host_contract_outdated_path package_host_contract_outdated_content;
+  write_file
+    (Workspace.package_current_path package_host_contract_outdated_manifest)
+    (package_host_contract_outdated_ref ^ "\n");
+  (try
+     ignore (Workspace.check_package package_host_contract_outdated_manifest);
+     fail "package check should reject out-of-date host contract hash"
    with Workspace.Error _ -> ());
   let graph_corrupt_root = temp_dir "workspace-graph-corrupt" in
   copy_tree ws_a graph_corrupt_root;
