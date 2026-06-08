@@ -1292,6 +1292,53 @@ and canonical_branches env branches =
       String.compare ka kb)
     cbs
 
+let rec cterm_direct_capabilities = function
+  | CRequest req -> [ req_capability req ]
+  | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CInst _ | CNil _ -> []
+  | CLambda (_, body) -> cterm_direct_capabilities body
+  | CApp (f, x) | CLet (f, x) | CImage (f, x) | CButton (f, x) | CInput (f, x)
+  | CListView (f, x) | CWhenView (f, x) ->
+      cterm_direct_capabilities f @ cterm_direct_capabilities x
+  | CRecord fields -> List.concat_map (fun (_, e) -> cterm_direct_capabilities e) fields
+  | CField (e, _) | CVariant (_, _, e) | CRecur e | CText e | CColumn e | CRow e
+  | CDone e ->
+      cterm_direct_capabilities e
+  | CCase (e, branches) ->
+      cterm_direct_capabilities e @ List.concat_map cbranch_direct_capabilities branches
+  | CFoldNat (n, zero, step) | CFoldList (n, zero, step) ->
+      cterm_direct_capabilities n @ cterm_direct_capabilities zero
+      @ cterm_direct_capabilities step
+  | CFoldVariant (_, _, scrut, branches) ->
+      cterm_direct_capabilities scrut @ List.concat_map cbranch_direct_capabilities branches
+  | CCons (_, head, tail) -> cterm_direct_capabilities head @ cterm_direct_capabilities tail
+  | CBind (p, _, body) -> cterm_direct_capabilities p @ cterm_direct_capabilities body
+
+and cbranch_direct_capabilities = function
+  | CBBool (_, e) | CBVariant (_, e) -> cterm_direct_capabilities e
+
+let rec cterm_global_refs = function
+  | CGlobal n when not (is_builtin n) -> [ n ]
+  | CInst (n, _) -> [ n ]
+  | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ | CNil _ -> []
+  | CLambda (_, body) -> cterm_global_refs body
+  | CApp (f, x) | CLet (f, x) | CImage (f, x) | CButton (f, x) | CInput (f, x)
+  | CListView (f, x) | CWhenView (f, x) ->
+      cterm_global_refs f @ cterm_global_refs x
+  | CRecord fields -> List.concat_map (fun (_, e) -> cterm_global_refs e) fields
+  | CField (e, _) | CVariant (_, _, e) | CRecur e | CText e | CColumn e | CRow e
+  | CDone e ->
+      cterm_global_refs e
+  | CCase (e, branches) -> cterm_global_refs e @ List.concat_map cbranch_global_refs branches
+  | CFoldNat (n, zero, step) | CFoldList (n, zero, step) ->
+      cterm_global_refs n @ cterm_global_refs zero @ cterm_global_refs step
+  | CFoldVariant (_, _, scrut, branches) ->
+      cterm_global_refs scrut @ List.concat_map cbranch_global_refs branches
+  | CCons (_, head, tail) -> cterm_global_refs head @ cterm_global_refs tail
+  | CBind (p, _, body) -> cterm_global_refs p @ cterm_global_refs body
+
+and cbranch_global_refs = function
+  | CBBool (_, e) | CBVariant (_, e) -> cterm_global_refs e
+
 let rec cterm_to_string = function
   | CUnit -> "unit"
   | CBool true -> "true"
@@ -2172,6 +2219,7 @@ type checked_def = {
   cterm : cterm;
   canonical : string;
   hash : string;
+  capabilities : string list;
 }
 
 type checked = {
@@ -2231,6 +2279,24 @@ let check_program (program : program) =
               id
           | _ -> fail ("unknown global definition in canonicalization: " ^ name))
   in
+  let cap_memo = Hashtbl.create 32 in
+  let rec capabilities_of_name name =
+    if is_builtin name then []
+    else
+      match Hashtbl.find_opt cap_memo name with
+      | Some caps -> caps
+      | None -> (
+          match Hashtbl.find_opt cterms name with
+          | None -> []
+          | Some cterm ->
+              let direct = cterm_direct_capabilities cterm in
+              let inherited =
+                cterm_global_refs cterm |> List.concat_map capabilities_of_name
+              in
+              let caps = List.sort_uniq String.compare (direct @ inherited) in
+              Hashtbl.add cap_memo name caps;
+              caps)
+  in
   let defs =
     List.map
       (fun d ->
@@ -2238,7 +2304,14 @@ let check_program (program : program) =
         let def_id = def_id_of d.name in
         let c = serialize_def d.name def_id d.typ cterm def_id_of in
         let _ = Hashcons.intern c in
-        { def = d; def_id; cterm; canonical = c; hash = hash_string c })
+        {
+          def = d;
+          def_id;
+          cterm;
+          canonical = c;
+          hash = hash_string c;
+          capabilities = capabilities_of_name d.name;
+        })
       program.defs
   in
   { program; defs }
@@ -2274,6 +2347,7 @@ let checked_to_graph_json checked =
         json_field "hash" (json_string d.hash);
         json_field "typeRef" (json_string (type_node_id d.def.typ));
         json_field "termRef" (json_string (term_node_id def_id_of d.cterm));
+        json_field "capabilityScope" (json_array json_string d.capabilities);
         json_field "type" (type_to_graph_json d.def.typ);
         json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
         json_field "deps"

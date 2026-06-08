@@ -59,6 +59,22 @@ let expect_check_error input =
 
 let check input = Parser.parse_string input |> Kernel.check_program
 
+let checked_def checked name =
+  match
+    checked.Kernel.defs
+    |> List.find_opt (fun (d : Kernel.checked_def) -> String.equal d.def.name name)
+  with
+  | Some d -> d
+  | None -> fail ("missing checked def: " ^ name)
+
+let graph_def graph name =
+  match
+    json_array_field "defs" graph
+    |> List.find_opt (fun def -> String.equal (json_string_field "name" def) name)
+  with
+  | Some def -> def
+  | None -> fail ("missing graph def: " ^ name)
+
 let temp_dir name =
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -661,6 +677,69 @@ let () =
   assert_equal "process graph response type" "String"
     (json_string_field "tag" (json_field "responseType" ask_request));
 
+  let scoped_process =
+    check
+      "(capabilities Human.ask Clock.read)\n\
+       (def ask (Process String) (Human.ask \"Name?\"))\n\
+       (def wrapped (Process String) ask)\n\
+       (def pure Nat 1)"
+  in
+  assert_equal "direct process capability scope" "Human.ask"
+    (String.concat "," (checked_def scoped_process "ask").Kernel.capabilities);
+  assert_equal "transitive process capability scope" "Human.ask"
+    (String.concat "," (checked_def scoped_process "wrapped").Kernel.capabilities);
+  assert_equal "pure def has empty capability scope" ""
+    (String.concat "," (checked_def scoped_process "pure").Kernel.capabilities);
+  let scoped_graph = Json.parse (Canonical_ir.serialize_graph scoped_process) in
+  assert_equal "graph def capability scope" "Human.ask"
+    (String.concat "," (json_string_array_field "capabilityScope" (graph_def scoped_graph "wrapped")));
+  ignore (Canonical_ir.parse_graph (Canonical_ir.serialize_graph scoped_process));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph scoped_process)
+             "\"capabilityScope\": [\"Human.ask\"]" "\"capabilityScope\": [\"Clock.read\"]"));
+     fail "canonical graph should reject corrupt capability scope"
+   with Kernel.Error _ -> ());
+  let scoped_suspended =
+    match fst (Runtime.eval_entry scoped_process "wrapped") with
+    | Runtime.VProcessRequest s -> s
+    | other -> fail ("expected scoped process request, got " ^ Runtime.value_to_string other)
+  in
+  assert_equal "runtime request capability scope is minimal" "Human.ask"
+    (String.concat "," scoped_suspended.Runtime.cap_scope);
+  let scoped_serialized = Runtime.serialize_suspended scoped_suspended in
+  assert_true "serialized suspended keeps cap scope"
+    (contains_substring scoped_serialized "(cap-scope (Human.ask))");
+  let scoped_parsed = Runtime.parse_suspended scoped_serialized in
+  assert_equal "parsed suspended keeps cap scope" "Human.ask"
+    (String.concat "," scoped_parsed.Runtime.cap_scope);
+
+  let bind_scoped_process =
+    check
+      "(capabilities Human.ask Clock.read)\n\
+       (def askTwice (Process String)\n\
+       (bind (Human.ask \"A?\") (lambda (x String) (Human.ask \"B?\"))))"
+  in
+  let first_request =
+    match fst (Runtime.eval_entry bind_scoped_process "askTwice") with
+    | Runtime.VProcessRequest s -> s
+    | other -> fail ("expected first bind request, got " ^ Runtime.value_to_string other)
+  in
+  assert_equal "first bind request cap scope" "Human.ask"
+    (String.concat "," first_request.Runtime.cap_scope);
+  let second_request =
+    match
+      Runtime.resume bind_scoped_process
+        (Runtime.parse_suspended (Runtime.serialize_suspended first_request))
+        (Runtime.response_value first_request.Runtime.req "Ada")
+    with
+    | Runtime.VProcessRequest s -> s
+    | other -> fail ("expected second bind request, got " ^ Runtime.value_to_string other)
+  in
+  assert_equal "resumed bind request cap scope" "Human.ask"
+    (String.concat "," second_request.Runtime.cap_scope);
+
   let process_resume =
     check
       "(capabilities Human.ask)\n\
@@ -728,6 +807,41 @@ let () =
      fail "unknown capability patch should be rejected"
    with Patch.Error _ -> ());
   assert_true "unknown capability patch must not modify store" (snapshot store = unknown_cap_before);
+
+  let cap_patch_store = temp_dir "patch-cap-scope" in
+  let cap_scope_path name =
+    Filename.concat (Filename.concat cap_patch_store "capability-scopes") (name ^ ".capabilities")
+  in
+  let add_scoped =
+    patch_file "protoss-add-scoped.json"
+      "{ \"op\":\"AddDef\", \"name\":\"askName\", \"deps\":[], \
+       \"capabilities\":[\"Human.ask\"], \"type\":{\"source\":\"(Process String)\"}, \
+       \"expr\":{\"source\":\"(Human.ask \\\"Name?\\\")\"} }"
+  in
+  ignore (Patch.apply cap_patch_store add_scoped);
+  assert_equal "patch AddDef writes capability scope" "Human.ask"
+    (String.trim (Store.read_file (cap_scope_path "askName")));
+  let cap_patch_graph =
+    Json.parse (Store.read_file (Filename.concat cap_patch_store "program.graph.json"))
+  in
+  assert_equal "patch graph writes capability scope" "Human.ask"
+    (String.concat "," (json_string_array_field "capabilityScope" (graph_def cap_patch_graph "askName")));
+  let replace_scoped =
+    patch_file "protoss-replace-scoped.json"
+      "{ \"op\":\"ReplaceDef\", \"name\":\"askName\", \"deps\":[], \
+       \"type\":{\"source\":\"(Process String)\"}, \
+       \"expr\":{\"source\":\"(done \\\"Ada\\\")\"} }"
+  in
+  ignore (Patch.apply cap_patch_store replace_scoped);
+  assert_equal "patch ReplaceDef refreshes capability scope" ""
+    (String.trim (Store.read_file (cap_scope_path "askName")));
+  let delete_scoped =
+    patch_file "protoss-delete-scoped.json"
+      "{ \"op\":\"DeleteDef\", \"name\":\"askName\", \"deps\":[] }"
+  in
+  ignore (Patch.apply cap_patch_store delete_scoped);
+  assert_true "patch DeleteDef removes capability scope"
+    (not (Sys.file_exists (cap_scope_path "askName")));
 
   let duplicate_before = count_files store in
   (try
@@ -933,6 +1047,25 @@ let () =
     (json_string_field "programHash" store_graph);
   assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
     (Store.read_file store_graph_path);
+  let capability_scope_file name =
+    Filename.concat (Filename.concat build_a.store "capability-scopes") (name ^ ".capabilities")
+  in
+  assert_equal "project store process capability scope" "Human.ask"
+    (String.trim (Store.read_file (capability_scope_file "askName")));
+  assert_equal "project store pure capability scope" ""
+    (String.trim (Store.read_file (capability_scope_file "appMain")));
+  let scope_corrupt_root = temp_dir "workspace-scope-corrupt" in
+  copy_tree ws_a scope_corrupt_root;
+  let scope_corrupt_manifest = Workspace.parse_manifest scope_corrupt_root in
+  let scope_corrupt_store = Workspace.store_root scope_corrupt_manifest in
+  write_file
+    (Filename.concat (Filename.concat scope_corrupt_store "capability-scopes")
+       "askName.capabilities")
+    "Clock.read\n";
+  (try
+     ignore (Workspace.audit scope_corrupt_manifest);
+     fail "audit should reject corrupt capability scope"
+   with Workspace.Error _ | Kernel.Error _ -> ());
   let graph_corrupt_root = temp_dir "workspace-graph-corrupt" in
   copy_tree ws_a graph_corrupt_root;
   let graph_corrupt_manifest = Workspace.parse_manifest graph_corrupt_root in

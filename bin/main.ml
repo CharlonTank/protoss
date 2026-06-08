@@ -135,7 +135,6 @@ let command_run file args =
   let entry, _ = find_entry args in
   let checked = parse_and_check file in
   let value, _ = Protoss.Runtime.eval_entry checked entry in
-  let value = Protoss.Runtime.with_cap_scope checked.Protoss.Kernel.program.capabilities value in
   match value with
   | Protoss.Runtime.VProcessDone v ->
       Printf.printf "Done %s\n" (Protoss.Runtime.value_to_string v)

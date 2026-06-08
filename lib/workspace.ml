@@ -205,6 +205,9 @@ let rec collect_protoss_files dir =
 
 let sort_uniq xs = xs |> List.sort_uniq String.compare
 
+let split_lines s =
+  s |> String.split_on_char '\n' |> List.map trim |> List.filter (fun line -> line <> "")
+
 let unit_dir store = Filename.concat store "units"
 
 let unit_defs_dir store = Filename.concat store "unit-defs"
@@ -527,6 +530,11 @@ let deps_path store name = Filename.concat (deps_dir store) (Store.sanitize_name
 
 let defid_path store name = Filename.concat (defids_dir store) (Store.sanitize_name name ^ ".defid")
 
+let capability_scopes_dir store = Filename.concat store "capability-scopes"
+
+let capability_scope_path store name =
+  Filename.concat (capability_scopes_dir store) (Store.sanitize_name name ^ ".capabilities")
+
 let write_project_def store cache_dir checked stats program_hash cd =
   let name = cd.Kernel.def.name in
   let deps =
@@ -554,6 +562,8 @@ let write_project_def store cache_dir checked stats program_hash cd =
   ignore (Store.write_def store cd.def cd.canonical normal);
   write_file (type_path store name) (string_of_typ cd.def.typ ^ "\n");
   write_file (deps_path store name) (String.concat "\n" deps ^ "\n");
+  Store.ensure_dir (capability_scopes_dir store);
+  write_file (capability_scope_path store name) (String.concat "\n" cd.capabilities ^ "\n");
   write_file (normal_path store name) (normal ^ "\n");
   write_file (defid_path store name) (cd.def_id ^ "\n")
 
@@ -911,7 +921,16 @@ let audit manifest =
       if deps <> actual then
         fail
           ("dependency mismatch in store for " ^ cd.def.name ^ ": stored ["
-          ^ String.concat "," deps ^ "], actual [" ^ String.concat "," actual ^ "]"))
+          ^ String.concat "," deps ^ "], actual [" ^ String.concat "," actual ^ "]");
+      let capability_path = capability_scope_path store cd.def.name in
+      if not (Sys.file_exists capability_path) then
+        fail ("missing capability scope: " ^ cd.def.name);
+      let stored_caps = read_file capability_path |> split_lines |> sort_uniq in
+      let actual_caps = cd.capabilities |> sort_uniq in
+      if stored_caps <> actual_caps then
+        fail
+          ("capability scope mismatch in store for " ^ cd.def.name ^ ": stored ["
+          ^ String.concat "," stored_caps ^ "], actual [" ^ String.concat "," actual_caps ^ "]"))
     checked.defs;
   let cache = cache_root manifest in
   let _ = Runtime.persistent_cache_stats cache in

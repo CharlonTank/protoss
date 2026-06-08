@@ -13,7 +13,7 @@ type value =
   | VRecord of (string * value) list
   | VVariant of typ * string * value
   | VView of view
-  | VClosure of typ * Kernel.cterm * value list
+  | VClosure of typ * Kernel.cterm * value list * string list
   | VBuiltinSucc
   | VProcessDone of value
   | VProcessRequest of suspended
@@ -34,7 +34,7 @@ and view =
 
 and continuation =
   | KDone
-  | KBind of continuation * Kernel.cterm * value list
+  | KBind of continuation * Kernel.cterm * value list * string list
 
 type eval_state = {
   checked : Kernel.checked;
@@ -45,6 +45,7 @@ type eval_state = {
   mutable trace : string list;
   trace_cache : bool;
   mutable recur_stack : (value -> value) list;
+  mutable cap_scope : string list;
 }
 
 let rec value_to_string = function
@@ -61,7 +62,7 @@ let rec value_to_string = function
       ^ "}"
   | VVariant (_, con, v) -> con ^ " " ^ value_to_string v
   | VView view -> view_to_string view
-  | VClosure (t, body, _) ->
+  | VClosure (t, body, _, _) ->
       "<lambda:" ^ Kernel.type_to_canonical t ^ ":" ^ Kernel.cterm_to_string body ^ ">"
   | VBuiltinSucc -> "<builtin:succ>"
   | VProcessDone v -> "Done " ^ value_to_string v
@@ -210,6 +211,13 @@ let def_by_ref checked n =
   checked.Kernel.defs
   |> List.find_opt (fun d -> String.equal d.Kernel.def.name n || String.equal d.Kernel.def_id n)
 
+let merge_caps a b = List.sort_uniq String.compare (a @ b)
+
+let eval_with_cap_scope st caps f =
+  let previous = st.cap_scope in
+  st.cap_scope <- merge_caps st.cap_scope caps;
+  Fun.protect ~finally:(fun () -> st.cap_scope <- previous) f
+
 let rec nth_env env i =
   match (env, i) with
   | v :: _, 0 -> v
@@ -225,15 +233,16 @@ let rec eval_cterm st env = function
   | Kernel.CGlobal n ->
       if String.equal n "succ" then VBuiltinSucc
       else if List.exists (String.equal n) [ "prim.Nat.eq"; "prim.String.concat"; "prim.String.eq" ]
-      then VClosure (TUnit, Kernel.CGlobal n, [])
+      then VClosure (TUnit, Kernel.CGlobal n, [], [])
       else eval_def st n
   | Kernel.CInst (n, args) -> (
       match def_by_ref st.checked n with
       | None -> fail ("unknown polymorphic definition at runtime: " ^ n)
       | Some d ->
           let canonical = Kernel.parse_serialized_def d.canonical in
-          eval_cterm st [] (Kernel.subst_type_in_cterm args canonical.cbody))
-  | Kernel.CLambda (t, body) -> VClosure (t, body, env)
+          eval_with_cap_scope st d.capabilities (fun () ->
+              eval_cterm st [] (Kernel.subst_type_in_cterm args canonical.cbody)))
+  | Kernel.CLambda (t, body) -> VClosure (t, body, env, st.cap_scope)
   | Kernel.CApp (f, arg) ->
       let fv = eval_cterm st env f in
       let av = eval_cterm st env arg in
@@ -353,11 +362,12 @@ let rec eval_cterm st env = function
       | VBool false -> VView (VColumn [])
       | v -> fail ("when condition on non-Bool runtime value: " ^ value_to_string v))
   | Kernel.CDone e -> VProcessDone (eval_cterm st env e)
-  | Kernel.CRequest req -> VProcessRequest { req; cont = KDone; cap_scope = [] }
+  | Kernel.CRequest req -> VProcessRequest { req; cont = KDone; cap_scope = st.cap_scope }
   | Kernel.CBind (p, _, body) -> (
       match eval_cterm st env p with
       | VProcessDone v -> eval_cterm st (v :: env) body
-      | VProcessRequest s -> VProcessRequest { s with cont = KBind (s.cont, body, env) }
+      | VProcessRequest s ->
+          VProcessRequest { s with cont = KBind (s.cont, body, env, st.cap_scope) }
       | other -> fail ("bind on non-process runtime value: " ^ value_to_string other))
 
 and expect_view = function
@@ -387,22 +397,24 @@ and eval_app st fv av =
                 match av with
                 | VNat n -> VNat (n + 1)
                 | v -> fail ("builtin on " ^ value_to_string v))
-            | VClosure (_, Kernel.CGlobal "prim.Nat.eq", closure_env) -> (
+            | VClosure (_, Kernel.CGlobal "prim.Nat.eq", closure_env, _) -> (
                 match (closure_env, av) with
-                | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.eq", [ av ])
+                | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.eq", [ av ], [])
                 | [ VNat a ], VNat b -> VBool (a = b)
                 | _ -> fail "prim.Nat.eq expects Nat Nat")
-            | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env) -> (
+            | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env, _) -> (
                 match (closure_env, av) with
-                | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.concat", [ av ])
+                | [], VString _ ->
+                    VClosure (TString, Kernel.CGlobal "prim.String.concat", [ av ], [])
                 | [ VString a ], VString b -> VString (a ^ b)
                 | _ -> fail "prim.String.concat expects String String")
-            | VClosure (_, Kernel.CGlobal "prim.String.eq", closure_env) -> (
+            | VClosure (_, Kernel.CGlobal "prim.String.eq", closure_env, _) -> (
                 match (closure_env, av) with
-                | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.eq", [ av ])
+                | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.eq", [ av ], [])
                 | [ VString a ], VString b -> VBool (String.equal a b)
                 | _ -> fail "prim.String.eq expects String String")
-            | VClosure (_, body, closure_env) -> eval_cterm st (av :: closure_env) body
+            | VClosure (_, body, closure_env, cap_scope) ->
+                eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
             | v -> fail ("application of non-function runtime value: " ^ value_to_string v)
           in
           Hashtbl.add st.app_cache key result;
@@ -417,7 +429,7 @@ and eval_def st n =
       | None -> fail ("unknown definition at runtime: " ^ n)
       | Some d ->
           let canonical = Kernel.parse_serialized_def d.canonical in
-          let v = eval_cterm st [] canonical.cbody in
+          let v = eval_with_cap_scope st d.capabilities (fun () -> eval_cterm st [] canonical.cbody) in
           Hashtbl.add st.def_cache n v;
           v)
 
@@ -436,6 +448,7 @@ let state ?(trace_cache = false) ?cache_dir ?cache_scope checked =
     trace = [];
     trace_cache;
     recur_stack = [];
+    cap_scope = [];
   }
 
 let eval_entry ?(trace_cache = false) ?cache_dir ?cache_scope checked entry =
@@ -472,9 +485,10 @@ let rec value_to_canonical = function
   | VVariant (typ, con, v) ->
       "(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " " ^ value_to_canonical v ^ ")"
   | VView view -> "(View " ^ view_to_canonical view ^ ")"
-  | VClosure (typ, body, env) ->
+  | VClosure (typ, body, env, cap_scope) ->
       "(Closure " ^ Kernel.type_to_canonical typ ^ " " ^ Kernel.cterm_to_string body ^ " (env "
-      ^ String.concat " " (List.map value_to_canonical env) ^ "))"
+      ^ String.concat " " (List.map value_to_canonical env) ^ ") (cap-scope "
+      ^ String.concat " " (List.sort_uniq String.compare cap_scope) ^ "))"
   | VBuiltinSucc -> "BuiltinSucc"
   | VProcessDone v -> "(Done " ^ value_to_canonical v ^ ")"
   | VProcessRequest s -> "(Suspended " ^ suspended_payload_to_canonical s ^ ")"
@@ -490,9 +504,10 @@ and view_to_canonical = function
 
 and continuation_to_canonical = function
   | KDone -> "KDone"
-  | KBind (inner, body, env) ->
+  | KBind (inner, body, env, cap_scope) ->
       "(KBind " ^ continuation_to_canonical inner ^ " " ^ Kernel.cterm_to_string body ^ " (env "
-      ^ String.concat " " (List.map value_to_canonical env) ^ "))"
+      ^ String.concat " " (List.map value_to_canonical env) ^ ") (cap-scope "
+      ^ String.concat " " (List.sort_uniq String.compare cap_scope) ^ "))"
 
 and suspended_payload_to_canonical s =
   let request = Kernel.req_to_canonical s.req in
@@ -535,7 +550,25 @@ let rec value_of_canonical_sexp = function
       VClosure
         ( Kernel.type_of_canonical_sexp typ,
           Kernel.cterm_of_canonical_sexp body,
-          List.map value_of_canonical_sexp env )
+          List.map value_of_canonical_sexp env,
+          [] )
+  | Sexp.List
+      [
+        Sexp.Atom "Closure";
+        typ;
+        body;
+        Sexp.List (Sexp.Atom "env" :: env);
+        Sexp.List (Sexp.Atom "cap-scope" :: caps);
+      ] ->
+      VClosure
+        ( Kernel.type_of_canonical_sexp typ,
+          Kernel.cterm_of_canonical_sexp body,
+          List.map value_of_canonical_sexp env,
+          List.map
+            (function
+              | Sexp.Atom cap -> cap
+              | x -> fail ("invalid closure cap-scope atom: " ^ Sexp.to_string x))
+            caps )
   | Sexp.Atom "BuiltinSucc" -> VBuiltinSucc
   | Sexp.List [ Sexp.Atom "Done"; v ] -> VProcessDone (value_of_canonical_sexp v)
   | x -> fail ("invalid runtime value: " ^ Sexp.to_string x)
@@ -556,7 +589,25 @@ let rec continuation_of_canonical_sexp = function
       KBind
         ( continuation_of_canonical_sexp inner,
           Kernel.cterm_of_canonical_sexp body,
-          List.map value_of_canonical_sexp env )
+          List.map value_of_canonical_sexp env,
+          [] )
+  | Sexp.List
+      [
+        Sexp.Atom "KBind";
+        inner;
+        body;
+        Sexp.List (Sexp.Atom "env" :: env);
+        Sexp.List (Sexp.Atom "cap-scope" :: caps);
+      ] ->
+      KBind
+        ( continuation_of_canonical_sexp inner,
+          Kernel.cterm_of_canonical_sexp body,
+          List.map value_of_canonical_sexp env,
+          List.map
+            (function
+              | Sexp.Atom cap -> cap
+              | x -> fail ("invalid continuation cap-scope atom: " ^ Sexp.to_string x))
+            caps )
   | x -> fail ("invalid runtime continuation: " ^ Sexp.to_string x)
 
 let suspended_of_payload = function
@@ -656,10 +707,11 @@ let response_value req response =
 let rec apply_cont st cont response =
   match cont with
   | KDone -> VProcessDone response
-  | KBind (inner, body, env) -> (
+  | KBind (inner, body, env, cap_scope) -> (
       match apply_cont st inner response with
-      | VProcessDone v -> eval_cterm st (v :: env) body
-      | VProcessRequest s -> VProcessRequest { s with cont = KBind (s.cont, body, env) }
+      | VProcessDone v ->
+          eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (v :: env) body)
+      | VProcessRequest s -> VProcessRequest { s with cont = KBind (s.cont, body, env, cap_scope) }
       | other -> fail ("invalid resumed process value: " ^ value_to_string other))
 
 let resume checked suspended response =

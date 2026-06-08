@@ -47,6 +47,18 @@ let json_string_array_field name obj =
        | Json.String s -> s
        | _ -> fail ("canonical graph field must be string array: " ^ name))
 
+let json_optional_string_array_field name obj =
+  match json_optional_field name obj with
+  | None -> None
+  | Some (Json.Array xs) ->
+      Some
+        (List.map
+           (function
+             | Json.String s -> s
+             | _ -> fail ("canonical graph field must be string array: " ^ name))
+           xs)
+  | Some _ -> fail ("canonical graph field must be string array: " ^ name)
+
 let ensure_unique what names =
   let seen = Hashtbl.create 16 in
   List.iter
@@ -223,6 +235,54 @@ let def_of_graph_json obj =
     fail ("canonical graph def hash mismatch: " ^ name);
   { Kernel.cname = name; cdef_id = def_id; ctyp = typ; cbody = body }
 
+let validate_capability_scopes caps def_objs defs =
+  let declared_program_cap cap =
+    List.exists (String.equal cap) caps
+  in
+  let defs_by_id = Hashtbl.create 32 in
+  List.iter (fun (d : Kernel.canonical_def) -> Hashtbl.add defs_by_id d.cdef_id d) defs;
+  let memo = Hashtbl.create 32 in
+  let visiting = Hashtbl.create 32 in
+  let rec capabilities_of_ref ref =
+    match Hashtbl.find_opt defs_by_id ref with
+    | Some d -> capabilities_of_def d
+    | None -> fail ("canonical graph references missing definition for capability scope: " ^ ref)
+  and capabilities_of_def (d : Kernel.canonical_def) =
+    match Hashtbl.find_opt memo d.cdef_id with
+    | Some caps -> caps
+    | None ->
+        if Hashtbl.mem visiting d.cdef_id then
+          fail ("canonical graph cyclic capability dependency: " ^ d.cname);
+        Hashtbl.add visiting d.cdef_id ();
+        let direct = Kernel.cterm_direct_capabilities d.cbody in
+        let inherited =
+          Kernel.cterm_global_refs d.cbody |> List.concat_map capabilities_of_ref
+        in
+        let actual = List.sort_uniq String.compare (direct @ inherited) in
+        List.iter
+          (fun cap ->
+            if not (declared_program_cap cap) then
+              fail
+                ("canonical graph capabilityScope uses undeclared capability in " ^ d.cname ^ ": "
+               ^ cap))
+          actual;
+        Hashtbl.remove visiting d.cdef_id;
+        Hashtbl.add memo d.cdef_id actual;
+        actual
+  in
+  List.iter2
+    (fun obj d ->
+      match json_optional_string_array_field "capabilityScope" obj with
+      | None -> ignore (capabilities_of_def d)
+      | Some declared ->
+          let declared = List.sort_uniq String.compare declared in
+          let actual = capabilities_of_def d in
+          if declared <> actual then
+            fail
+              ("canonical graph capabilityScope mismatch: " ^ d.Kernel.cname ^ " declared ["
+             ^ String.concat "," declared ^ "], actual [" ^ String.concat "," actual ^ "]"))
+    def_objs defs
+
 let validate_node_payload id kind canonical payload =
   match kind with
   | "Type" ->
@@ -307,8 +367,10 @@ let parse_graph input =
   let expected_descriptors = Json.parse (Kernel.capabilities_to_graph_json caps) in
   let descriptors = json_field "capabilityDescriptors" graph in
   if descriptors <> expected_descriptors then fail "canonical graph capabilityDescriptors mismatch";
-  let defs = List.map def_of_graph_json (json_array_field "defs" graph) in
+  let def_objs = json_array_field "defs" graph in
+  let defs = List.map def_of_graph_json def_objs in
   ensure_unique "definition" (List.map (fun d -> d.Kernel.cname) defs);
+  validate_capability_scopes caps def_objs defs;
   let canonical = Kernel.serialize_program caps defs in
   let program_hash = json_string_field "programHash" graph in
   if not (String.equal program_hash (Kernel.hash_string canonical)) then

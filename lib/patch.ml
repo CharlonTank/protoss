@@ -357,6 +357,20 @@ let write_program_metadata store_root checked =
   Store.write_file_atomic (Filename.concat store_root "program.graph.json")
     (Kernel.checked_to_graph_json checked)
 
+let capability_scopes_dir store_root = Filename.concat store_root "capability-scopes"
+
+let capability_scope_path store_root name =
+  Filename.concat (capability_scopes_dir store_root) (Store.sanitize_name name ^ ".capabilities")
+
+let delete_capability_scope store_root name =
+  let path = capability_scope_path store_root name in
+  if Sys.file_exists path then Sys.remove path
+
+let write_capability_scope store_root (cd : Kernel.checked_def) =
+  Store.ensure_dir (capability_scopes_dir store_root);
+  Store.write_file_atomic (capability_scope_path store_root cd.def.name)
+    (String.concat "\n" cd.capabilities ^ "\n")
+
 let apply store_root patch_path =
   let checked_patch = check store_root patch_path in
   let current =
@@ -367,19 +381,23 @@ let apply store_root patch_path =
   let final_names = List.map (fun (d : def) -> d.name) checked_patch.program.defs in
   List.iter
     (fun (d : def) ->
-      if not (List.exists (String.equal d.name) final_names) then Store.delete_def store_root d.name)
+      if not (List.exists (String.equal d.name) final_names) then (
+        Store.delete_def store_root d.name;
+        delete_capability_scope store_root d.name))
     current.defs;
   List.iter
     (fun change ->
       match change.previous_name with
       | Some name when not (List.exists (String.equal name) final_names) ->
-          Store.delete_def store_root name
+          Store.delete_def store_root name;
+          delete_capability_scope store_root name
       | _ -> ())
     checked_patch.changes;
   List.iter
     (fun (cd : Kernel.checked_def) ->
       let normal, _ = Runtime.normalize_def checked_patch.checked cd.def.name in
-      ignore (Store.write_def store_root cd.def cd.canonical (Runtime.value_to_string normal)))
+      ignore (Store.write_def store_root cd.def cd.canonical (Runtime.value_to_string normal));
+      write_capability_scope store_root cd)
     checked_patch.checked.defs;
   write_program_metadata store_root checked_patch.checked;
   (if Sys.file_exists (Filename.concat store_root "web_app") then
