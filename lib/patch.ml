@@ -18,6 +18,7 @@ type t = {
 }
 
 type checked_change = {
+  index : int;
   patch : t;
   target_name : string;
   previous_name : string option;
@@ -39,6 +40,44 @@ let read_file path =
     (fun () ->
       let len = in_channel_length ic in
       really_input_string ic len)
+
+let op_to_string = function
+  | AddDef -> "AddDef"
+  | ReplaceDef -> "ReplaceDef"
+  | DeleteDef -> "DeleteDef"
+  | RenameDef -> "RenameDef"
+
+let patch_context index patch =
+  "patch op #" ^ string_of_int index ^ " " ^ op_to_string patch.op ^ " " ^ patch.name
+
+let partial_context index ?op ?name () =
+  "patch op #" ^ string_of_int index
+  ^ (match op with Some op -> " " ^ op_to_string op | None -> "")
+  ^ (match name with Some name -> " " ^ name | None -> "")
+
+let fail_in context msg = fail (context ^ ": " ^ msg)
+
+let with_context context f =
+  try f () with Error msg -> fail_in context msg
+
+let is_prefix prefix s =
+  let lp = String.length prefix in
+  String.length s >= lp && String.sub s 0 lp = prefix
+
+let take_until_colon s =
+  match String.index_opt s ':' with
+  | Some i -> Some (String.sub s 0 i)
+  | None -> None
+
+let extract_error_def_name msg =
+  if is_prefix "definition " msg then
+    let rest = String.sub msg 11 (String.length msg - 11) in
+    take_until_colon rest
+  else if is_prefix "duplicate definition: " msg then
+    Some (String.sub msg 22 (String.length msg - 22))
+  else if is_prefix "definition shadows builtin: " msg then
+    Some (String.sub msg 28 (String.length msg - 28))
+  else None
 
 let json_field name obj =
   match Json.field name obj with Some v -> v | None -> fail ("patch missing field: " ^ name)
@@ -109,41 +148,61 @@ let rec expr_sexp_of_json = function
   | Json.Object [ ("done", e) ] -> Sexp.List [ Sexp.Atom "done"; expr_sexp_of_json e ]
   | _ -> fail "invalid structural expr JSON"
 
-let parse_one_json obj =
+let parse_one_json ?(index = 1) obj =
   let op =
-    match json_string_field "op" obj with
-    | "AddDef" -> AddDef
-    | "ReplaceDef" -> ReplaceDef
-    | "DeleteDef" -> DeleteDef
-    | "RenameDef" -> RenameDef
-    | s -> fail ("unknown patch op: " ^ s)
+    with_context (partial_context index ()) (fun () ->
+        match json_string_field "op" obj with
+        | "AddDef" -> AddDef
+        | "ReplaceDef" -> ReplaceDef
+        | "DeleteDef" -> DeleteDef
+        | "RenameDef" -> RenameDef
+        | s -> fail ("unknown patch op: " ^ s))
   in
-  let name = json_string_field "name" obj in
-  let new_name = match Json.field "newName" obj with Some v -> Json.string v | None -> None in
+  let name =
+    with_context (partial_context index ~op ()) (fun () -> json_string_field "name" obj)
+  in
+  let context = partial_context index ~op ~name () in
+  let new_name =
+    match Json.field "newName" obj with
+    | None -> None
+    | Some v -> (
+        match Json.string v with
+        | Some s -> Some s
+        | None -> fail_in (context ^ " field newName") "patch field must be string: newName")
+  in
   let def =
     match op with
     | AddDef | ReplaceDef ->
         let typ =
-          try Parser.parse_type (type_sexp_of_json (json_field "type" obj)) with
-          | Parser.Error msg -> fail ("invalid patch type: " ^ msg)
+          with_context (context ^ " field type") (fun () ->
+              try Parser.parse_type (type_sexp_of_json (json_field "type" obj)) with
+              | Parser.Error msg -> fail ("invalid patch type: " ^ msg))
         in
         let body =
-          try Parser.parse_expr (expr_sexp_of_json (json_field "expr" obj)) with
-          | Parser.Error msg -> fail ("invalid patch expr: " ^ msg)
+          with_context (context ^ " field expr") (fun () ->
+              try Parser.parse_expr (expr_sexp_of_json (json_field "expr" obj)) with
+              | Parser.Error msg -> fail ("invalid patch expr: " ^ msg))
         in
         Some { name; type_params = []; typ; body }
     | DeleteDef | RenameDef -> None
   in
   let capabilities =
-    match Json.field "capabilities" obj with
-    | None -> []
-    | Some (Json.Array xs) ->
-        List.map
-          (function Json.String s -> s | _ -> fail "capabilities must be strings")
-          xs
-    | Some _ -> fail "capabilities must be an array"
+    with_context (context ^ " field capabilities") (fun () ->
+        let caps =
+          match Json.field "capabilities" obj with
+          | None -> []
+          | Some (Json.Array xs) ->
+              List.map
+                (function Json.String s -> s | _ -> fail "capabilities must be strings")
+                xs
+          | Some _ -> fail "capabilities must be an array"
+        in
+        (try Kernel.validate_capabilities caps with Kernel.Error msg -> fail msg);
+        caps)
   in
-  let dependencies = json_string_array_field "deps" obj in
+  let dependencies =
+    with_context (context ^ " field deps") (fun () -> json_string_array_field "deps" obj)
+  in
   { op; name; new_name; def; capabilities; dependencies }
 
 let parse_json input =
@@ -157,9 +216,9 @@ let parse_ops_json input =
     try Json.parse input with Json.Error msg -> fail ("invalid JSON patch: " ^ msg)
   in
   match Json.field "ops" value with
-  | None -> [ parse_one_json value ]
+  | None -> [ parse_one_json ~index:1 value ]
   | Some (Json.Array ops) ->
-      List.map parse_one_json ops
+      ops |> List.mapi (fun i op -> parse_one_json ~index:(i + 1) op)
   | Some _ -> fail "patch ops must be an array"
 
 let parse_file path = parse_json (read_file path)
@@ -267,6 +326,22 @@ let merge_defs (patch : t) (defs : def list) =
         Some patch.name,
         Some renamed )
 
+let fail_for_patch index patch msg =
+  fail_in (patch_context index patch) msg
+
+let fail_kernel_with_patch_context changes msg =
+  match extract_error_def_name msg with
+  | Some name -> (
+      match
+        changes
+        |> List.find_opt (fun change ->
+               String.equal change.target_name name
+               || Option.value ~default:"" change.previous_name = name)
+      with
+      | Some change -> fail_for_patch change.index change.patch msg
+      | None -> fail msg)
+  | None -> fail msg
+
 let check store_root patch_path =
   let patches = parse_ops_file patch_path in
   let current : program =
@@ -274,25 +349,28 @@ let check store_root patch_path =
     | Store.Error msg -> fail msg
     | Parser.Error msg -> fail ("store contains invalid definition: " ^ msg)
   in
-  let defs, changes =
+  let defs, changes, _ =
     List.fold_left
-      (fun (defs, changes) patch ->
+      (fun (defs, changes, index) patch ->
         let before_defs = defs in
-        let defs, target_name, previous_name, changed_def = merge_defs patch defs in
+        let defs, target_name, previous_name, changed_def =
+          try merge_defs patch defs with Error msg -> fail_for_patch index patch msg
+        in
         let actual_deps =
           let source_defs = match patch.op with DeleteDef -> before_defs | _ -> defs in
           Kernel.dependencies_of_defs source_defs target_name |> List.sort_uniq String.compare
         in
         let declared_deps = List.sort_uniq String.compare patch.dependencies in
         if actual_deps <> declared_deps then
-          fail
+          fail_for_patch index patch
             ("dependency mismatch for " ^ patch.name ^ ": declared ["
             ^ String.concat ", " declared_deps ^ "], actual ["
             ^ String.concat ", " actual_deps ^ "]");
         ( defs,
-          { patch; target_name; previous_name; changed_def; changed_checked_def = None }
-          :: changes ))
-      (current.defs, []) patches
+          { index; patch; target_name; previous_name; changed_def; changed_checked_def = None }
+          :: changes,
+          index + 1 ))
+      (current.defs, [], 1) patches
   in
   let program =
     {
@@ -307,7 +385,8 @@ let check store_root patch_path =
     }
   in
   let checked =
-    try Kernel.check_program program with Kernel.Error msg -> fail msg
+    try Kernel.check_program program with
+    | Kernel.Error msg -> fail_kernel_with_patch_context (List.rev changes) msg
   in
   let changes =
     List.rev changes

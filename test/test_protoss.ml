@@ -1458,9 +1458,28 @@ let () =
   (try
      let _ = Patch.apply store patch_bad in
      fail "invalid patch should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "invalid patch names patch op"
+       (contains_substring msg "patch op #1 AddDef bad");
+     assert_true "invalid patch keeps kernel definition context"
+       (contains_substring msg "definition bad"));
   assert_true "invalid patch must not modify store" (count_objects store = before);
   assert_true "invalid patch must not modify ledger" (count_files ledger = ledger_before);
+
+  let patch_bad_expr_shape =
+    patch_file "protoss-bad-expr-shape.json"
+      "{ \"op\":\"AddDef\", \"name\":\"badShape\", \"deps\":[], \"type\":\"Nat\", \
+       \"expr\":{\"unknown\":1} }"
+  in
+  let bad_expr_shape_before = snapshot store in
+  (try
+     ignore (Patch.apply store patch_bad_expr_shape);
+     fail "invalid structural patch expr should be rejected"
+   with Patch.Error msg ->
+     assert_true "invalid patch expr has field context"
+       (contains_substring msg "patch op #1 AddDef badShape field expr"));
+  assert_true "invalid structural expr patch must not modify store"
+    (snapshot store = bad_expr_shape_before);
 
   let unknown_cap_patch =
     patch_file "protoss-unknown-cap.json"
@@ -1471,7 +1490,11 @@ let () =
   (try
      let _ = Patch.apply store unknown_cap_patch in
      fail "unknown capability patch should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "unknown capability patch has capability field context"
+       (contains_substring msg "patch op #1 AddDef capBad field capabilities");
+     assert_true "unknown capability patch names capability"
+       (contains_substring msg "Space.laser"));
   assert_true "unknown capability patch must not modify store" (snapshot store = unknown_cap_before);
 
   let cap_patch_store = temp_dir "patch-cap-scope" in
@@ -1513,7 +1536,11 @@ let () =
   (try
      let _ = Patch.apply store patch_ok in
      fail "duplicate AddDef should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "duplicate AddDef has patch context"
+       (contains_substring msg "patch op #1 AddDef two");
+     assert_true "duplicate AddDef names conflict"
+       (contains_substring msg "AddDef target already exists"));
   assert_true "conflicting AddDef must not modify store" (count_files store = duplicate_before);
 
   let replace =
@@ -1536,7 +1563,9 @@ let () =
   (try
      let _ = Patch.apply store missing_replace in
      fail "missing ReplaceDef should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "missing ReplaceDef has patch context"
+       (contains_substring msg "patch op #1 ReplaceDef missing"));
 
   let dep_bad =
     patch_file "protoss-dep-bad.json"
@@ -1545,7 +1574,11 @@ let () =
   (try
      let _ = Patch.apply store dep_bad in
      fail "dependency mismatch should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "dependency mismatch has patch context"
+       (contains_substring msg "patch op #1 AddDef three");
+     assert_true "dependency mismatch names mismatch"
+       (contains_substring msg "dependency mismatch"));
 
   let protected_delete =
     patch_file "protoss-add-three.json"
@@ -1605,7 +1638,9 @@ let () =
   (try
      ignore (Patch.apply batch_store invalid_batch);
      fail "invalid batch should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "invalid batch points to second op"
+       (contains_substring msg "patch op #2 AddDef badBatch"));
   assert_true "invalid batch must not mutate store" (snapshot batch_store = invalid_before);
 
   let conflict_batch =
@@ -1619,7 +1654,9 @@ let () =
   (try
      ignore (Patch.apply batch_store conflict_batch);
      fail "conflicting batch should be rejected"
-   with Patch.Error _ -> ());
+   with Patch.Error msg ->
+     assert_true "conflicting batch points to second op"
+       (contains_substring msg "patch op #2 AddDef dupe"));
   assert_true "conflicting batch must not mutate store" (snapshot batch_store = conflict_before);
 
   let interop_batch =
