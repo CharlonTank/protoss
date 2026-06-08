@@ -347,6 +347,9 @@ let runtime_js =
           if (!fn.args.length) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
           return { tag: "Bool", value: fn.args[0].value === arg.value };
         }
+        if (fn.name === "prim.Nat.toString") {
+          return { tag: "String", value: String(arg.value) };
+        }
         if (fn.name === "prim.String.concat") {
           if (!fn.args.length) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
           return { tag: "String", value: String(fn.args[0].value) + String(arg.value) };

@@ -1,4 +1,4 @@
-; Protoss stdlib v0.15. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.16. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -7,6 +7,8 @@
 (type Assoc (K V) (List (Pair K V)))
 (type Map (K V) (Assoc K V))
 (type Set (A) (List A))
+(record SourceSpan (line Nat) (column Nat))
+(record Diagnostic (span SourceSpan) (message String))
 (variant Sexp
   (SAtom String)
   (SString String)
@@ -19,7 +21,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.15")
+(def Stdlib.version String "v0.16")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -35,6 +37,10 @@
   (lambda (a Nat)
     (lambda (b Nat)
       ((prim.Nat.eq a) b))))
+
+(def Nat.toString (-> Nat String)
+  (lambda (n Nat)
+    (prim.Nat.toString n)))
 
 (def Bool.not (-> Bool Bool)
   (lambda (b Bool)
@@ -84,6 +90,26 @@
             (case (String.isEmpty acc)
               (true item)
               (false ((String.concat item) ((String.concat separator) acc))))))))))
+
+(def SourceSpan.at (-> Nat (-> Nat SourceSpan))
+  (lambda (line Nat)
+    (lambda (column Nat)
+      (record (line line) (column column)))))
+
+(def SourceSpan.render (-> SourceSpan String)
+  (lambda (span SourceSpan)
+    ((String.concat (Nat.toString (get span line)))
+      ((String.concat ":") (Nat.toString (get span column))))))
+
+(def Diagnostic.at (-> SourceSpan (-> String Diagnostic))
+  (lambda (span SourceSpan)
+    (lambda (message String)
+      (record (span span) (message message)))))
+
+(def Diagnostic.render (-> Diagnostic String)
+  (lambda (diagnostic Diagnostic)
+    ((String.concat (SourceSpan.render (get diagnostic span)))
+      ((String.concat ": ") (get diagnostic message)))))
 
 (defpoly List.map (params A B)
   (-> (List A) (-> (-> A B) (List B)))

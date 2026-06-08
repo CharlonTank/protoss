@@ -283,7 +283,9 @@ let rec eval_cterm st env = function
   | Kernel.CVar i -> nth_env env i
   | Kernel.CGlobal n ->
       if String.equal n "succ" then VBuiltinSucc
-      else if List.exists (String.equal n) [ "prim.Nat.eq"; "prim.String.concat"; "prim.String.eq" ]
+      else if
+        List.exists (String.equal n)
+          [ "prim.Nat.eq"; "prim.Nat.toString"; "prim.String.concat"; "prim.String.eq" ]
       then VClosure (TUnit, Kernel.CGlobal n, [], [])
       else eval_def st n
   | Kernel.CInst (n, args) -> (
@@ -459,6 +461,10 @@ and eval_app st fv av =
                 | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.eq", [ av ], [])
                 | [ VNat a ], VNat b -> VBool (a = b)
                 | _ -> fail "prim.Nat.eq expects Nat Nat")
+            | VClosure (_, Kernel.CGlobal "prim.Nat.toString", closure_env, _) -> (
+                match (closure_env, av) with
+                | [], VNat n -> VString (string_of_int n)
+                | _ -> fail "prim.Nat.toString expects Nat")
             | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env, _) -> (
                 match (closure_env, av) with
                 | [], VString _ ->

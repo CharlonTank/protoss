@@ -14,6 +14,7 @@ let builtin_types =
   [
     ("succ", TFun (TNat, TNat));
     ("prim.Nat.eq", TFun (TNat, TFun (TNat, TBool)));
+    ("prim.Nat.toString", TFun (TNat, TString));
     ("prim.String.concat", TFun (TString, TFun (TString, TString)));
     ("prim.String.eq", TFun (TString, TFun (TString, TBool)));
   ]
@@ -3427,6 +3428,10 @@ let rec normalize_cterm checked = function
       match (nf, nx) with
       | CLambda (_, body), arg -> normalize_cterm checked (subst_top arg body)
       | CGlobal "succ", CNat n -> CNat (n + 1)
+      | CGlobal "prim.Nat.toString", CNat n -> CString (string_of_int n)
+      | CApp (CGlobal "prim.Nat.eq", CNat a), CNat b -> CBool (a = b)
+      | CApp (CGlobal "prim.String.concat", CString a), CString b -> CString (a ^ b)
+      | CApp (CGlobal "prim.String.eq", CString a), CString b -> CBool (String.equal a b)
       | _ -> CApp (nf, nx))
   | CLet (e, body) -> normalize_cterm checked (subst_top (normalize_cterm checked e) body)
   | CRecord fields ->

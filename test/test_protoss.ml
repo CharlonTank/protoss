@@ -1620,6 +1620,18 @@ let () =
 
   let kernel_nf = Kernel.normalize_checked_def norm "two" in
   assert_equal "kernel pure normalizer" "2" (Kernel.cterm_to_string kernel_nf);
+  let primitive_nf =
+    check
+      "(def natText String (prim.Nat.toString 42))\n\
+       (def cat String ((prim.String.concat \"a\") \"b\"))\n\
+       (def eq Bool ((prim.Nat.eq 2) 2))\n"
+  in
+  assert_equal "kernel Nat.toString normalizer" "\"42\""
+    (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "natText"));
+  assert_equal "kernel String.concat normalizer" "\"ab\""
+    (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "cat"));
+  assert_equal "kernel Nat.eq normalizer" "true"
+    (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "eq"));
 
   assert_equal "deterministic hash" (Kernel.hash_program norm) (Kernel.hash_program norm);
   let diff = check "(def two Nat (succ 2))" in
@@ -1699,6 +1711,14 @@ let () =
   assert_equal "stdlib String.nonEmpty" "true" (Runtime.value_to_string non_empty_label);
   let joined_labels, _ = Runtime.normalize_def stdlib_generics "joinedLabels" in
   assert_equal "stdlib String.join" "\"item,item\"" (Runtime.value_to_string joined_labels);
+  let nat_text, _ = Runtime.normalize_def stdlib_generics "natText" in
+  assert_equal "stdlib Nat.toString" "\"42\"" (Runtime.value_to_string nat_text);
+  let source_span_text, _ = Runtime.normalize_def stdlib_generics "sourceSpanText" in
+  assert_equal "stdlib SourceSpan.render" "\"2:7\""
+    (Runtime.value_to_string source_span_text);
+  let diagnostic_text, _ = Runtime.normalize_def stdlib_generics "diagnosticText" in
+  assert_equal "stdlib Diagnostic.render" "\"2:7: unexpected token\""
+    (Runtime.value_to_string diagnostic_text);
   let len, _ = Runtime.normalize_def stdlib_generics "len" in
   assert_equal "stdlib generic List.length" "2" (Runtime.value_to_string len);
   let appended, _ = Runtime.normalize_def stdlib_generics "appended" in

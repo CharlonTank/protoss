@@ -23,6 +23,21 @@
 (def joinedLabels String
   ((String.join ",") labels))
 
+(def natText String
+  (Nat.toString 42))
+
+(def sourceSpan SourceSpan
+  ((SourceSpan.at 2) 7))
+
+(def sourceSpanText String
+  (SourceSpan.render sourceSpan))
+
+(def diagnostic Diagnostic
+  ((Diagnostic.at sourceSpan) "unexpected token"))
+
+(def diagnosticText String
+  (Diagnostic.render diagnostic))
+
 (def len Nat
   ((inst List.length Nat) xs))
 
