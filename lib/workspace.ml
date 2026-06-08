@@ -1902,6 +1902,12 @@ let audit_program_canonical store checked =
   let expected = Kernel.serialize_checked_program checked in
   if not (String.equal stored expected) then fail "canonical program mismatch: program.canon"
 
+let audit_patch_audits store =
+  let dir = Patch_audit.patch_audits_dir store in
+  if Sys.file_exists dir then
+    try ignore (Patch_audit.verify_latest_matches_store store) with
+    | Patch_audit.Error msg -> fail ("patch audit invalid: " ^ msg)
+
 let audit manifest =
   let store = store_root manifest in
   if not (Sys.file_exists store) then fail ("store not found: " ^ store);
@@ -1914,6 +1920,7 @@ let audit manifest =
   let checked =
     try Kernel.check_program program with Kernel.Error msg -> fail ("store program invalid: " ^ msg)
   in
+  audit_patch_audits store;
   audit_program_canonical store checked;
   audit_program_graph store checked;
   List.iter

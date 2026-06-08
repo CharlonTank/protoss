@@ -1848,6 +1848,26 @@ let () =
     (String.concat "," (Workspace.read_deps build_a.store "appMain"));
   assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
   assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
+  let patch_audit_ws = make_workspace "workspace-patch-audit" 5 "p" in
+  let patch_audit_manifest = Workspace.parse_manifest patch_audit_ws in
+  let patch_audit_build = Workspace.build patch_audit_manifest in
+  let patch_audit_project_patch =
+    patch_file "protoss-project-patch-audit.json"
+      "{ \"op\":\"AddDef\", \"name\":\"auditExtra\", \"deps\":[], \"type\":\"Nat\", \"expr\":7 }"
+  in
+  ignore (Patch.apply patch_audit_build.Workspace.store patch_audit_project_patch);
+  assert_equal "project audit verifies patch latest" "Audit OK\n"
+    (Workspace.audit patch_audit_manifest);
+  Store.write_file_atomic
+    (Filename.concat (Filename.concat patch_audit_build.store "defs") "auditExtra.protoss")
+    "(def auditExtra Nat 0)\n";
+  (try
+     ignore (Workspace.audit patch_audit_manifest);
+     fail "project audit should reject patch audit drift"
+   with Workspace.Error msg ->
+     assert_true "project audit reports patch audit drift"
+       (contains_substring msg "patch audit invalid"
+       && contains_substring msg "patch audit program hash mismatch"));
   let loaded_store_program = Store.load_program build_a.store in
   assert_true "project store preserves recursive Json alias"
     (List.exists
