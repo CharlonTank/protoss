@@ -1842,6 +1842,9 @@ let store_graph_capability_scopes_for store graph_hash id =
 let store_graph_host_contract store graph_hash =
   Canonical_ir.graph_host_contract (graph_store store graph_hash)
 
+let check_store_graph_host_contract store graph_hash contract_input =
+  Canonical_ir.check_graph_host_contract (graph_store store graph_hash) contract_input
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

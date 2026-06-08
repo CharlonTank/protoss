@@ -1511,6 +1511,8 @@ let () =
     (String.length (json_string_field "contractHash" process_host_contract) > 3);
   assert_equal "process host contract deterministic" process_host_contract_json
     (Canonical_ir.graph_host_contract process_graph_json);
+  assert_equal "process host contract check" "Host contract OK\n"
+    (Canonical_ir.check_graph_host_contract process_graph_json process_host_contract_json);
   let process_host_caps = json_array_field "capabilities" process_host_contract in
   assert_equal "process host contract capability count" "1"
     (string_of_int (List.length process_host_caps));
@@ -1533,6 +1535,14 @@ let () =
     (json_string_field "def" process_host_scope);
   assert_equal "process host contract scope capability" "Human.ask"
     (json_string_field "capability" process_host_scope);
+  (try
+     ignore
+       (Canonical_ir.check_graph_host_contract process_graph_json
+          (replace_once process_host_contract_json "Human.ask" "Clock.read"));
+     fail "drifted host contract should be rejected"
+   with Kernel.Error msg ->
+     assert_true "drifted host contract mismatch"
+       (contains_substring msg "host contract mismatch"));
   assert_equal "process graph capability refs" human_capability_ref
     (String.concat "," (json_string_array_field "capabilityRefs" process_graph));
   (try
@@ -2524,10 +2534,21 @@ let () =
     (json_string_field "graphHash" store_graph_host_contract);
   assert_equal "project store graph host contract deterministic" store_graph_host_contract_json
     (Workspace.store_graph_host_contract build_a.store store_graph_hash);
+  assert_equal "project store graph host contract check" "Host contract OK\n"
+    (Workspace.check_store_graph_host_contract build_a.store store_graph_hash
+       store_graph_host_contract_json);
   assert_true "project store graph host contract includes capability"
     (contains_substring store_graph_host_contract_json "Human.ask");
   assert_true "project store graph host contract includes askName scope"
     (contains_substring store_graph_host_contract_json "\"def\": \"askName\"");
+  (try
+     ignore
+       (Workspace.check_store_graph_host_contract build_a.store store_graph_hash
+          (replace_once store_graph_host_contract_json "Human.ask" "Clock.read"));
+     fail "drifted store graph host contract should be rejected"
+   with Kernel.Error msg ->
+     assert_true "drifted store graph host contract mismatch"
+       (contains_substring msg "host contract mismatch"));
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;

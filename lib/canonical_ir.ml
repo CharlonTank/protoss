@@ -888,6 +888,20 @@ let graph_host_contract input =
     :: contract_body_fields)
   ^ "\n"
 
+let contract_hash_of_json obj =
+  try json_string_field "contractHash" obj with Kernel.Error _ -> "-"
+
+let check_graph_host_contract graph_input contract_input =
+  let expected = graph_host_contract graph_input in
+  let expected_json = Json.parse expected in
+  let contract_json = Json.parse contract_input in
+  if not (contract_json = expected_json) then
+    fail
+      ("host contract mismatch: expected "
+      ^ contract_hash_of_json expected_json
+      ^ ", got " ^ contract_hash_of_json contract_json);
+  "Host contract OK\n"
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program
