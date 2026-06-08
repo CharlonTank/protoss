@@ -1386,8 +1386,22 @@ let () =
     patch_file "protoss-add-two.json"
       "{ \"op\":\"AddDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":[\"succ\",1] }"
   in
-  let _ = Patch.apply store patch_ok in
+  let patch_audit_path store ref =
+    Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
+  in
+  let patch_latest_path store = Filename.concat (Filename.concat store "patches") "latest" in
+  let patch_ok_ref = Patch.apply store patch_ok in
   assert_true "valid patch writes object" (count_objects store > 0);
+  assert_true "valid patch writes audit ref" (Sys.file_exists (patch_audit_path store patch_ok_ref));
+  assert_equal "valid patch latest pointer" patch_ok_ref
+    (String.trim (Store.read_file (patch_latest_path store)));
+  let patch_ok_audit = Store.read_file (patch_audit_path store patch_ok_ref) in
+  assert_true "patch audit records format"
+    (contains_substring patch_ok_audit "protoss-patch-audit-v1");
+  assert_true "patch audit records source hash" (contains_substring patch_ok_audit "source-hash=p2:");
+  assert_true "patch audit records program hash" (contains_substring patch_ok_audit "program-hash=p2:");
+  assert_true "patch audit records operation"
+    (contains_substring patch_ok_audit "op=1 kind=AddDef name=two target=two");
   let inferred_lambda_patch_store = temp_dir "patch-inferred-lambda" in
   let inferred_lambda_patch =
     patch_file "protoss-inferred-lambda-patch.json"
@@ -1723,8 +1737,12 @@ let () =
   assert_true "store stats canonical" (canonical_count > 0);
 
   let store_a = temp_dir "store-a" and store_b = temp_dir "store-b" in
-  let _ = Patch.apply store_a patch_ok in
-  let _ = Patch.apply store_b patch_ok in
+  let patch_ref_a = Patch.apply store_a patch_ok in
+  let patch_ref_b = Patch.apply store_b patch_ok in
+  assert_equal "deterministic patch audit ref" patch_ref_a patch_ref_b;
+  assert_equal "deterministic patch audit content"
+    (Store.read_file (patch_audit_path store_a patch_ref_a))
+    (Store.read_file (patch_audit_path store_b patch_ref_b));
   assert_equal "deterministic store objects"
     (String.concat "," (Store.list_objects store_a))
     (String.concat "," (Store.list_objects store_b));

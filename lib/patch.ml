@@ -461,6 +461,42 @@ let describe_checked checked_patch =
   | [ { changed_checked_def = None; _ } ] -> "no-object"
   | _ -> Kernel.hash_program checked_patch.checked
 
+let patch_audits_dir store_root = Filename.concat store_root "patches"
+
+let change_audit_line change =
+  "op=" ^ string_of_int change.index ^ " kind=" ^ op_to_string change.patch.op ^ " name="
+  ^ change.patch.name ^ " target=" ^ change.target_name
+  ^ (match change.previous_name with Some name -> " previous=" ^ name | None -> "")
+  ^
+  match change.changed_checked_def with
+  | Some d -> " result=" ^ d.hash
+  | None -> " result=no-object"
+
+let patch_audit_content patch_source checked_patch =
+  let source_hash = Kernel.hash_string ("protoss-patch-source-v1\n" ^ patch_source) in
+  let lines =
+    [
+      "protoss-patch-audit-v1";
+      "source-hash=" ^ source_hash;
+      "program-hash=" ^ Kernel.hash_program checked_patch.checked;
+      "result=" ^ describe_checked checked_patch;
+      "ops=" ^ string_of_int (List.length checked_patch.changes);
+    ]
+    @ List.map change_audit_line checked_patch.changes
+    @ [ "source-bytes=" ^ string_of_int (String.length patch_source); "--source--"; patch_source ]
+  in
+  String.concat "\n" lines
+
+let write_patch_audit store_root patch_path checked_patch =
+  let patch_source = read_file patch_path in
+  let content = patch_audit_content patch_source checked_patch in
+  let patch_ref = Kernel.hash_string ("protoss-patch-audit-v1\n" ^ content) in
+  let dir = patch_audits_dir store_root in
+  Store.ensure_dir dir;
+  Store.write_file_atomic (Filename.concat dir (patch_ref ^ ".patch")) (content ^ "\n");
+  Store.write_file_atomic (Filename.concat dir "latest") (patch_ref ^ "\n");
+  patch_ref
+
 let write_program_metadata store_root checked =
   let canonical = Kernel.serialize_checked_program checked in
   Store.write_file_atomic (Filename.concat store_root "capabilities")
@@ -516,4 +552,4 @@ let apply store_root patch_path =
   (if Sys.file_exists (Filename.concat store_root "web_app") then
      let contract = Web.check_contract checked_patch.checked in
      Web.write_web_marker store_root contract);
-  describe_checked checked_patch
+  write_patch_audit store_root patch_path checked_patch
