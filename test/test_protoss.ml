@@ -1373,6 +1373,42 @@ let () =
   assert_equal "process graph request tag" "AskHuman" (json_string_field "tag" ask_request);
   assert_equal "process graph response type" "String"
     (json_string_field "tag" (json_field "responseType" ask_request));
+  let process_request =
+    json_field "request" (json_field "term" (graph_def process_graph "askName"))
+  in
+  assert_equal "process request capability ref" human_capability_ref
+    (json_string_field "capabilityRef" process_request);
+  assert_equal "process request signature ref" human_signature_ref
+    (json_string_field "requestSignatureRef" process_request);
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             "\"capabilityRef\": " "\"capabilityRefMissing\": "));
+     fail "canonical graph should reject missing request capability ref"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing request capability ref"
+       (contains_substring msg "canonical graph missing field: capabilityRef"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             ("\"capabilityRef\": " ^ Ast.quote human_capability_ref)
+             "\"capabilityRef\": \"p2:bad\""));
+     fail "canonical graph should reject corrupt request capability ref"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt request capability ref"
+       (contains_substring msg "canonical graph request capabilityRef mismatch: AskHuman"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             ("\"requestSignatureRef\": " ^ Ast.quote human_signature_ref)
+             "\"requestSignatureRef\": \"p2:bad\""));
+     fail "canonical graph should reject corrupt request signature ref"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt request signature ref"
+       (contains_substring msg "canonical graph requestSignatureRef mismatch: AskHuman"));
   assert_equal "process graph def capability scope refs" human_capability_ref
     (String.concat ","
        (json_string_array_field "capabilityScopeRefs" (graph_def process_graph "askName")));

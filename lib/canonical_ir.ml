@@ -111,6 +111,17 @@ let req_of_graph_json obj =
   let capability = json_string_field "capability" obj in
   if not (String.equal capability (Kernel.req_capability req)) then
     fail ("canonical graph request capability mismatch: " ^ capability);
+  let capability_ref = json_string_field "capabilityRef" obj in
+  let expected_capability_ref =
+    match Kernel.req_capability_ref req with
+    | Some ref -> ref
+    | None -> fail ("canonical graph request unknown capability: " ^ Kernel.req_capability req)
+  in
+  if not (String.equal capability_ref expected_capability_ref) then
+    fail ("canonical graph request capabilityRef mismatch: " ^ Kernel.req_tag req);
+  let signature_ref = json_string_field "requestSignatureRef" obj in
+  if not (String.equal signature_ref (Kernel.req_signature_ref req)) then
+    fail ("canonical graph requestSignatureRef mismatch: " ^ Kernel.req_tag req);
   req
 
 let rec term_of_graph_json obj =

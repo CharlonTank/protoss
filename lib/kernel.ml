@@ -2064,8 +2064,17 @@ let req_to_graph_json req =
         ( "ServerRequest",
           [ json_field "route" (json_string route); json_field "payload" (json_string payload) ] )
   in
+  let capability = req_capability req in
+  let capability_ref =
+    match capability_ref capability with
+    | Some ref -> ref
+    | None -> fail ("unknown capability in canonical graph request: " ^ capability)
+  in
   json_obj
-    (json_field "tag" (json_string tag) :: json_field "capability" (json_string (req_capability req))
+    (json_field "tag" (json_string tag)
+    :: json_field "capability" (json_string capability)
+    :: json_field "capabilityRef" (json_string capability_ref)
+    :: json_field "requestSignatureRef" (json_string (req_signature_ref req))
     :: fields)
 
 let capability_request_to_graph_json capability req =
