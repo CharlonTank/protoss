@@ -1625,6 +1625,8 @@ let () =
   assert_true "project package records public interface"
     (contains_substring package_content "(interface ");
   let interface_hash = sexp_atom_field "interface-hash" package_content in
+  assert_true "project package public interface records capability scope"
+    (contains_substring package_content "(capability-scope \"Human.ask\")");
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
   let package_checked = Workspace.check_package manifest_a in
@@ -1662,6 +1664,22 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "invalid package interface write leaves package store untouched"
     (package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss"));
+  let capability_interface_ws = temp_dir "workspace-interface-capability" in
+  copy_tree ws_a capability_interface_ws;
+  let capability_manifest_path = Filename.concat capability_interface_ws "protoss.toml" in
+  write_file capability_manifest_path
+    (replace_once (Store.read_file capability_manifest_path) "capabilities = [\"Human.ask\"]"
+       "capabilities = [\"Clock.read\"]");
+  let capability_app_path = Filename.concat capability_interface_ws "src/app.protoss" in
+  write_file capability_app_path
+    (replace_once (Store.read_file capability_app_path) "(Human.ask \"Name?\")" "(Clock.read)");
+  let capability_manifest = Workspace.parse_manifest capability_interface_ws in
+  let capability_package = Workspace.write_package capability_manifest in
+  let capability_interface_hash =
+    sexp_atom_field "interface-hash" (Store.read_file capability_package.package_path)
+  in
+  assert_true "package interface hash includes public capability scope"
+    (not (String.equal interface_hash capability_interface_hash));
   let dot_before_drift = snapshot (Filename.concat ws_a ".protoss") in
   let math_path = Filename.concat ws_a "src/math.protoss" in
   let math_before = Store.read_file math_path in

@@ -836,6 +836,7 @@ let package_interface_item checked symbol =
         [
           lock_item "name" [ lock_string d.def.name ];
           lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+          lock_string_list "capability-scope" d.capabilities;
         ]
   | None -> (
       match
