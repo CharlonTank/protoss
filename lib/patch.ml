@@ -533,6 +533,41 @@ let inspect_audit ?(ref = "latest") store_root =
   try Patch_audit.inspect_audit ~ref store_root with
   | Patch_audit.Error msg -> fail msg
 
+let host_contracts_dir store_root = Filename.concat store_root "host-contracts"
+
+let host_contract_path store_root = Filename.concat store_root "host.contract.json"
+
+let host_contract_current_path store_root = Filename.concat store_root "host_contract"
+
+let sanitize_id s =
+  let b = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '-' | '_' as c -> Buffer.add_char b c
+      | _ -> Buffer.add_char b '_')
+    s;
+  Buffer.contents b
+
+let host_contract_object_path store_root contract_hash =
+  Filename.concat (host_contracts_dir store_root) (sanitize_id contract_hash ^ ".host-contract.json")
+
+let host_contract_hash contract_json =
+  let obj = Json.parse contract_json in
+  match Json.field "contractHash" obj with
+  | Some value -> (
+      match Json.string value with
+      | Some hash -> hash
+      | None -> fail "host contract field must be string: contractHash")
+  | None -> fail "host contract field must be string: contractHash"
+
+let write_host_contract store_root graph_json =
+  let contract_json = Canonical_ir.graph_host_contract graph_json in
+  let contract_hash = host_contract_hash contract_json in
+  Store.ensure_dir (host_contracts_dir store_root);
+  Store.write_file_atomic (host_contract_path store_root) contract_json;
+  Store.write_file_atomic (host_contract_object_path store_root contract_hash) contract_json;
+  Store.write_file_atomic (host_contract_current_path store_root) (contract_hash ^ "\n")
+
 let write_program_metadata store_root checked =
   let canonical = Kernel.serialize_checked_program checked in
   Store.write_file_atomic (Filename.concat store_root "capabilities")
@@ -541,7 +576,8 @@ let write_program_metadata store_root checked =
   Store.write_file_atomic (Filename.concat store_root "program.canon") (canonical ^ "\n");
   let graph_json = Kernel.checked_to_graph_json checked in
   Store.write_file_atomic (Filename.concat store_root "program.graph.json") graph_json;
-  Store.write_graph store_root (Kernel.checked_to_graph_content_hash checked) graph_json
+  Store.write_graph store_root (Kernel.checked_to_graph_content_hash checked) graph_json;
+  write_host_contract store_root graph_json
 
 let capability_scopes_dir store_root = Filename.concat store_root "capability-scopes"
 

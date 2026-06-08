@@ -2527,11 +2527,20 @@ let () =
   let store_graph_host_contract_json =
     Workspace.store_graph_host_contract build_a.store store_graph_hash
   in
+  let store_host_contract_path = Workspace.host_contract_path build_a.store in
+  assert_true "project store host contract file" (Sys.file_exists store_host_contract_path);
+  assert_equal "project store host contract file content" store_graph_host_contract_json
+    (Store.read_file store_host_contract_path);
   let store_graph_host_contract = Json.parse store_graph_host_contract_json in
   assert_equal "project store graph host contract format" "protoss-host-contract-v1"
     (json_string_field "format" store_graph_host_contract);
   assert_equal "project store graph host contract graph hash" store_graph_hash
     (json_string_field "graphHash" store_graph_host_contract);
+  let store_host_contract_hash = json_string_field "contractHash" store_graph_host_contract in
+  assert_equal "project store host contract current ref" store_host_contract_hash
+    (String.trim (Store.read_file (Workspace.host_contract_current_path build_a.store)));
+  assert_equal "project store host contract object" store_graph_host_contract_json
+    (Store.read_file (Workspace.host_contract_object_path build_a.store store_host_contract_hash));
   assert_equal "project store graph host contract deterministic" store_graph_host_contract_json
     (Workspace.store_graph_host_contract build_a.store store_graph_hash);
   assert_equal "project store graph host contract check" "Host contract OK\n"
@@ -3069,6 +3078,60 @@ let () =
    with Workspace.Error msg ->
      assert_true "audit reports content-addressed graph mismatch"
        (contains_substring msg "content-addressed canonical graph mismatch"));
+  let host_contract_corrupt_root = temp_dir "workspace-host-contract-corrupt" in
+  copy_tree ws_a host_contract_corrupt_root;
+  let host_contract_corrupt_manifest = Workspace.parse_manifest host_contract_corrupt_root in
+  let host_contract_corrupt_store = Workspace.store_root host_contract_corrupt_manifest in
+  Store.write_file_atomic
+    (Workspace.host_contract_path host_contract_corrupt_store)
+    (replace_once
+       (Store.read_file (Workspace.host_contract_path host_contract_corrupt_store))
+       "Human.ask" "Clock.read");
+  (try
+     ignore (Workspace.audit host_contract_corrupt_manifest);
+     fail "audit should reject corrupt host contract"
+   with Workspace.Error msg ->
+     assert_true "audit reports host contract mismatch"
+       (contains_substring msg "host contract mismatch: host.contract.json"));
+  let host_contract_ref_corrupt_root = temp_dir "workspace-host-contract-ref-corrupt" in
+  copy_tree ws_a host_contract_ref_corrupt_root;
+  let host_contract_ref_corrupt_manifest =
+    Workspace.parse_manifest host_contract_ref_corrupt_root
+  in
+  let host_contract_ref_corrupt_store = Workspace.store_root host_contract_ref_corrupt_manifest in
+  Store.write_file_atomic (Workspace.host_contract_current_path host_contract_ref_corrupt_store)
+    "p2:bad\n";
+  (try
+     ignore (Workspace.audit host_contract_ref_corrupt_manifest);
+     fail "audit should reject corrupt host contract ref"
+   with Workspace.Error msg ->
+     assert_true "audit reports host contract ref mismatch"
+       (contains_substring msg "host contract ref mismatch"));
+  let host_contract_object_corrupt_root = temp_dir "workspace-host-contract-object-corrupt" in
+  copy_tree ws_a host_contract_object_corrupt_root;
+  let host_contract_object_corrupt_manifest =
+    Workspace.parse_manifest host_contract_object_corrupt_root
+  in
+  let host_contract_object_corrupt_store =
+    Workspace.store_root host_contract_object_corrupt_manifest
+  in
+  let host_contract_object_hash =
+    String.trim
+      (Store.read_file (Workspace.host_contract_current_path host_contract_object_corrupt_store))
+  in
+  Store.write_file_atomic
+    (Workspace.host_contract_object_path host_contract_object_corrupt_store
+       host_contract_object_hash)
+    (Store.read_file
+       (Workspace.host_contract_object_path host_contract_object_corrupt_store
+          host_contract_object_hash)
+    ^ "corrupt\n");
+  (try
+     ignore (Workspace.audit host_contract_object_corrupt_manifest);
+     fail "audit should reject corrupt content-addressed host contract"
+   with Workspace.Error msg ->
+     assert_true "audit reports content-addressed host contract mismatch"
+       (contains_substring msg "content-addressed host contract mismatch"));
   let extra_graph_bad_root = temp_dir "workspace-extra-graph-bad" in
   copy_tree ws_a extra_graph_bad_root;
   let extra_graph_bad_manifest = Workspace.parse_manifest extra_graph_bad_root in
@@ -3142,6 +3205,18 @@ let () =
   assert_equal "patch updates graph object"
     (Store.read_file (Filename.concat patched_store "program.graph.json"))
     (Store.read_file (Store.graph_path patched_store (json_string_field "graphHash" patched_graph)));
+  let patched_host_contract =
+    Canonical_ir.graph_host_contract (Store.read_file (Filename.concat patched_store "program.graph.json"))
+  in
+  assert_equal "patch updates host contract" patched_host_contract
+    (Store.read_file (Workspace.host_contract_path patched_store));
+  let patched_host_contract_hash =
+    json_string_field "contractHash" (Json.parse patched_host_contract)
+  in
+  assert_equal "patch updates host contract ref" patched_host_contract_hash
+    (String.trim (Store.read_file (Workspace.host_contract_current_path patched_store)));
+  assert_equal "patch updates host contract object" patched_host_contract
+    (Store.read_file (Workspace.host_contract_object_path patched_store patched_host_contract_hash));
 
   let corrupt_root = temp_dir "workspace-corrupt" in
   copy_tree ws_a corrupt_root;

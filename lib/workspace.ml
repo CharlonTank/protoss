@@ -263,6 +263,15 @@ let builds_dir store = Filename.concat store "builds"
 
 let meta_dir store = Filename.concat store "meta"
 
+let host_contracts_dir store = Filename.concat store "host-contracts"
+
+let host_contract_path store = Filename.concat store "host.contract.json"
+
+let host_contract_current_path store = Filename.concat store "host_contract"
+
+let host_contract_object_path store contract_hash =
+  Filename.concat (host_contracts_dir store) (sanitize_id contract_hash ^ ".host-contract.json")
+
 let project_store_dirs store =
   Store.ensure_store store;
   List.iter ensure_dir
@@ -275,11 +284,29 @@ let project_store_dirs store =
       defids_dir store;
       builds_dir store;
       meta_dir store;
+      host_contracts_dir store;
     ]
 
 let write_program_graph store checked graph_json =
   write_file (Filename.concat store "program.graph.json") graph_json;
   Store.write_graph store (Kernel.checked_to_graph_content_hash checked) graph_json
+
+let host_contract_hash contract_json =
+  let obj = Json.parse contract_json in
+  match Json.field "contractHash" obj with
+  | Some value -> (
+      match Json.string value with
+      | Some hash -> hash
+      | None -> fail "host contract field must be string: contractHash")
+  | None -> fail "host contract field must be string: contractHash"
+
+let write_host_contract store graph_json =
+  let contract_json = Canonical_ir.graph_host_contract graph_json in
+  let contract_hash = host_contract_hash contract_json in
+  write_file (host_contract_path store) contract_json;
+  write_file (host_contract_object_path store contract_hash) contract_json;
+  write_file (host_contract_current_path store) (contract_hash ^ "\n");
+  contract_hash
 
 let unit_key path =
   path_hash path |> sanitize_id
@@ -703,6 +730,7 @@ let build ?(write = true) ?lock_hash manifest =
     Store.write_type_aliases store prepared.checked.program.type_aliases;
     write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
     write_program_graph store prepared.checked prepared.program_graph;
+    ignore (write_host_contract store prepared.program_graph);
     cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
     List.iter
       (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
@@ -2015,6 +2043,27 @@ let audit_program_graph store checked =
   if not (String.equal stored_by_hash expected) then
     fail ("content-addressed canonical graph mismatch: " ^ graph_path)
 
+let audit_host_contract store checked =
+  let graph_json = Kernel.checked_to_graph_json checked in
+  let expected = Canonical_ir.graph_host_contract graph_json in
+  let expected_hash = host_contract_hash expected in
+  let path = host_contract_path store in
+  if not (Sys.file_exists path) then fail "missing host contract: host.contract.json";
+  let stored = read_file path in
+  if not (String.equal stored expected) then fail "host contract mismatch: host.contract.json";
+  let current_path = host_contract_current_path store in
+  if not (Sys.file_exists current_path) then fail "missing host contract ref: host_contract";
+  let current = trim (read_file current_path) in
+  if not (String.equal current expected_hash) then
+    fail ("host contract ref mismatch: expected " ^ expected_hash ^ ", got " ^ current);
+  let object_path = host_contract_object_path store expected_hash in
+  if not (Sys.file_exists object_path) then
+    fail ("missing content-addressed host contract: " ^ object_path);
+  let stored_by_hash = read_file object_path in
+  if not (String.equal stored_by_hash expected) then
+    fail ("content-addressed host contract mismatch: " ^ object_path);
+  ignore (Canonical_ir.check_graph_host_contract graph_json stored)
+
 let audit_program_canonical store checked =
   let path = Filename.concat store "program.canon" in
   if not (Sys.file_exists path) then fail "missing canonical program: program.canon";
@@ -2050,6 +2099,7 @@ let audit manifest =
   audit_patch_audits store;
   audit_program_canonical store checked;
   audit_program_graph store checked;
+  audit_host_contract store checked;
   audit_all_store_graphs store;
   List.iter
     (fun (cd : Kernel.checked_def) ->
