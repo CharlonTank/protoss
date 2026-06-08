@@ -597,22 +597,31 @@ type build_result = {
   store : string;
 }
 
-let build ?(write = true) manifest =
+type prepared_build = {
+  units : unit_load list;
+  checked : Kernel.checked;
+  stats : build_stats;
+  build_id : string;
+  program_canonical : string;
+  program_graph : string;
+}
+
+let prepare_build manifest =
   let stats = empty_stats () in
   let store = store_root manifest in
   let units = load_units manifest store stats in
   check_unit_access manifest units;
   let program =
-	    {
-	      imports = [];
-	      capabilities =
-	        List.sort_uniq String.compare
-	          (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
-	      module_name = None;
-	      exports = None;
-	      type_aliases = List.concat (List.map (fun u -> u.type_aliases) units);
-	      defs = List.concat (List.map (fun u -> u.defs) units);
-	    }
+    {
+      imports = [];
+      capabilities =
+        List.sort_uniq String.compare
+          (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
+      module_name = None;
+      exports = None;
+      type_aliases = List.concat (List.map (fun u -> u.type_aliases) units);
+      defs = List.concat (List.map (fun u -> u.defs) units);
+    }
   in
   stats.typechecked <-
     List.fold_left
@@ -624,26 +633,33 @@ let build ?(write = true) manifest =
   let program_canonical = Kernel.serialize_checked_program checked in
   let program_graph = Kernel.checked_to_graph_json checked in
   let build_id = Kernel.hash_string program_canonical in
+  { units; checked; stats; build_id; program_canonical; program_graph }
+
+let build ?(write = true) manifest =
+  let prepared = prepare_build manifest in
+  let store = store_root manifest in
   if write then (
     project_store_dirs store;
-    List.iter (write_unit store) units;
+    List.iter (write_unit store) prepared.units;
     write_file (Filename.concat store "capabilities")
-      (String.concat "\n" checked.program.capabilities ^ "\n");
-    write_file (Filename.concat store "program.canon") (program_canonical ^ "\n");
-    write_file (Filename.concat store "program.graph.json") program_graph;
-    cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) checked.defs);
-    List.iter (write_project_def store (cache_root manifest) checked stats build_id) checked.defs;
-    write_file (Filename.concat (builds_dir store) (sanitize_id build_id ^ ".build"))
-      ("id=" ^ build_id ^ "\npackage=" ^ manifest.name ^ "\nversion=" ^ manifest.version
-     ^ "\nprogram_hash=" ^ build_id ^ "\ndefs="
-      ^ String.concat " " (List.map (fun d -> d.Kernel.def.name) checked.defs)
+      (String.concat "\n" prepared.checked.program.capabilities ^ "\n");
+    write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
+    write_file (Filename.concat store "program.graph.json") prepared.program_graph;
+    cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
+    List.iter
+      (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
+      prepared.checked.defs;
+    write_file (Filename.concat (builds_dir store) (sanitize_id prepared.build_id ^ ".build"))
+      ("id=" ^ prepared.build_id ^ "\npackage=" ^ manifest.name ^ "\nversion="
+     ^ manifest.version ^ "\nprogram_hash=" ^ prepared.build_id ^ "\ndefs="
+      ^ String.concat " " (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs)
       ^ "\n");
-    write_file (Filename.concat store "current") (build_id ^ "\n");
+    write_file (Filename.concat store "current") (prepared.build_id ^ "\n");
     write_file (Filename.concat store "roots")
       ("package=" ^ manifest.name ^ "\nversion=" ^ manifest.version ^ "\nentrypoints="
      ^ String.concat " " manifest.entrypoints ^ "\nroots="
       ^ String.concat " "
-          (units
+          (prepared.units
           |> List.filter (fun u ->
                  List.exists
                    (fun entry -> String.equal u.path (path_in_project manifest entry))
@@ -651,7 +667,87 @@ let build ?(write = true) manifest =
           |> List.concat_map (fun u -> List.map (fun (d : def) -> d.name) u.defs))
       ^ "\n");
     write_file (Filename.concat store "world_refs") "");
-  { manifest; checked; stats; build_id; store }
+  { manifest; checked = prepared.checked; stats = prepared.stats; build_id = prepared.build_id; store }
+
+let lock_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "lock"
+
+let relative_to_root manifest path =
+  let root = realpath_or manifest.root in
+  let path = realpath_or path in
+  let root_prefix = if has_suffix "/" root then root else root ^ "/" in
+  if has_prefix root_prefix path then
+    String.sub path (String.length root_prefix) (String.length path - String.length root_prefix)
+  else path
+
+let lock_item name values =
+  "(" ^ name
+  ^ (match values with [] -> "" | _ -> " " ^ String.concat " " values)
+  ^ ")"
+
+let lock_string s = Ast.quote s
+
+let lock_string_list name values =
+  lock_item name (List.map lock_string (List.sort String.compare values))
+
+let unit_lock manifest (unit : unit_load) =
+  let rel_import import =
+    normalize_path (Filename.dirname unit.path) import |> relative_to_root manifest
+  in
+  lock_item "unit"
+    [
+      lock_item "path" [ lock_string (relative_to_root manifest unit.path) ];
+      lock_item "source-hash" [ unit.source_hash ];
+      lock_string_list "imports" (List.map rel_import unit.imports);
+      lock_string_list "capabilities" unit.capabilities;
+      lock_string_list "public-symbols" unit.public_symbols;
+      lock_string_list "all-symbols" unit.all_symbols;
+    ]
+
+let lock_content manifest prepared =
+  let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
+  String.concat "\n"
+    [
+      "(protoss-lock-v1";
+      "  " ^ lock_item "package" [ lock_string manifest.name ];
+      "  " ^ lock_item "version" [ lock_string manifest.version ];
+      "  " ^ lock_item "canonical-version" [ lock_string Kernel.canonical_version ];
+      "  " ^ lock_item "canonical-graph-version" [ lock_string Kernel.canonical_graph_version ];
+      "  " ^ lock_item "program-hash" [ prepared.build_id ];
+      "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
+      "  " ^ lock_item "program-graph-hash" [ Kernel.hash_string prepared.program_graph ];
+      "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
+      "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
+      "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  "
+      ^ lock_item "defs"
+          (prepared.checked.defs
+          |> List.map (fun (d : Kernel.checked_def) ->
+                 lock_item "def"
+                   [
+                     lock_item "name" [ lock_string d.def.name ];
+                     lock_item "def-id" [ d.def_id ];
+                     lock_item "hash" [ Kernel.hash_string d.canonical ];
+                   ]));
+      "  " ^ lock_item "units" (List.map (unit_lock manifest) units);
+      ")";
+      "";
+    ]
+
+let write_lock manifest =
+  let prepared = prepare_build manifest in
+  let path = lock_path manifest in
+  ensure_dir (Filename.dirname path);
+  let content = lock_content manifest prepared in
+  write_file path content;
+  (path, Kernel.hash_string content)
+
+let check_lock manifest =
+  let path = lock_path manifest in
+  if not (Sys.file_exists path) then fail ("missing lockfile: " ^ path);
+  let expected = lock_content manifest (prepare_build manifest) in
+  let actual = read_file path in
+  if not (String.equal actual expected) then fail ("lockfile out of date: " ^ path);
+  Kernel.hash_string expected
 
 let check_project manifest =
   ignore (build ~write:false manifest)

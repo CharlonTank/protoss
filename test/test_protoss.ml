@@ -1389,6 +1389,29 @@ let () =
     (String.trim (Store.read_file (capability_scope_file "askName")));
   assert_equal "project store pure capability scope" ""
     (String.trim (Store.read_file (capability_scope_file "appMain")));
+  let lock_path, lock_hash = Workspace.write_lock manifest_a in
+  assert_true "project lock writes file" (Sys.file_exists lock_path);
+  let lock_before = Store.read_file lock_path in
+  assert_true "project lock records version" (contains_substring lock_before "protoss-lock-v1");
+  assert_true "project lock records program hash" (contains_substring lock_before build_a.build_id);
+  assert_true "project lock records source units" (contains_substring lock_before "(source-hash p1:");
+  assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
+  let lock_path_again, lock_hash_again = Workspace.write_lock manifest_a in
+  assert_equal "project lock deterministic path" lock_path lock_path_again;
+  assert_equal "project lock deterministic hash" lock_hash lock_hash_again;
+  assert_equal "project lock deterministic content" lock_before (Store.read_file lock_path_again);
+  let dot_before_drift = snapshot (Filename.concat ws_a ".protoss") in
+  let math_path = Filename.concat ws_a "src/math.protoss" in
+  let math_before = Store.read_file math_path in
+  write_file math_path (math_before ^ "(def drift Nat 0)\n");
+  (try
+     ignore (Workspace.check_lock manifest_a);
+     fail "project lock check should reject source drift"
+   with Workspace.Error _ -> ());
+  assert_equal "project lock drift keeps lockfile" lock_before (Store.read_file lock_path);
+  assert_true "project lock drift leaves .protoss untouched"
+    (dot_before_drift = snapshot (Filename.concat ws_a ".protoss"));
+  write_file math_path math_before;
   let scope_corrupt_root = temp_dir "workspace-scope-corrupt" in
   copy_tree ws_a scope_corrupt_root;
   let scope_corrupt_manifest = Workspace.parse_manifest scope_corrupt_root in

@@ -9,7 +9,7 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
-     \       protoss project init|check|build [project] [--stats]\n\
+     \       protoss project init|check|build|lock [project] [--stats|--check]\n\
      \       protoss build [project] [--target web] [--stats]\n\
      \       protoss patch check|apply <store> <patch.json>\n\
      \       protoss patch from-diff <store-a> <store-b>\n\
@@ -296,6 +296,16 @@ let command_project_build args =
   Printf.printf "Build %s\nStore %s\n" result.Protoss.Workspace.build_id result.store;
   if stats then print_string (Protoss.Workspace.stats_to_string result.stats)
 
+let command_project_lock args =
+  let root = project_arg args in
+  let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
+  if has_flag "--check" args then
+    let hash = Protoss.Workspace.check_lock manifest in
+    Printf.printf "Lock OK %s\nPath %s\n" hash (Protoss.Workspace.lock_path manifest)
+  else
+    let path, hash = Protoss.Workspace.write_lock manifest in
+    Printf.printf "Lock %s\nPath %s\n" hash path
+
 let command_project = function
   | "init" :: args ->
       let root = project_arg args in
@@ -307,6 +317,7 @@ let command_project = function
       Protoss.Workspace.check_project manifest;
       Printf.printf "Project OK %s\n" manifest.name
   | "build" :: args -> command_project_build args
+  | "lock" :: args -> command_project_lock args
   | _ -> usage ()
 
 let command_app = function
