@@ -2086,6 +2086,30 @@ let () =
   assert_equal "stdlib Protoss.parseText caseList expr"
     "Ok [PDDef {expr = PECaseList {consBody = PEVar \"head\", head = \"head\", nilBody = PEVar \"0\", tail = \"tail\", target = PEVar \"xs\"}, name = \"headOrZero\", typ = PTName \"Nat\"}]"
     (Runtime.value_to_string protoss_parsed_case_list_expr);
+  let protoss_parsed_nil_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedNilExpr"
+  in
+  assert_equal "stdlib Protoss.parseText Nil expr"
+    "Ok [PDDef {expr = PENil {arg = None unit, typ = None unit}, name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
+    (Runtime.value_to_string protoss_parsed_nil_expr);
+  let protoss_parsed_typed_nil_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedTypedNilExpr"
+  in
+  assert_equal "stdlib Protoss.parseText typed Nil expr"
+    "Ok [PDDef {expr = PENil {arg = Some PEVar \"Nat\", typ = Some PTName \"Nat\"}, name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
+    (Runtime.value_to_string protoss_parsed_typed_nil_expr);
+  let protoss_parsed_cons_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedConsExpr"
+  in
+  assert_equal "stdlib Protoss.parseText Cons expr"
+    "Ok [PDDef {expr = PECons {head = PEVar \"1\", tail = PENil {arg = None unit, typ = None unit}, typ = Some PTName \"Nat\"}, name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
+    (Runtime.value_to_string protoss_parsed_cons_expr);
+  let protoss_parsed_cons_inferred_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedConsInferredExpr"
+  in
+  assert_equal "stdlib Protoss.parseText inferred Cons expr"
+    "Ok [PDDef {expr = PECons {head = PEVar \"1\", tail = PENil {arg = None unit, typ = None unit}, typ = None unit}, name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
+    (Runtime.value_to_string protoss_parsed_cons_inferred_expr);
   let protoss_parsed_done_expr, _ =
     Runtime.normalize_def stdlib_generics "protossParsedDoneExpr"
   in
@@ -2160,6 +2184,16 @@ let () =
   assert_equal "stdlib Protoss.parseText bad caseList expr"
     "Err \"expected caseList Cons branch\""
     (Runtime.value_to_string protoss_parsed_bad_case_list_expr);
+  let protoss_parsed_bad_nil_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadNilExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad Nil expr" "Err \"too many Nil arguments\""
+    (Runtime.value_to_string protoss_parsed_bad_nil_expr);
+  let protoss_parsed_bad_cons_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadConsExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad Cons expr" "Err \"too many Cons arguments\""
+    (Runtime.value_to_string protoss_parsed_bad_cons_expr);
   let protoss_parsed_bad_bind_expr, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadBindExpr"
   in

@@ -467,6 +467,18 @@
 (def protossParsedCaseListExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def headOrZero Nat (caseList xs (Nil 0) (Cons head tail head)))"))
 
+(def protossParsedNilExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def xs (List Nat) Nil)"))
+
+(def protossParsedTypedNilExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def xs (List Nat) (Nil Nat))"))
+
+(def protossParsedConsExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def xs (List Nat) (Cons Nat 1 Nil))"))
+
+(def protossParsedConsInferredExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def xs (List Nat) (Cons 1 Nil))"))
+
 (def protossParsedDoneExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def p (Process String) (done \"ok\"))"))
 
@@ -505,6 +517,12 @@
 
 (def protossParsedBadCaseListExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Nat (caseList xs (Nil 0)))"))
+
+(def protossParsedBadNilExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad (List Nat) (Nil Nat extra))"))
+
+(def protossParsedBadConsExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad (List Nat) (Cons Nat 1 Nil extra))"))
 
 (def protossParsedBadBindExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad (Process String) (bind p answer))"))

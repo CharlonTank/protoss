@@ -1,4 +1,4 @@
-; Protoss stdlib v0.28. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.29. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -91,6 +91,13 @@
   (head String)
   (tail String)
   (consBody ProtossExpr))
+(record ProtossNilExpr
+  (typ (Maybe ProtossType))
+  (arg (Maybe ProtossExpr)))
+(record ProtossConsExpr
+  (typ (Maybe ProtossType))
+  (head ProtossExpr)
+  (tail ProtossExpr))
 (record ProtossBindExpr
   (process ProtossExpr)
   (param String)
@@ -117,6 +124,8 @@
   (PEInst ProtossInstExpr)
   (PELambda ProtossLambdaExpr)
   (PELet ProtossLetExpr)
+  (PECons ProtossConsExpr)
+  (PENil ProtossNilExpr)
   (PERecord (List ProtossRecordFieldExpr))
   (PERecur ProtossExpr)
   (PERequest ProtossRequest)
@@ -162,7 +171,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.28")
+(def Stdlib.version String "v0.29")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -1161,7 +1170,14 @@
           (false
             (case ((String.eqString name) "false")
               (true (variant PEBool false))
-              (false (variant PEVar name)))))))))
+              (false
+                (case ((String.eqString name) "Nil")
+                  (true
+                    (variant PENil
+                      (record
+                        (typ (variant None unit))
+                        (arg (variant None unit)))))
+                  (false (variant PEVar name)))))))))))
 
 (defrec Protoss.exprToType (-> ProtossExpr (Result String ProtossType))
   (variant expr)
@@ -1207,6 +1223,7 @@
   (PEBool value (Protoss.typeErr "expected type"))
   (PECase value (Protoss.typeErr "expected type"))
   (PECaseList value (Protoss.typeErr "expected type"))
+  (PECons value (Protoss.typeErr "expected type"))
   (PEDone value (Protoss.typeErr "expected type"))
   (PEField value (Protoss.typeErr "expected type"))
   (PEFoldNat value (Protoss.typeErr "expected type"))
@@ -1215,6 +1232,7 @@
   (PEInst value (Protoss.typeErr "expected type"))
   (PELambda value (Protoss.typeErr "expected type"))
   (PELet value (Protoss.typeErr "expected type"))
+  (PENil value (Protoss.typeErr "expected type"))
   (PERecord value (Protoss.typeErr "expected type"))
   (PERecur value (Protoss.typeErr "expected type"))
   (PERequest value (Protoss.typeErr "expected type"))
@@ -1618,6 +1636,60 @@
           (Cons extraHead extraTail
             (Protoss.exprErr "too many recur arguments")))))))
 
+(def Protoss.finishNilExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil
+        (Protoss.exprOk
+          (variant PENil
+            (record
+              (typ (variant None unit))
+              (arg (variant None unit))))))
+      (Cons typeExpr extra
+        (caseList extra
+          (Nil
+            (case (Protoss.exprToType typeExpr)
+              (Err err (Protoss.exprErr err))
+              (Ok typ
+                (Protoss.exprOk
+                  (variant PENil
+                    (record
+                      (typ (variant Some typ))
+                      (arg (variant Some typeExpr))))))))
+          (Cons extraHead extraTail
+            (Protoss.exprErr "too many Nil arguments")))))))
+
+(def Protoss.finishConsExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil (Protoss.exprErr "expected Cons head"))
+      (Cons first rest
+        (caseList rest
+          (Nil (Protoss.exprErr "expected Cons tail"))
+          (Cons second more
+            (caseList more
+              (Nil
+                (Protoss.exprOk
+                  (variant PECons
+                    (record
+                      (typ (variant None unit))
+                      (head first)
+                      (tail second)))))
+              (Cons third extra
+                (caseList extra
+                  (Nil
+                    (case (Protoss.exprToType first)
+                      (Err err (Protoss.exprErr err))
+                      (Ok typ
+                        (Protoss.exprOk
+                          (variant PECons
+                            (record
+                              (typ (variant Some typ))
+                              (head second)
+                              (tail third)))))))
+                  (Cons extraHead extraTail
+                    (Protoss.exprErr "too many Cons arguments")))))))))))
+
 (def Protoss.finishGetExpr (-> (List ProtossExpr) (Result String ProtossExpr))
   (lambda (args (List ProtossExpr))
     (caseList args
@@ -1677,6 +1749,10 @@
 (def Protoss.parseCaseListNilBranch (-> ProtossExpr (Result String ProtossExpr))
   (lambda (branch ProtossExpr)
     (case branch
+      (PENil nil
+        (case (get nil arg)
+          (None (Protoss.exprErr "expected caseList Nil body"))
+          (Some body (Protoss.exprOk body))))
       (PEApply call
         (case (get call fn)
           (PEVar name
@@ -1707,6 +1783,21 @@
   (-> ProtossExpr (Result String ProtossCaseListConsBranch))
   (lambda (branch ProtossExpr)
     (case branch
+      (PECons cons
+        (case (get cons typ)
+          (None (Protoss.caseListConsErr "expected caseList Cons branch"))
+          (Some typ
+            (case typ
+              (PTName head
+                (case (get cons head)
+                  (PEVar tail
+                    (Protoss.caseListConsOk
+                      (record
+                        (head head)
+                        (tail tail)
+                        (body (get cons tail)))))
+                  (_ (Protoss.caseListConsErr "expected caseList Cons tail"))))
+              (_ (Protoss.caseListConsErr "expected caseList Cons head"))))))
       (PEApply call
         (case (get call fn)
           (PEVar name
@@ -1948,25 +2039,28 @@
           (case ((String.eqString name) "inst")
             (true (Protoss.finishInstExpr args))
             (false
-              (case ((String.eqString name) "foldList")
-                (true (Protoss.finishFoldListExpr args))
+              (case ((String.eqString name) "Cons")
+                (true (Protoss.finishConsExpr args))
                 (false
-                  (case ((String.eqString name) "foldVariant")
-                    (true (Protoss.finishFoldVariantExpr args))
+                  (case ((String.eqString name) "foldList")
+                    (true (Protoss.finishFoldListExpr args))
                     (false
-                      (case ((String.eqString name) "caseList")
-                        (true (Protoss.finishCaseListExpr args))
+                      (case ((String.eqString name) "foldVariant")
+                        (true (Protoss.finishFoldVariantExpr args))
                         (false
-                          (case ((String.eqString name) "recur")
-                            (true (Protoss.finishRecurExpr args))
+                          (case ((String.eqString name) "caseList")
+                            (true (Protoss.finishCaseListExpr args))
                             (false
-                              (case ((String.eqString name) "done")
-                                (true (Protoss.finishDoneExpr args))
+                              (case ((String.eqString name) "recur")
+                                (true (Protoss.finishRecurExpr args))
                                 (false
-                                  (case ((String.eqString name) "bind")
-                                    (true (Protoss.finishBindExpr args))
+                                  (case ((String.eqString name) "done")
+                                    (true (Protoss.finishDoneExpr args))
                                     (false
-                                      ((Protoss.finishRequestNamedExpr name) args))))))))))))))))))))
+                                      (case ((String.eqString name) "bind")
+                                        (true (Protoss.finishBindExpr args))
+                                        (false
+                                          ((Protoss.finishRequestNamedExpr name) args))))))))))))))))))))))
 
 (def Protoss.finishNamedExpr
   (-> String (-> (List ProtossExpr) (Result String ProtossExpr)))
@@ -1995,11 +2089,12 @@
   (lambda (items (List ProtossExpr))
     (caseList items
       (Nil (Protoss.exprErr "expected expression"))
-      (Cons fn args
-        (case fn
-          (PEVar name
-            ((Protoss.finishNamedExpr name) args))
-          (_ ((Protoss.finishApplyExpr fn) args)))))))
+          (Cons fn args
+            (case fn
+              (PENil nil (Protoss.finishNilExpr args))
+              (PEVar name
+                ((Protoss.finishNamedExpr name) args))
+              (_ ((Protoss.finishApplyExpr fn) args)))))))
 
 (defrec Protoss.parseExpr (-> Sexp (Result String ProtossExpr))
   (variant value)
