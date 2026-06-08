@@ -404,6 +404,37 @@ let () =
         String.length (json_string_field "typeRef" def) > 3
         && String.length (json_string_field "termRef" def) > 3
     | [] -> false);
+  let graph_main_def = graph_def graph "main" in
+  let top_type_ref = json_string_field "typeRef" graph_main_def in
+  let top_term_ref = json_string_field "termRef" graph_main_def in
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json "\"nodeGraph\": " "\"nodeGraphMissing\": "));
+     fail "canonical graph missing nodeGraph should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing nodeGraph"
+       (contains_substring msg "canonical graph missing field: nodeGraph"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json
+             ("\"typeRef\": " ^ Ast.quote top_type_ref)
+             "\"typeRef\": \"p2:0000000000000000000000000000000000000000000000000000000000000001\""));
+     fail "canonical graph top-level typeRef mismatch should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects top-level typeRef mismatch"
+       (contains_substring msg "canonical graph typeRef mismatch: main"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json
+             ("\"termRef\": " ^ Ast.quote top_term_ref)
+             "\"termRef\": \"p2:0000000000000000000000000000000000000000000000000000000000000002\""));
+     fail "canonical graph top-level termRef mismatch should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects top-level termRef mismatch"
+       (contains_substring msg "canonical graph termRef mismatch: main"));
   assert_true "canonical node graph def refs"
     (match node_defs with
     | def :: _ ->
