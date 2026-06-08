@@ -40,6 +40,8 @@ let sanitize_name name =
 
 let objects_dir root = Filename.concat root "objects"
 
+let graphs_dir root = Filename.concat root "graphs"
+
 let defs_dir root = Filename.concat root "defs"
 
 let canonical_dir root = Filename.concat root "canonical"
@@ -49,10 +51,18 @@ let type_aliases_path root = Filename.concat (defs_dir root) "__types.protoss"
 let ensure_store root =
   ensure_dir root;
   ensure_dir (objects_dir root);
+  ensure_dir (graphs_dir root);
   ensure_dir (defs_dir root);
   ensure_dir (canonical_dir root)
 
 let object_path root hash = Filename.concat (objects_dir root) hash
+
+let graph_path root graph_hash =
+  Filename.concat (graphs_dir root) (sanitize_name graph_hash ^ ".graph.json")
+
+let write_graph root graph_hash graph_json =
+  ensure_store root;
+  write_file_atomic (graph_path root graph_hash) graph_json
 
 let put_object root kind content =
   ensure_store root;

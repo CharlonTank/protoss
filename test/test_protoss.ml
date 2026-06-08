@@ -2293,6 +2293,11 @@ let () =
   assert_equal "project store graph content hash"
     (Kernel.checked_to_graph_content_hash build_a.Workspace.checked)
     (json_string_field "graphHash" store_graph);
+  let store_graph_hash = json_string_field "graphHash" store_graph in
+  let store_graph_object_path = Store.graph_path build_a.store store_graph_hash in
+  assert_true "project store graph object" (Sys.file_exists store_graph_object_path);
+  assert_equal "project store graph object content" (Store.read_file store_graph_path)
+    (Store.read_file store_graph_object_path);
   assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
     (Store.read_file store_graph_path);
   let capability_scope_file name =
@@ -2777,6 +2782,24 @@ let () =
      ignore (Workspace.audit graph_corrupt_manifest);
      fail "audit should reject corrupt canonical graph"
    with Workspace.Error _ | Kernel.Error _ -> ());
+  let graph_object_corrupt_root = temp_dir "workspace-graph-object-corrupt" in
+  copy_tree ws_a graph_object_corrupt_root;
+  let graph_object_corrupt_manifest = Workspace.parse_manifest graph_object_corrupt_root in
+  let graph_object_corrupt_store = Workspace.store_root graph_object_corrupt_manifest in
+  let graph_object_corrupt_graph =
+    Json.parse (Store.read_file (Filename.concat graph_object_corrupt_store "program.graph.json"))
+  in
+  let graph_object_corrupt_path =
+    Store.graph_path graph_object_corrupt_store (json_string_field "graphHash" graph_object_corrupt_graph)
+  in
+  Store.write_file_atomic graph_object_corrupt_path
+    (Store.read_file graph_object_corrupt_path ^ "corrupt\n");
+  (try
+     ignore (Workspace.audit graph_object_corrupt_manifest);
+     fail "audit should reject corrupt content-addressed canonical graph"
+   with Workspace.Error msg ->
+     assert_true "audit reports content-addressed graph mismatch"
+       (contains_substring msg "content-addressed canonical graph mismatch"));
 
   let module_ws = temp_dir "workspace-modules" in
   ensure_dir module_ws;
@@ -2832,6 +2855,10 @@ let () =
     (Store.read_file (Filename.concat patched_store "program.canon"));
   assert_equal "patch updates program graph" (Kernel.checked_to_graph_json patched_checked)
     (Store.read_file (Filename.concat patched_store "program.graph.json"));
+  let patched_graph = Json.parse (Store.read_file (Filename.concat patched_store "program.graph.json")) in
+  assert_equal "patch updates graph object"
+    (Store.read_file (Filename.concat patched_store "program.graph.json"))
+    (Store.read_file (Store.graph_path patched_store (json_string_field "graphHash" patched_graph)));
 
   let corrupt_root = temp_dir "workspace-corrupt" in
   copy_tree ws_a corrupt_root;

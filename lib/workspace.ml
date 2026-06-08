@@ -277,6 +277,10 @@ let project_store_dirs store =
       meta_dir store;
     ]
 
+let write_program_graph store checked graph_json =
+  write_file (Filename.concat store "program.graph.json") graph_json;
+  Store.write_graph store (Kernel.checked_to_graph_content_hash checked) graph_json
+
 let unit_key path =
   path_hash path |> sanitize_id
 
@@ -698,7 +702,7 @@ let build ?(write = true) ?lock_hash manifest =
       (String.concat "\n" prepared.checked.program.capabilities ^ "\n");
     Store.write_type_aliases store prepared.checked.program.type_aliases;
     write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
-    write_file (Filename.concat store "program.graph.json") prepared.program_graph;
+    write_program_graph store prepared.checked prepared.program_graph;
     cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
     List.iter
       (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
@@ -1895,7 +1899,14 @@ let audit_program_graph store checked =
   if not (String.equal graph_canonical expected_canonical) then
     fail "canonical graph program mismatch: program.graph.json";
   let expected = trim (Kernel.checked_to_graph_json checked) in
-  if not (String.equal stored expected) then fail "canonical graph mismatch: program.graph.json"
+  if not (String.equal stored expected) then fail "canonical graph mismatch: program.graph.json";
+  let graph_hash = Kernel.checked_to_graph_content_hash checked in
+  let graph_path = Store.graph_path store graph_hash in
+  if not (Sys.file_exists graph_path) then
+    fail ("missing content-addressed canonical graph: " ^ graph_path);
+  let stored_by_hash = trim (read_file graph_path) in
+  if not (String.equal stored_by_hash expected) then
+    fail ("content-addressed canonical graph mismatch: " ^ graph_path)
 
 let audit_program_canonical store checked =
   let path = Filename.concat store "program.canon" in

@@ -539,8 +539,9 @@ let write_program_metadata store_root checked =
     (String.concat "\n" checked.Kernel.program.capabilities ^ "\n");
   Store.write_type_aliases store_root checked.Kernel.program.type_aliases;
   Store.write_file_atomic (Filename.concat store_root "program.canon") (canonical ^ "\n");
-  Store.write_file_atomic (Filename.concat store_root "program.graph.json")
-    (Kernel.checked_to_graph_json checked)
+  let graph_json = Kernel.checked_to_graph_json checked in
+  Store.write_file_atomic (Filename.concat store_root "program.graph.json") graph_json;
+  Store.write_graph store_root (Kernel.checked_to_graph_content_hash checked) graph_json
 
 let capability_scopes_dir store_root = Filename.concat store_root "capability-scopes"
 
