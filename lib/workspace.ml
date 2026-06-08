@@ -590,12 +590,8 @@ let build ?(write = true) manifest =
   let checked =
     try Kernel.check_program program with Kernel.Error msg -> fail msg
   in
-  let program_defs =
-    checked.defs
-    |> List.map (fun (d : Kernel.checked_def) ->
-           { Kernel.cname = d.def.name; cdef_id = d.def_id; ctyp = d.def.typ; cbody = d.cterm })
-  in
-  let program_canonical = Kernel.serialize_program checked.program.capabilities program_defs in
+  let program_canonical = Kernel.serialize_checked_program checked in
+  let program_graph = Kernel.checked_to_graph_json checked in
   let build_id = Kernel.hash_string program_canonical in
   if write then (
     project_store_dirs store;
@@ -603,6 +599,7 @@ let build ?(write = true) manifest =
     write_file (Filename.concat store "capabilities")
       (String.concat "\n" checked.program.capabilities ^ "\n");
     write_file (Filename.concat store "program.canon") (program_canonical ^ "\n");
+    write_file (Filename.concat store "program.graph.json") program_graph;
     cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) checked.defs);
     List.iter (write_project_def store (cache_root manifest) checked stats build_id) checked.defs;
     write_file (Filename.concat (builds_dir store) (sanitize_id build_id ^ ".build"))
@@ -853,6 +850,47 @@ let patch_from_diff store_a store_b =
   in
   "{ \"ops\": [\n  " ^ String.concat ",\n  " ops ^ "\n] }\n"
 
+let json_string_field name obj =
+  match Option.bind (Json.field name obj) Json.string with
+  | Some s -> s
+  | None -> fail ("canonical graph missing string field: " ^ name)
+
+let json_array_field name obj =
+  match Option.bind (Json.field name obj) Json.array with
+  | Some xs -> xs
+  | None -> fail ("canonical graph missing array field: " ^ name)
+
+let audit_program_graph store checked =
+  let path = Filename.concat store "program.graph.json" in
+  if not (Sys.file_exists path) then fail "missing canonical graph: program.graph.json";
+  let stored = trim (read_file path) in
+  let graph =
+    try Json.parse stored with Json.Error msg -> fail ("invalid canonical graph: " ^ msg)
+  in
+  let version = json_string_field "version" graph in
+  if not (String.equal version Kernel.canonical_graph_version) then
+    fail ("canonical graph version mismatch: " ^ version);
+  let canonical_version = json_string_field "canonicalVersion" graph in
+  if not (String.equal canonical_version Kernel.canonical_version) then
+    fail ("canonical version mismatch in graph: " ^ canonical_version);
+  let program_hash = json_string_field "programHash" graph in
+  let expected_hash = Kernel.hash_program checked in
+  if not (String.equal program_hash expected_hash) then
+    fail ("canonical graph program hash mismatch: " ^ program_hash);
+  let defs = json_array_field "defs" graph in
+  if List.length defs <> List.length checked.Kernel.defs then
+    fail "canonical graph definition count mismatch";
+  let expected = trim (Kernel.checked_to_graph_json checked) in
+  if not (String.equal stored expected) then fail "canonical graph mismatch: program.graph.json"
+
+let audit_program_canonical store checked =
+  let path = Filename.concat store "program.canon" in
+  if not (Sys.file_exists path) then fail "missing canonical program: program.canon";
+  let stored = trim (read_file path) in
+  ignore (Kernel.parse_serialized_program stored);
+  let expected = Kernel.serialize_checked_program checked in
+  if not (String.equal stored expected) then fail "canonical program mismatch: program.canon"
+
 let audit manifest =
   let store = store_root manifest in
   if not (Sys.file_exists store) then fail ("store not found: " ^ store);
@@ -865,6 +903,8 @@ let audit manifest =
   let checked =
     try Kernel.check_program program with Kernel.Error msg -> fail ("store program invalid: " ^ msg)
   in
+  audit_program_canonical store checked;
+  audit_program_graph store checked;
   List.iter
     (fun (cd : Kernel.checked_def) ->
       let canonical_path = Store.canonical_path store cd.def.name in

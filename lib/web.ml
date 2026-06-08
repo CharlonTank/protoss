@@ -586,6 +586,8 @@ let build ?out project =
   write_file (Filename.concat out_dir "protoss-runtime.js") runtime_js;
   write_file (Filename.concat out_dir "protoss-app.json") app_json;
   write_file (Filename.concat out_dir "protoss-graph.json") (stored_graph_json build.store);
+  write_file (Filename.concat out_dir "protoss-canon-graph.json")
+    (Kernel.checked_to_graph_json build.checked);
   write_file (Filename.concat out_dir "protoss-capabilities.json")
     (json_obj [ json_field "capabilities" (json_array json_string build.checked.program.capabilities) ] ^ "\n");
   write_file (Filename.concat out_dir "protoss-world.json") (current_world_json ());

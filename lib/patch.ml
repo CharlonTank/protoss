@@ -347,6 +347,14 @@ let describe_checked checked_patch =
   | [ { changed_checked_def = None; _ } ] -> "no-object"
   | _ -> Kernel.hash_program checked_patch.checked
 
+let write_program_metadata store_root checked =
+  let canonical = Kernel.serialize_checked_program checked in
+  Store.write_file_atomic (Filename.concat store_root "capabilities")
+    (String.concat "\n" checked.Kernel.program.capabilities ^ "\n");
+  Store.write_file_atomic (Filename.concat store_root "program.canon") (canonical ^ "\n");
+  Store.write_file_atomic (Filename.concat store_root "program.graph.json")
+    (Kernel.checked_to_graph_json checked)
+
 let apply store_root patch_path =
   let checked_patch = check store_root patch_path in
   let current =
@@ -371,6 +379,7 @@ let apply store_root patch_path =
       let normal, _ = Runtime.normalize_def checked_patch.checked cd.def.name in
       ignore (Store.write_def store_root cd.def cd.canonical (Runtime.value_to_string normal)))
     checked_patch.checked.defs;
+  write_program_metadata store_root checked_patch.checked;
   (if Sys.file_exists (Filename.concat store_root "web_app") then
      let contract = Web.check_contract checked_patch.checked in
      Web.write_web_marker store_root contract);

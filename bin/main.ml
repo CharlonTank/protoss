@@ -1,7 +1,7 @@
 let usage () =
   prerr_endline
     "usage: protoss parse|check|nf|hash <file>\n\
-     \       protoss canon <file>\n\
+     \       protoss canon <file> | protoss canon --graph <file>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss run <file> --entry <name>\n\
      \       protoss resume <file> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
@@ -113,6 +113,10 @@ let canonical_program checked =
 let command_canon file =
   let checked = parse_and_check file in
   print_endline (canonical_program checked)
+
+let command_canon_graph file =
+  let checked = parse_and_check file in
+  print_string (Protoss.Canonical_ir.serialize_graph checked)
 
 let command_eval file args =
   let entry, rest = find_entry args in
@@ -414,6 +418,7 @@ let () =
       | [ "nf"; file ] -> command_nf file
       | [ "hash"; file ] -> command_hash file
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
+      | [ "canon"; "--graph"; file ] -> command_canon_graph file
       | [ "canon"; file ] -> command_canon file
       | "eval" :: file :: args -> command_eval file args
       | "run" :: file :: args -> command_run file args

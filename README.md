@@ -5,13 +5,13 @@ Executable OCaml/Dune prototype for graph-first, content-addressed Protoss apps.
 What works now:
 
 - The pure core remains total: typed AST, canonical DefIds, stable hashes, deterministic normalization, explicit `Process` effects, capabilities, atomic patches, project stores, diff, and audit.
-- Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, types, deps, normal forms, roots, build refs, and web markers.
+- Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, `program.canon`, `program.graph.json`, types, deps, normal forms, roots, build refs, and web markers.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
 - Source-level modules work with `(module Name)` and `(export symbol ...)`. Module-local definitions and type aliases are namespace-qualified, and imports may only reference exported symbols directly.
 - `View msg` is a typed canonical UI type. Supported constructors are `text`, `image`, `button`, `input`, `column`, `row`, `list`, and `when`.
 - UI/message mismatches are rejected statically by the typechecker.
-- Web bundles are deterministic and include `index.html`, `protoss-runtime.js`, `protoss-app.json`, `protoss-graph.json`, `protoss-capabilities.json`, and `protoss-world.json`.
+- Web bundles are deterministic and include `index.html`, `protoss-runtime.js`, `protoss-app.json`, `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-capabilities.json`, and `protoss-world.json`.
 - `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Typed resume rejects wrong response tags.
 - Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
@@ -45,6 +45,7 @@ dune exec protoss -- fmt examples/web/todo_app/src/app.protoss
 dune exec protoss -- fmt --check examples/web/todo_app/src/app.protoss
 dune exec protoss -- graph examples/web/todo_app --out graph.json
 dune exec protoss -- graph examples/web/todo_app --dot graph.dot
+dune exec protoss -- canon --graph examples/basic.protoss
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app
 ```

@@ -6,6 +6,29 @@ let assert_true msg b = if not b then fail msg
 
 let assert_equal msg a b = if a <> b then fail (msg ^ ": expected " ^ a ^ ", got " ^ b)
 
+let contains_substring haystack needle =
+  let lh = String.length haystack and ln = String.length needle in
+  let rec loop i =
+    i + ln <= lh
+    && (String.sub haystack i ln = needle || loop (i + 1))
+  in
+  ln = 0 || loop 0
+
+let json_field name obj =
+  match Json.field name obj with
+  | Some v -> v
+  | None -> fail ("missing JSON field " ^ name)
+
+let json_string_field name obj =
+  match Json.string (json_field name obj) with
+  | Some s -> s
+  | None -> fail ("JSON field is not string: " ^ name)
+
+let json_array_field name obj =
+  match Json.array (json_field name obj) with
+  | Some xs -> xs
+  | None -> fail ("JSON field is not array: " ^ name)
+
 let expect_parse_error input =
   try
     let _ = Parser.parse_string input in
@@ -127,6 +150,19 @@ let () =
   let caps, defs = Kernel.parse_serialized_program program_canonical in
   assert_equal "canonical program roundtrip" program_canonical (Kernel.serialize_program caps defs);
   assert_true "canonical program v2 stable" (String.length program_canonical > 20);
+  let graph_json = Canonical_ir.serialize_graph formatted_a in
+  let graph = Json.parse graph_json in
+  assert_equal "canonical graph version" Kernel.canonical_graph_version
+    (json_string_field "version" graph);
+  assert_equal "canonical graph program hash" (Kernel.hash_program formatted_a)
+    (json_string_field "programHash" graph);
+  assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
+  assert_equal "canonical graph deterministic" graph_json (Canonical_ir.serialize_graph formatted_a);
+  assert_equal "canonical graph alpha-stable" (Canonical_ir.serialize_graph alpha_a)
+    (Canonical_ir.serialize_graph alpha_b);
+  assert_true "canonical graph omits bound names"
+    (not (contains_substring (Canonical_ir.serialize_graph alpha_a) "\"x\"")
+    && not (contains_substring (Canonical_ir.serialize_graph alpha_b) "\"y\""));
   let dep_canon =
     check "(def two Nat (succ 1))\n(def three Nat (succ two))"
     |> fun checked ->
@@ -593,34 +629,43 @@ let () =
   assert_true "project store get" (String.length (Workspace.get_store build_a.store "appMain") > 0);
   assert_equal "project store deps" "Nat.add,base,total"
     (String.concat "," (Workspace.read_deps build_a.store "appMain"));
-	  assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
-	  assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
+  assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
+  assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
+  let store_graph_path = Filename.concat build_a.store "program.graph.json" in
+  assert_true "project store canonical graph" (Sys.file_exists store_graph_path);
+  let store_graph = Json.parse (Store.read_file store_graph_path) in
+  assert_equal "project store graph version" Kernel.canonical_graph_version
+    (json_string_field "version" store_graph);
+  assert_equal "project store graph hash" (Kernel.hash_program build_a.Workspace.checked)
+    (json_string_field "programHash" store_graph);
+  assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
+    (Store.read_file store_graph_path);
 
-	  let module_ws = temp_dir "workspace-modules" in
-	  ensure_dir module_ws;
-	  ensure_dir (Filename.concat module_ws "src");
-	  write_file (Filename.concat module_ws "protoss.toml")
-	    ("name = \"workspace-modules\"\nversion = \"0.5.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
-	   ^ stdlib_path
-	    ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = []\n");
-	  write_file (Filename.concat module_ws "src/math.protoss")
-	    "(module Demo.Math)\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
-	     (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n";
-	  write_file (Filename.concat module_ws "src/app.protoss")
-	    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n";
-	  let module_manifest = Workspace.parse_manifest module_ws in
-	  let module_build = Workspace.build module_manifest in
-	  let module_checked = module_build.Workspace.checked in
-	  let module_value, _ = Runtime.normalize_def module_checked "result" in
-	  assert_equal "workspace module export" "8" (Runtime.value_to_string module_value);
-	  write_file (Filename.concat module_ws "src/bad.protoss")
-	    "(def leak Demo.Math.Number Demo.Math.hidden)\n";
-	  (try
-	     ignore (Workspace.build module_manifest);
-	     fail "workspace should reject non-imported private module symbol"
-	   with Workspace.Error msg -> assert_true "workspace private module error" (String.contains msg 'i'));
+  let module_ws = temp_dir "workspace-modules" in
+  ensure_dir module_ws;
+  ensure_dir (Filename.concat module_ws "src");
+  write_file (Filename.concat module_ws "protoss.toml")
+    ("name = \"workspace-modules\"\nversion = \"0.5.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
+   ^ stdlib_path
+    ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = []\n");
+  write_file (Filename.concat module_ws "src/math.protoss")
+    "(module Demo.Math)\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
+     (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n";
+  write_file (Filename.concat module_ws "src/app.protoss")
+    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n";
+  let module_manifest = Workspace.parse_manifest module_ws in
+  let module_build = Workspace.build module_manifest in
+  let module_checked = module_build.Workspace.checked in
+  let module_value, _ = Runtime.normalize_def module_checked "result" in
+  assert_equal "workspace module export" "8" (Runtime.value_to_string module_value);
+  write_file (Filename.concat module_ws "src/bad.protoss")
+    "(def leak Demo.Math.Number Demo.Math.hidden)\n";
+  (try
+     ignore (Workspace.build module_manifest);
+     fail "workspace should reject non-imported private module symbol"
+   with Workspace.Error msg -> assert_true "workspace private module error" (String.contains msg 'i'));
 
-	  let second_build = Workspace.build manifest_a in
+  let second_build = Workspace.build manifest_a in
   assert_equal "incremental parsed" "0" (string_of_int second_build.Workspace.stats.Workspace.parsed);
   assert_true "incremental reused" (second_build.Workspace.stats.Workspace.reused > 0);
   assert_equal "incremental normalized" "0"
@@ -644,6 +689,12 @@ let () =
   copy_tree build_a.store patched_store;
   ignore (Patch.apply patched_store patch_from_diff);
   assert_true "patch from diff applicable" (Workspace.diff patched_store build_b.store = []);
+  let patched_checked = Store.load_program patched_store |> Kernel.check_program in
+  assert_equal "patch updates program canon"
+    (Kernel.serialize_checked_program patched_checked ^ "\n")
+    (Store.read_file (Filename.concat patched_store "program.canon"));
+  assert_equal "patch updates program graph" (Kernel.checked_to_graph_json patched_checked)
+    (Store.read_file (Filename.concat patched_store "program.graph.json"));
 
   let corrupt_root = temp_dir "workspace-corrupt" in
   copy_tree ws_a corrupt_root;
@@ -676,9 +727,17 @@ let () =
       "protoss-runtime.js";
       "protoss-app.json";
       "protoss-graph.json";
+      "protoss-canon-graph.json";
       "protoss-capabilities.json";
       "protoss-world.json";
     ];
+  let web_canon_graph =
+    Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-canon-graph.json"))
+  in
+  assert_equal "web canonical graph version" Kernel.canonical_graph_version
+    (json_string_field "version" web_canon_graph);
+  assert_equal "web canonical graph hash" (Kernel.hash_program web_a.Web.build.Workspace.checked)
+    (json_string_field "programHash" web_canon_graph);
   let web_dist_b = temp_dir "web-dist-b" in
   ignore (Web.build ~out:web_dist_b todo);
   List.iter
@@ -691,6 +750,7 @@ let () =
       "protoss-runtime.js";
       "protoss-app.json";
       "protoss-graph.json";
+      "protoss-canon-graph.json";
       "protoss-capabilities.json";
       "protoss-world.json";
     ];

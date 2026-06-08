@@ -735,6 +735,245 @@ let serialize_program_payload caps defs =
 let serialize_program caps defs =
   "(" ^ canonical_version ^ " " ^ serialize_program_payload caps defs ^ ")"
 
+let canonical_graph_version = "protoss-canon-graph-v1"
+
+let json_string = Ast.quote
+
+let json_field name value = json_string name ^ ": " ^ value
+
+let json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
+
+let json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
+
+let json_bool b = if b then "true" else "false"
+
+let rec type_to_graph_json = function
+  | TUnit -> json_obj [ json_field "tag" (json_string "Unit") ]
+  | TBool -> json_obj [ json_field "tag" (json_string "Bool") ]
+  | TNat -> json_obj [ json_field "tag" (json_string "Nat") ]
+  | TString -> json_obj [ json_field "tag" (json_string "String") ]
+  | TFun (a, b) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Fun");
+          json_field "from" (type_to_graph_json a);
+          json_field "to" (type_to_graph_json b);
+        ]
+  | TRecord fields ->
+      json_obj
+        [
+          json_field "tag" (json_string "Record");
+          json_field "fields"
+            (json_array
+               (fun (name, typ) ->
+                 json_obj
+                   [ json_field "name" (json_string name); json_field "type" (type_to_graph_json typ) ])
+               (sort_fields fields));
+        ]
+  | TVariant cases ->
+      json_obj
+        [
+          json_field "tag" (json_string "Variant");
+          json_field "cases"
+            (json_array
+               (fun (name, typ) ->
+                 json_obj
+                   [ json_field "name" (json_string name); json_field "type" (type_to_graph_json typ) ])
+               (sort_fields cases));
+        ]
+  | TList t ->
+      json_obj [ json_field "tag" (json_string "List"); json_field "item" (type_to_graph_json t) ]
+  | TView t ->
+      json_obj [ json_field "tag" (json_string "View"); json_field "message" (type_to_graph_json t) ]
+  | TProcess t ->
+      json_obj [ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
+  | TNamed (n, _) -> fail ("unresolved type alias in graph type: " ^ n)
+
+let req_to_graph_json req =
+  let tag, fields =
+    match req with
+    | AskHuman prompt -> ("AskHuman", [ json_field "prompt" (json_string prompt) ])
+    | HttpGet url -> ("HttpGet", [ json_field "url" (json_string url) ])
+    | ReadClock -> ("ReadClock", [])
+    | SaveLocal (key, value) ->
+        ("SaveLocal", [ json_field "key" (json_string key); json_field "value" (json_string value) ])
+    | LoadLocal key -> ("LoadLocal", [ json_field "key" (json_string key) ])
+    | ServerRequest (route, payload) ->
+        ( "ServerRequest",
+          [ json_field "route" (json_string route); json_field "payload" (json_string payload) ] )
+  in
+  json_obj
+    (json_field "tag" (json_string tag) :: json_field "capability" (json_string (req_capability req))
+    :: fields)
+
+let rec cterm_to_graph_json def_id_of = function
+  | CUnit -> json_obj [ json_field "tag" (json_string "Unit") ]
+  | CBool b -> json_obj [ json_field "tag" (json_string "Bool"); json_field "value" (json_bool b) ]
+  | CNat n ->
+      json_obj [ json_field "tag" (json_string "Nat"); json_field "value" (string_of_int n) ]
+  | CString s ->
+      json_obj [ json_field "tag" (json_string "String"); json_field "value" (json_string s) ]
+  | CVar i ->
+      json_obj [ json_field "tag" (json_string "Var"); json_field "index" (string_of_int i) ]
+  | CGlobal n when is_builtin n ->
+      json_obj [ json_field "tag" (json_string "Builtin"); json_field "name" (json_string n) ]
+  | CGlobal n ->
+      json_obj [ json_field "tag" (json_string "Ref"); json_field "defId" (json_string (def_id_of n)) ]
+  | CLambda (typ, body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Lambda");
+          json_field "paramType" (type_to_graph_json typ);
+          json_field "body" (cterm_to_graph_json def_id_of body);
+        ]
+  | CApp (f, arg) ->
+      json_obj
+        [
+          json_field "tag" (json_string "App");
+          json_field "fn" (cterm_to_graph_json def_id_of f);
+          json_field "arg" (cterm_to_graph_json def_id_of arg);
+        ]
+  | CLet (e, body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Let");
+          json_field "value" (cterm_to_graph_json def_id_of e);
+          json_field "body" (cterm_to_graph_json def_id_of body);
+        ]
+  | CRecord fields ->
+      json_obj
+        [
+          json_field "tag" (json_string "Record");
+          json_field "fields"
+            (json_array
+               (fun (name, value) ->
+                 json_obj
+                   [
+                     json_field "name" (json_string name);
+                     json_field "value" (cterm_to_graph_json def_id_of value);
+                   ])
+               fields);
+        ]
+  | CField (e, field) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Field");
+          json_field "record" (cterm_to_graph_json def_id_of e);
+          json_field "field" (json_string field);
+        ]
+  | CVariant (typ, con, payload) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Variant");
+          json_field "type" (type_to_graph_json typ);
+          json_field "constructor" (json_string con);
+          json_field "payload" (cterm_to_graph_json def_id_of payload);
+        ]
+  | CCase (scrutinee, branches) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Case");
+          json_field "scrutinee" (cterm_to_graph_json def_id_of scrutinee);
+          json_field "branches" (json_array (cbranch_to_graph_json def_id_of) branches);
+        ]
+  | CFoldNat (n, zero, step) ->
+      json_obj
+        [
+          json_field "tag" (json_string "FoldNat");
+          json_field "index" (cterm_to_graph_json def_id_of n);
+          json_field "zero" (cterm_to_graph_json def_id_of zero);
+          json_field "step" (cterm_to_graph_json def_id_of step);
+        ]
+  | CNil typ ->
+      json_obj [ json_field "tag" (json_string "Nil"); json_field "type" (type_to_graph_json typ) ]
+  | CCons (typ, head, tail) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Cons");
+          json_field "type" (type_to_graph_json typ);
+          json_field "head" (cterm_to_graph_json def_id_of head);
+          json_field "tail" (cterm_to_graph_json def_id_of tail);
+        ]
+  | CFoldList (xs, zero, step) ->
+      json_obj
+        [
+          json_field "tag" (json_string "FoldList");
+          json_field "list" (cterm_to_graph_json def_id_of xs);
+          json_field "zero" (cterm_to_graph_json def_id_of zero);
+          json_field "step" (cterm_to_graph_json def_id_of step);
+        ]
+  | CText e ->
+      json_obj [ json_field "tag" (json_string "Text"); json_field "value" (cterm_to_graph_json def_id_of e) ]
+  | CImage (src, alt) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Image");
+          json_field "src" (cterm_to_graph_json def_id_of src);
+          json_field "alt" (cterm_to_graph_json def_id_of alt);
+        ]
+  | CButton (label, msg) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Button");
+          json_field "label" (cterm_to_graph_json def_id_of label);
+          json_field "message" (cterm_to_graph_json def_id_of msg);
+        ]
+  | CInput (value, handler) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Input");
+          json_field "value" (cterm_to_graph_json def_id_of value);
+          json_field "handler" (cterm_to_graph_json def_id_of handler);
+        ]
+  | CColumn children ->
+      json_obj
+        [ json_field "tag" (json_string "Column"); json_field "children" (cterm_to_graph_json def_id_of children) ]
+  | CRow children ->
+      json_obj
+        [ json_field "tag" (json_string "Row"); json_field "children" (cterm_to_graph_json def_id_of children) ]
+  | CListView (items, render) ->
+      json_obj
+        [
+          json_field "tag" (json_string "ListView");
+          json_field "items" (cterm_to_graph_json def_id_of items);
+          json_field "render" (cterm_to_graph_json def_id_of render);
+        ]
+  | CWhenView (cond, view) ->
+      json_obj
+        [
+          json_field "tag" (json_string "WhenView");
+          json_field "condition" (cterm_to_graph_json def_id_of cond);
+          json_field "view" (cterm_to_graph_json def_id_of view);
+        ]
+  | CDone e ->
+      json_obj [ json_field "tag" (json_string "Done"); json_field "value" (cterm_to_graph_json def_id_of e) ]
+  | CRequest req ->
+      json_obj [ json_field "tag" (json_string "Request"); json_field "request" (req_to_graph_json req) ]
+  | CBind (p, typ, body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Bind");
+          json_field "process" (cterm_to_graph_json def_id_of p);
+          json_field "valueType" (type_to_graph_json typ);
+          json_field "body" (cterm_to_graph_json def_id_of body);
+        ]
+
+and cbranch_to_graph_json def_id_of = function
+  | CBBool (b, body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "BoolBranch");
+          json_field "value" (json_bool b);
+          json_field "body" (cterm_to_graph_json def_id_of body);
+        ]
+  | CBVariant (con, body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "VariantBranch");
+          json_field "constructor" (json_string con);
+          json_field "body" (cterm_to_graph_json def_id_of body);
+        ]
+
 let single_sexp input =
   match Sexp.parse input with
   | [ x ] -> x
@@ -965,12 +1204,54 @@ let check_program (program : program) =
   in
   { program; defs }
 
-let hash_program checked =
+let canonical_defs_of_checked checked =
   let defs =
     checked.defs
     |> List.map (fun d -> { cname = d.def.name; cdef_id = d.def_id; ctyp = d.def.typ; cbody = d.cterm })
   in
-  hash_string (serialize_program checked.program.capabilities defs)
+  defs
+
+let serialize_checked_program checked =
+  serialize_program checked.program.capabilities (canonical_defs_of_checked checked)
+
+let hash_program checked =
+  hash_string (serialize_checked_program checked)
+
+let checked_to_graph_json checked =
+  let defs = checked.defs |> List.sort (fun a b -> String.compare a.def.name b.def.name) in
+  let def_id_of name =
+    if is_builtin name then "builtin:" ^ name
+    else
+      match List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name) defs with
+      | Some d -> d.def_id
+      | None -> name
+  in
+  let def_json d =
+    let canonical_payload = cterm_to_canonical_v2 def_id_of d.cterm in
+    json_obj
+      [
+        json_field "name" (json_string d.def.name);
+        json_field "defId" (json_string d.def_id);
+        json_field "hash" (json_string d.hash);
+        json_field "type" (type_to_graph_json d.def.typ);
+        json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
+        json_field "deps"
+          (json_array json_string
+             (dependencies_of_defs checked.program.defs d.def.name |> List.sort_uniq String.compare));
+        json_field "term" (cterm_to_graph_json def_id_of d.cterm);
+        json_field "termCanonical" (json_string canonical_payload);
+      ]
+  in
+  json_obj
+    [
+      json_field "version" (json_string canonical_graph_version);
+      json_field "canonicalVersion" (json_string canonical_version);
+      json_field "programHash" (json_string (hash_program checked));
+      json_field "capabilities"
+        (json_array json_string (List.sort_uniq String.compare checked.program.capabilities));
+      json_field "defs" (json_array def_json defs);
+    ]
+  ^ "\n"
 
 let checked_def_by_name checked name =
   checked.defs |> List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name)
