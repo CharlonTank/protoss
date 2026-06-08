@@ -773,6 +773,23 @@ let check_variant_branch_coverage cases branches where =
         fail (where ^ " unknown branch: " ^ con))
     branches
 
+let bool_branch_name = function true -> "true" | false -> "false"
+
+let bool_case_branches branches =
+  let true_branch = ref None and false_branch = ref None in
+  List.iter
+    (function
+      | BBool (value, e) ->
+          let target = if value then true_branch else false_branch in
+          if Option.is_some !target then
+            fail ("Bool case duplicate branch: " ^ bool_branch_name value);
+          target := Some e
+      | BVariant _ | BVariantUnit _ -> fail "variant branch in Bool case")
+    branches;
+  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
+  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  (t_expr, f_expr)
+
 let recur_scope ctx =
   match ctx.fold_scope with
   | Some scope -> scope
@@ -1054,38 +1071,13 @@ let rec infer ctx = function
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
 and infer_bool_case ctx branches =
-  let true_branch = ref None and false_branch = ref None in
-  List.iter
-      (function
-        | BBool (true, e) -> true_branch := Some e
-        | BBool (false, e) -> false_branch := Some e
-        | BVariant _ | BVariantUnit _ -> fail "variant branch in Bool case")
-    branches;
-  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
-  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  let t_expr, f_expr = bool_case_branches branches in
   let ty = infer ctx t_expr in
   require_type ty (infer ctx f_expr) "Bool case branches";
   ty
 
 and infer_variant_case ctx cases branches =
-  let branch_names =
-    List.map
-      (function
-        | BVariant (con, _, _) | BVariantUnit (con, _) -> con
-        | BBool _ -> fail "Bool branch in Variant case")
-      branches
-  in
-  let case_names = List.map fst cases in
-  List.iter
-    (fun con ->
-      if not (List.exists (String.equal con) branch_names) then
-        fail ("Variant case missing branch: " ^ con))
-    case_names;
-  List.iter
-    (fun con ->
-      if not (List.exists (String.equal con) case_names) then
-        fail ("unknown Variant branch: " ^ con))
-    branch_names;
+  check_variant_branch_coverage cases branches "Variant case";
   let result = ref None in
   List.iter
     (function
@@ -1582,29 +1574,13 @@ and elaborate_variant_payload ctx ty con e =
   | _ -> fail "variant expression must carry a Variant type"
 
 and infer_bool_case_elab ctx branches =
-  let true_branch = ref None and false_branch = ref None in
-  List.iter
-      (function
-        | BBool (true, e) -> true_branch := Some e
-        | BBool (false, e) -> false_branch := Some e
-        | BVariant _ | BVariantUnit _ -> fail "variant branch in Bool case")
-    branches;
-  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
-  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  let t_expr, f_expr = bool_case_branches branches in
   let ty, t_expr = infer_elab ctx t_expr in
   let _, f_expr = check_elab ctx ty f_expr in
   (ty, [ BBool (true, t_expr); BBool (false, f_expr) ])
 
 and check_bool_case_elab ctx expected branches =
-  let true_branch = ref None and false_branch = ref None in
-  List.iter
-      (function
-        | BBool (true, e) -> true_branch := Some e
-        | BBool (false, e) -> false_branch := Some e
-        | BVariant _ | BVariantUnit _ -> fail "variant branch in Bool case")
-    branches;
-  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
-  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  let t_expr, f_expr = bool_case_branches branches in
   let _, t_expr = check_elab ctx expected t_expr in
   let _, f_expr = check_elab ctx expected f_expr in
   [ BBool (true, t_expr); BBool (false, f_expr) ]
@@ -1615,24 +1591,7 @@ and infer_variant_case_elab ctx cases branches =
   (ty, branches)
 
 and check_variant_case_elab ctx cases expected branches =
-  let branch_names =
-    List.map
-      (function
-        | BVariant (con, _, _) | BVariantUnit (con, _) -> con
-        | BBool _ -> fail "Bool branch in Variant case")
-      branches
-  in
-  let case_names = List.map fst cases in
-  List.iter
-    (fun con ->
-      if not (List.exists (String.equal con) branch_names) then
-        fail ("Variant case missing branch: " ^ con))
-    case_names;
-  List.iter
-    (fun con ->
-      if not (List.exists (String.equal con) case_names) then
-        fail ("unknown Variant branch: " ^ con))
-    branch_names;
+  check_variant_branch_coverage cases branches "Variant case";
   List.map
     (function
       | BBool _ -> assert false

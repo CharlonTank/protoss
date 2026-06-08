@@ -102,6 +102,16 @@ let expect_check_error input =
     fail "expected check error"
   with Kernel.Error _ | Parser.Error _ -> ()
 
+let expect_check_error_contains input needle =
+  try
+    let p = Parser.parse_string input in
+    let _ = Kernel.check_program p in
+    fail "expected check error"
+  with
+  | Kernel.Error msg | Parser.Error msg ->
+      assert_true ("check error should contain " ^ needle ^ ", got " ^ msg)
+        (contains_substring msg needle)
+
 let check input = Parser.parse_string input |> Kernel.check_program
 
 let checked_def checked name =
@@ -324,6 +334,12 @@ let () =
     (Kernel.hash_program bool_match);
   let bool_match_out, _ = Runtime.normalize_def bool_match "out" in
   assert_equal "match Bool normalizes" "1" (Runtime.value_to_string bool_match_out);
+  expect_check_error_contains
+    "(def bad Nat (case true (true 1) (true 2) (false 0)))"
+    "Bool case duplicate branch: true";
+  expect_check_error_contains
+    "(def bad Nat (case false (false 0) (true 1) (false 2)))"
+    "Bool case duplicate branch: false";
   let list_match =
     check
       "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
@@ -1089,6 +1105,11 @@ let () =
   assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
   let maybe_short_out, _ = Runtime.normalize_def maybe_unit_branch_shorthand "out" in
   assert_equal "unit variant branch shorthand runtime" "4" (Runtime.value_to_string maybe_short_out);
+  expect_check_error_contains
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (case value (None 0) (Some n n) (Some m m)))"
+    "Variant case duplicate branch: Some";
   let fold_variant_unit_short =
     check
       "(variant Maybe (params A) (None Unit) (Some A))\n\
@@ -1107,6 +1128,11 @@ let () =
   let fold_variant_out, _ = Runtime.normalize_def fold_variant_unit_short "out" in
   assert_equal "foldVariant unit branch shorthand runtime" "0"
     (Runtime.value_to_string fold_variant_out);
+  expect_check_error_contains
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def value (Maybe Nat) (variant Some 1))\n\
+     (def bad Nat (foldVariant (Maybe Nat) Nat value (None 0) (Some n n) (Some m m)))"
+    "foldVariant duplicate branch: Some";
   let inferred_ctor_contexts =
     check
       "(variant Maybe (params A) (None Unit) (Some A))\n\
