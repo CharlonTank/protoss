@@ -850,36 +850,17 @@ let patch_from_diff store_a store_b =
   in
   "{ \"ops\": [\n  " ^ String.concat ",\n  " ops ^ "\n] }\n"
 
-let json_string_field name obj =
-  match Option.bind (Json.field name obj) Json.string with
-  | Some s -> s
-  | None -> fail ("canonical graph missing string field: " ^ name)
-
-let json_array_field name obj =
-  match Option.bind (Json.field name obj) Json.array with
-  | Some xs -> xs
-  | None -> fail ("canonical graph missing array field: " ^ name)
-
 let audit_program_graph store checked =
   let path = Filename.concat store "program.graph.json" in
   if not (Sys.file_exists path) then fail "missing canonical graph: program.graph.json";
   let stored = trim (read_file path) in
-  let graph =
-    try Json.parse stored with Json.Error msg -> fail ("invalid canonical graph: " ^ msg)
+  let graph_caps, graph_defs =
+    try Canonical_ir.parse_graph stored with Kernel.Error msg -> fail ("invalid canonical graph: " ^ msg)
   in
-  let version = json_string_field "version" graph in
-  if not (String.equal version Kernel.canonical_graph_version) then
-    fail ("canonical graph version mismatch: " ^ version);
-  let canonical_version = json_string_field "canonicalVersion" graph in
-  if not (String.equal canonical_version Kernel.canonical_version) then
-    fail ("canonical version mismatch in graph: " ^ canonical_version);
-  let program_hash = json_string_field "programHash" graph in
-  let expected_hash = Kernel.hash_program checked in
-  if not (String.equal program_hash expected_hash) then
-    fail ("canonical graph program hash mismatch: " ^ program_hash);
-  let defs = json_array_field "defs" graph in
-  if List.length defs <> List.length checked.Kernel.defs then
-    fail "canonical graph definition count mismatch";
+  let graph_canonical = Kernel.serialize_program graph_caps graph_defs in
+  let expected_canonical = Kernel.serialize_checked_program checked in
+  if not (String.equal graph_canonical expected_canonical) then
+    fail "canonical graph program mismatch: program.graph.json";
   let expected = trim (Kernel.checked_to_graph_json checked) in
   if not (String.equal stored expected) then fail "canonical graph mismatch: program.graph.json"
 

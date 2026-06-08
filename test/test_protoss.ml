@@ -14,6 +14,17 @@ let contains_substring haystack needle =
   in
   ln = 0 || loop 0
 
+let replace_once haystack needle replacement =
+  let lh = String.length haystack and ln = String.length needle in
+  let rec loop i =
+    if i + ln > lh then fail ("substring not found: " ^ needle)
+    else if String.sub haystack i ln = needle then
+      String.sub haystack 0 i ^ replacement
+      ^ String.sub haystack (i + ln) (lh - i - ln)
+    else loop (i + 1)
+  in
+  loop 0
+
 let json_field name obj =
   match Json.field name obj with
   | Some v -> v
@@ -163,6 +174,26 @@ let () =
   assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
   assert_true "canonical graph empty capability descriptors"
     (json_array_field "capabilityDescriptors" graph = []);
+  assert_equal "canonical graph to program roundtrip" program_canonical
+    (Canonical_ir.graph_to_program graph_json);
+  let graph_caps, graph_defs = Canonical_ir.parse_graph graph_json in
+  assert_equal "canonical graph parsed caps" "" (String.concat "," graph_caps);
+  assert_equal "canonical graph parsed defs" "main"
+    (String.concat "," (List.map (fun d -> d.Kernel.cname) graph_defs));
+  (try
+     ignore (Canonical_ir.parse_graph (replace_once graph_json "\"value\": 1" "\"value\": 2"));
+     fail "canonical graph typed node mismatch should be rejected"
+   with Kernel.Error _ -> ());
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json (Kernel.hash_program formatted_a) "p1:00000000000000000000000000000000"));
+     fail "canonical graph program hash mismatch should be rejected"
+   with Kernel.Error _ -> ());
+  let duplicate_def_ids = check "(def a Nat 1)\n(def b Nat 1)" in
+  assert_equal "canonical graph allows shared DefIds"
+    (Kernel.serialize_checked_program duplicate_def_ids)
+    (Canonical_ir.graph_to_program (Canonical_ir.serialize_graph duplicate_def_ids));
   assert_equal "canonical graph deterministic" graph_json (Canonical_ir.serialize_graph formatted_a);
   assert_equal "canonical graph alpha-stable" (Canonical_ir.serialize_graph alpha_a)
     (Canonical_ir.serialize_graph alpha_b);
@@ -690,6 +721,19 @@ let () =
     (json_string_field "programHash" store_graph);
   assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
     (Store.read_file store_graph_path);
+  let graph_corrupt_root = temp_dir "workspace-graph-corrupt" in
+  copy_tree ws_a graph_corrupt_root;
+  let graph_corrupt_manifest = Workspace.parse_manifest graph_corrupt_root in
+  let graph_corrupt_store = Workspace.store_root graph_corrupt_manifest in
+  let graph_corrupt_path = Filename.concat graph_corrupt_store "program.graph.json" in
+  write_file graph_corrupt_path
+    (replace_once (Store.read_file graph_corrupt_path)
+       (Kernel.hash_program build_a.Workspace.checked)
+       "p1:00000000000000000000000000000000");
+  (try
+     ignore (Workspace.audit graph_corrupt_manifest);
+     fail "audit should reject corrupt canonical graph"
+   with Workspace.Error _ | Kernel.Error _ -> ());
 
   let module_ws = temp_dir "workspace-modules" in
   ensure_dir module_ws;

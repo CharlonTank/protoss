@@ -6,11 +6,225 @@ type def = Kernel.canonical_def
 
 let version = Kernel.canonical_version
 
+let graph_version = Kernel.canonical_graph_version
+
 let serialize_def = Kernel.serialize_def
 
 let serialize_program = Kernel.serialize_program
 
 let serialize_graph = Kernel.checked_to_graph_json
+
+let fail = Kernel.fail
+
+let json_field name obj =
+  match Json.field name obj with Some v -> v | None -> fail ("canonical graph missing field: " ^ name)
+
+let json_string_field name obj =
+  match Json.string (json_field name obj) with
+  | Some s -> s
+  | None -> fail ("canonical graph field must be string: " ^ name)
+
+let json_array_field name obj =
+  match Json.array (json_field name obj) with
+  | Some xs -> xs
+  | None -> fail ("canonical graph field must be array: " ^ name)
+
+let json_bool_field name obj =
+  match json_field name obj with
+  | Json.Bool b -> b
+  | _ -> fail ("canonical graph field must be bool: " ^ name)
+
+let json_nat_field name obj =
+  match json_field name obj with
+  | Json.Num n when n >= 0 -> n
+  | _ -> fail ("canonical graph field must be natural number: " ^ name)
+
+let ensure_unique what names =
+  let seen = Hashtbl.create 16 in
+  List.iter
+    (fun name ->
+      if Hashtbl.mem seen name then fail ("duplicate " ^ what ^ " in canonical graph: " ^ name);
+      Hashtbl.add seen name ())
+    names
+
+let rec type_of_graph_json obj =
+  match json_string_field "tag" obj with
+  | "Unit" -> Ast.TUnit
+  | "Bool" -> Ast.TBool
+  | "Nat" -> Ast.TNat
+  | "String" -> Ast.TString
+  | "Fun" -> Ast.TFun (type_of_graph_json (json_field "from" obj), type_of_graph_json (json_field "to" obj))
+  | "Record" ->
+      let fields =
+        json_array_field "fields" obj
+        |> List.map (fun field ->
+               (json_string_field "name" field, type_of_graph_json (json_field "type" field)))
+      in
+      ensure_unique "record field" (List.map fst fields);
+      Ast.TRecord (Ast.sort_fields fields)
+  | "Variant" ->
+      let cases =
+        json_array_field "cases" obj
+        |> List.map (fun case ->
+               (json_string_field "name" case, type_of_graph_json (json_field "type" case)))
+      in
+      ensure_unique "variant constructor" (List.map fst cases);
+      Ast.TVariant (Ast.sort_fields cases)
+  | "List" -> Ast.TList (type_of_graph_json (json_field "item" obj))
+  | "View" -> Ast.TView (type_of_graph_json (json_field "message" obj))
+  | "Process" -> Ast.TProcess (type_of_graph_json (json_field "result" obj))
+  | tag -> fail ("unknown canonical graph type tag: " ^ tag)
+
+let req_of_graph_json obj =
+  let req =
+    match json_string_field "tag" obj with
+    | "AskHuman" -> Ast.AskHuman (json_string_field "prompt" obj)
+    | "HttpGet" -> Ast.HttpGet (json_string_field "url" obj)
+    | "ReadClock" -> Ast.ReadClock
+    | "SaveLocal" -> Ast.SaveLocal (json_string_field "key" obj, json_string_field "value" obj)
+    | "LoadLocal" -> Ast.LoadLocal (json_string_field "key" obj)
+    | "ServerRequest" ->
+        Ast.ServerRequest (json_string_field "route" obj, json_string_field "payload" obj)
+    | tag -> fail ("unknown canonical graph request tag: " ^ tag)
+  in
+  let capability = json_string_field "capability" obj in
+  if not (String.equal capability (Kernel.req_capability req)) then
+    fail ("canonical graph request capability mismatch: " ^ capability);
+  req
+
+let rec term_of_graph_json obj =
+  match json_string_field "tag" obj with
+  | "Unit" -> Kernel.CUnit
+  | "Bool" -> Kernel.CBool (json_bool_field "value" obj)
+  | "Nat" -> Kernel.CNat (json_nat_field "value" obj)
+  | "String" -> Kernel.CString (json_string_field "value" obj)
+  | "Var" -> Kernel.CVar (json_nat_field "index" obj)
+  | "Builtin" ->
+      let name = json_string_field "name" obj in
+      if not (Kernel.is_builtin name) then fail ("unknown canonical graph builtin: " ^ name);
+      Kernel.CGlobal name
+  | "Ref" -> Kernel.CGlobal (json_string_field "defId" obj)
+  | "Lambda" ->
+      Kernel.CLambda
+        (type_of_graph_json (json_field "paramType" obj), term_of_graph_json (json_field "body" obj))
+  | "App" ->
+      Kernel.CApp (term_of_graph_json (json_field "fn" obj), term_of_graph_json (json_field "arg" obj))
+  | "Let" ->
+      Kernel.CLet
+        (term_of_graph_json (json_field "value" obj), term_of_graph_json (json_field "body" obj))
+  | "Record" ->
+      let fields =
+        json_array_field "fields" obj
+        |> List.map (fun field ->
+               (json_string_field "name" field, term_of_graph_json (json_field "value" field)))
+      in
+      ensure_unique "record field" (List.map fst fields);
+      Kernel.CRecord (Ast.sort_fields fields)
+  | "Field" ->
+      Kernel.CField (term_of_graph_json (json_field "record" obj), json_string_field "field" obj)
+  | "Variant" ->
+      Kernel.CVariant
+        ( type_of_graph_json (json_field "type" obj),
+          json_string_field "constructor" obj,
+          term_of_graph_json (json_field "payload" obj) )
+  | "Case" ->
+      Kernel.CCase
+        ( term_of_graph_json (json_field "scrutinee" obj),
+          List.map branch_of_graph_json (json_array_field "branches" obj) )
+  | "FoldNat" ->
+      Kernel.CFoldNat
+        ( term_of_graph_json (json_field "index" obj),
+          term_of_graph_json (json_field "zero" obj),
+          term_of_graph_json (json_field "step" obj) )
+  | "Nil" -> Kernel.CNil (type_of_graph_json (json_field "type" obj))
+  | "Cons" ->
+      Kernel.CCons
+        ( type_of_graph_json (json_field "type" obj),
+          term_of_graph_json (json_field "head" obj),
+          term_of_graph_json (json_field "tail" obj) )
+  | "FoldList" ->
+      Kernel.CFoldList
+        ( term_of_graph_json (json_field "list" obj),
+          term_of_graph_json (json_field "zero" obj),
+          term_of_graph_json (json_field "step" obj) )
+  | "Text" -> Kernel.CText (term_of_graph_json (json_field "value" obj))
+  | "Image" ->
+      Kernel.CImage (term_of_graph_json (json_field "src" obj), term_of_graph_json (json_field "alt" obj))
+  | "Button" ->
+      Kernel.CButton
+        (term_of_graph_json (json_field "label" obj), term_of_graph_json (json_field "message" obj))
+  | "Input" ->
+      Kernel.CInput
+        (term_of_graph_json (json_field "value" obj), term_of_graph_json (json_field "handler" obj))
+  | "Column" -> Kernel.CColumn (term_of_graph_json (json_field "children" obj))
+  | "Row" -> Kernel.CRow (term_of_graph_json (json_field "children" obj))
+  | "ListView" ->
+      Kernel.CListView
+        (term_of_graph_json (json_field "items" obj), term_of_graph_json (json_field "render" obj))
+  | "WhenView" ->
+      Kernel.CWhenView
+        (term_of_graph_json (json_field "condition" obj), term_of_graph_json (json_field "view" obj))
+  | "Done" -> Kernel.CDone (term_of_graph_json (json_field "value" obj))
+  | "Request" -> Kernel.CRequest (req_of_graph_json (json_field "request" obj))
+  | "Bind" ->
+      Kernel.CBind
+        ( term_of_graph_json (json_field "process" obj),
+          type_of_graph_json (json_field "valueType" obj),
+          term_of_graph_json (json_field "body" obj) )
+  | tag -> fail ("unknown canonical graph term tag: " ^ tag)
+
+and branch_of_graph_json obj =
+  match json_string_field "tag" obj with
+  | "BoolBranch" -> Kernel.CBBool (json_bool_field "value" obj, term_of_graph_json (json_field "body" obj))
+  | "VariantBranch" ->
+      Kernel.CBVariant (json_string_field "constructor" obj, term_of_graph_json (json_field "body" obj))
+  | tag -> fail ("unknown canonical graph branch tag: " ^ tag)
+
+let def_of_graph_json obj =
+  let name = json_string_field "name" obj in
+  let def_id = json_string_field "defId" obj in
+  let typ = type_of_graph_json (json_field "type" obj) in
+  let body = term_of_graph_json (json_field "term" obj) in
+  let type_canonical = json_string_field "typeCanonical" obj in
+  let term_canonical = json_string_field "termCanonical" obj in
+  if not (String.equal type_canonical (Kernel.type_to_canonical typ)) then
+    fail ("canonical graph typeCanonical mismatch: " ^ name);
+  if not (String.equal term_canonical (Kernel.cterm_to_canonical_v2 (fun x -> x) body)) then
+    fail ("canonical graph termCanonical mismatch: " ^ name);
+  let canonical = Kernel.serialize_def name def_id typ body (fun x -> x) in
+  let hash = json_string_field "hash" obj in
+  if not (String.equal hash (Kernel.hash_string canonical)) then
+    fail ("canonical graph def hash mismatch: " ^ name);
+  { Kernel.cname = name; cdef_id = def_id; ctyp = typ; cbody = body }
+
+let parse_graph input =
+  let graph = try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg) in
+  let version = json_string_field "version" graph in
+  if not (String.equal version Kernel.canonical_graph_version) then
+    fail ("canonical graph version mismatch: " ^ version);
+  let canonical_version = json_string_field "canonicalVersion" graph in
+  if not (String.equal canonical_version Kernel.canonical_version) then
+    fail ("canonical graph canonicalVersion mismatch: " ^ canonical_version);
+  let caps =
+    json_array_field "capabilities" graph
+    |> List.map (function Json.String s -> s | _ -> fail "canonical graph capability must be string")
+    |> List.sort_uniq String.compare
+  in
+  Kernel.validate_capabilities caps;
+  let expected_descriptors = Json.parse (Kernel.capabilities_to_graph_json caps) in
+  let descriptors = json_field "capabilityDescriptors" graph in
+  if descriptors <> expected_descriptors then fail "canonical graph capabilityDescriptors mismatch";
+  let defs = List.map def_of_graph_json (json_array_field "defs" graph) in
+  ensure_unique "definition" (List.map (fun d -> d.Kernel.cname) defs);
+  let canonical = Kernel.serialize_program caps defs in
+  let program_hash = json_string_field "programHash" graph in
+  if not (String.equal program_hash (Kernel.hash_string canonical)) then
+    fail ("canonical graph programHash mismatch: " ^ program_hash);
+  (caps, defs)
+
+let graph_to_program input =
+  let caps, defs = parse_graph input in
+  Kernel.serialize_program caps defs
 
 let parse_def = Kernel.parse_serialized_def
 

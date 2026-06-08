@@ -6,6 +6,7 @@ What works now:
 
 - The pure core remains total: typed AST, canonical DefIds, stable hashes, deterministic normalization, explicit `Process` effects, typed capability descriptors, atomic patches, project stores, diff, and audit.
 - Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, `program.canon`, `program.graph.json`, types, deps, normal forms, roots, build refs, and web markers.
+- Canonical graph JSON can be round-tripped back to `program.canon` with `canon --from-graph`.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Named records and variants also work as alias syntax: `(record Model (name String))`, `(record Pair (params A B) (first A) (second B))`, and `(variant Maybe (params A) (None Unit) (Some A))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
 - Source-level modules work with `(module Name)` and `(export symbol ...)`. Module-local definitions and type aliases are namespace-qualified, and imports may only reference exported symbols directly.
@@ -45,7 +46,8 @@ dune exec protoss -- fmt examples/web/todo_app/src/app.protoss
 dune exec protoss -- fmt --check examples/web/todo_app/src/app.protoss
 dune exec protoss -- graph examples/web/todo_app --out graph.json
 dune exec protoss -- graph examples/web/todo_app --dot graph.dot
-dune exec protoss -- canon --graph examples/basic.protoss
+dune exec protoss -- canon --graph examples/basic.protoss > /tmp/basic.protoss.graph.json
+dune exec protoss -- canon --from-graph /tmp/basic.protoss.graph.json
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app
 ```
