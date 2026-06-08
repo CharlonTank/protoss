@@ -1738,15 +1738,18 @@ let get_store store id =
         ^ Option.value (read_trim (normal_path store d.s_name)) ~default:""
         ^ "\n"
 
-let graphs_store store =
+let graph_hashes_store store =
   let dir = Store.graphs_dir store in
-  if not (Sys.file_exists dir) then ""
+  if not (Sys.file_exists dir) then []
   else
     Sys.readdir dir |> Array.to_list
     |> List.filter (fun f -> has_suffix ".graph.json" f)
     |> List.sort String.compare
     |> List.map (fun f ->
            String.sub f 0 (String.length f - String.length ".graph.json"))
+
+let graphs_store store =
+  graph_hashes_store store
     |> String.concat "\n"
     |> fun s -> if s = "" then "" else s ^ "\n"
 
@@ -1980,6 +1983,12 @@ let audit_patch_audits store =
     try ignore (Patch_audit.verify_latest_matches_store store) with
     | Patch_audit.Error msg -> fail ("patch audit invalid: " ^ msg)
 
+let audit_all_store_graphs store =
+  graph_hashes_store store
+  |> List.iter (fun graph_hash ->
+         try ignore (read_store_graph store graph_hash) with
+         | Error msg -> fail ("invalid content-addressed canonical graph " ^ graph_hash ^ ": " ^ msg))
+
 let audit manifest =
   let store = store_root manifest in
   if not (Sys.file_exists store) then fail ("store not found: " ^ store);
@@ -1995,6 +2004,7 @@ let audit manifest =
   audit_patch_audits store;
   audit_program_canonical store checked;
   audit_program_graph store checked;
+  audit_all_store_graphs store;
   List.iter
     (fun (cd : Kernel.checked_def) ->
       let canonical_path = Store.canonical_path store cd.def.name in

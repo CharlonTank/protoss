@@ -2825,6 +2825,20 @@ let () =
    with Workspace.Error msg ->
      assert_true "audit reports content-addressed graph mismatch"
        (contains_substring msg "content-addressed canonical graph mismatch"));
+  let extra_graph_bad_root = temp_dir "workspace-extra-graph-bad" in
+  copy_tree ws_a extra_graph_bad_root;
+  let extra_graph_bad_manifest = Workspace.parse_manifest extra_graph_bad_root in
+  let extra_graph_bad_store = Workspace.store_root extra_graph_bad_manifest in
+  Store.write_file_atomic
+    (Store.graph_path extra_graph_bad_store "p2:bad")
+    (Store.read_file (Filename.concat extra_graph_bad_store "program.graph.json"));
+  (try
+     ignore (Workspace.audit extra_graph_bad_manifest);
+     fail "audit should reject extra graph stored under wrong hash"
+   with Workspace.Error msg ->
+     assert_true "audit reports invalid extra graph object"
+       (contains_substring msg "invalid content-addressed canonical graph p2:bad"
+       && contains_substring msg "stored canonical graph hash mismatch"));
 
   let module_ws = temp_dir "workspace-modules" in
   ensure_dir module_ws;
