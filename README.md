@@ -6,7 +6,7 @@ What works now:
 
 - The pure core remains total: typed AST, canonical DefIds, stable hashes, deterministic normalization, explicit `Process` effects, typed capability descriptors, atomic patches, project stores, diff, and audit.
 - Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, `program.canon`, `program.graph.json`, types, deps, normal forms, roots, build refs, and web markers.
-- `project lock` writes `.protoss/lock`, a deterministic content-addressed lockfile over the package metadata, canonical format versions, program hash, graph hash, DefIds, source unit hashes, imports, exports, and capabilities. `project lock --check` rejects drift without rewriting the lockfile or store.
+- `project lock` writes `.protoss/lock`, a deterministic content-addressed lockfile over the package metadata, canonical format versions, program hash, graph hash, DefIds, source unit hashes, imports, exports, and capabilities. `project lock --check` and `project build --locked` reject drift without rewriting the lockfile or store.
 - Canonical graph JSON can be round-tripped back to `program.canon` with `canon --from-graph`. It includes a versioned `nodeGraph` table with content-addressed `Type`/`Term` nodes, `typeRef`/`termRef` roots, deterministic sharing, and audit-time validation.
 - `defrec` supports only structural Nat/List recursion and desugars to `foldNat` or `foldList`; malformed or self-recursive definitions are rejected.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
@@ -38,6 +38,7 @@ dune exec protoss -- app check examples/web/todo_app
 dune exec protoss -- project build examples/web/todo_app --target web --stats
 dune exec protoss -- project lock examples/web/todo_app
 dune exec protoss -- project lock examples/web/todo_app --check
+dune exec protoss -- project build examples/web/todo_app --locked
 dune exec protoss -- web build examples/web/todo_app --out dist/
 dune exec protoss -- web inspect examples/web/todo_app
 dune exec protoss -- audit examples/web/todo_app

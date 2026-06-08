@@ -1339,6 +1339,13 @@ let () =
   Workspace.check_project init_manifest;
   let init_build = Workspace.build init_manifest in
   assert_true "project init build writes store" (Sys.file_exists init_build.Workspace.store);
+  let init_dot_before_locked = snapshot (Filename.concat project_init_root ".protoss") in
+  (try
+     ignore (Workspace.build_locked init_manifest);
+     fail "locked build should require a lockfile"
+   with Workspace.Error _ -> ());
+  assert_true "locked build missing lock leaves .protoss untouched"
+    (init_dot_before_locked = snapshot (Filename.concat project_init_root ".protoss"));
 
   let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let make_workspace name base_value bound =
@@ -1408,10 +1415,22 @@ let () =
      ignore (Workspace.check_lock manifest_a);
      fail "project lock check should reject source drift"
    with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.build_locked manifest_a);
+     fail "locked build should reject source drift"
+   with Workspace.Error _ -> ());
   assert_equal "project lock drift keeps lockfile" lock_before (Store.read_file lock_path);
   assert_true "project lock drift leaves .protoss untouched"
     (dot_before_drift = snapshot (Filename.concat ws_a ".protoss"));
   write_file math_path math_before;
+  let locked_build = Workspace.build_locked manifest_a in
+  let locked_build_meta =
+    Filename.concat
+      (Filename.concat locked_build.Workspace.store "builds")
+      (Workspace.sanitize_id locked_build.Workspace.build_id ^ ".build")
+  in
+  assert_true "locked build records lock hash"
+    (contains_substring (Store.read_file locked_build_meta) ("lock_hash=" ^ lock_hash));
   let scope_corrupt_root = temp_dir "workspace-scope-corrupt" in
   copy_tree ws_a scope_corrupt_root;
   let scope_corrupt_manifest = Workspace.parse_manifest scope_corrupt_root in

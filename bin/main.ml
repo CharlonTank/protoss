@@ -9,8 +9,8 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
-     \       protoss project init|check|build|lock [project] [--stats|--check]\n\
-     \       protoss build [project] [--target web] [--stats]\n\
+     \       protoss project init|check|build|lock [project] [--stats|--locked|--check]\n\
+     \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json>\n\
      \       protoss patch from-diff <store-a> <store-b>\n\
      \       protoss diff [--json] <store-a> <store-b>\n\
@@ -274,24 +274,29 @@ let project_arg args =
 let find_flag_value flag args = find_arg flag args
 
 let parse_build_args args =
-  let rec loop target stats paths = function
-    | [] -> (List.rev paths, target, stats)
-    | "--stats" :: rest -> loop target true paths rest
-    | "--target" :: value :: rest -> loop (Some value) stats paths rest
+  let rec loop target stats locked paths = function
+    | [] -> (List.rev paths, target, stats, locked)
+    | "--stats" :: rest -> loop target true locked paths rest
+    | "--locked" :: rest -> loop target stats true paths rest
+    | "--target" :: value :: rest -> loop (Some value) stats locked paths rest
     | x :: _rest when is_flag x -> usage ()
-    | x :: rest -> loop target stats (x :: paths) rest
+    | x :: rest -> loop target stats locked (x :: paths) rest
   in
-  loop None false [] args
+  loop None false false [] args
 
 let command_project_build args =
-  let paths, target, stats = parse_build_args args in
+  let paths, target, stats, locked = parse_build_args args in
   let root = match paths with [] -> "." | [ path ] -> path | _ -> usage () in
   let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
   let result =
     match target with
-    | Some "web" -> (Protoss.Web.build root).Protoss.Web.build
+    | Some "web" ->
+        if locked then ignore (Protoss.Workspace.check_lock manifest);
+        (Protoss.Web.build root).Protoss.Web.build
     | Some other -> Protoss.Workspace.fail ("unknown build target: " ^ other)
-    | None -> Protoss.Workspace.build manifest
+    | None ->
+        if locked then Protoss.Workspace.build_locked manifest
+        else Protoss.Workspace.build manifest
   in
   Printf.printf "Build %s\nStore %s\n" result.Protoss.Workspace.build_id result.store;
   if stats then print_string (Protoss.Workspace.stats_to_string result.stats)

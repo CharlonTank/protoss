@@ -635,7 +635,7 @@ let prepare_build manifest =
   let build_id = Kernel.hash_string program_canonical in
   { units; checked; stats; build_id; program_canonical; program_graph }
 
-let build ?(write = true) manifest =
+let build ?(write = true) ?lock_hash manifest =
   let prepared = prepare_build manifest in
   let store = store_root manifest in
   if write then (
@@ -653,6 +653,7 @@ let build ?(write = true) manifest =
       ("id=" ^ prepared.build_id ^ "\npackage=" ^ manifest.name ^ "\nversion="
      ^ manifest.version ^ "\nprogram_hash=" ^ prepared.build_id ^ "\ndefs="
       ^ String.concat " " (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs)
+      ^ "\nlock_hash=" ^ Option.value lock_hash ~default:""
       ^ "\n");
     write_file (Filename.concat store "current") (prepared.build_id ^ "\n");
     write_file (Filename.concat store "roots")
@@ -748,6 +749,10 @@ let check_lock manifest =
   let actual = read_file path in
   if not (String.equal actual expected) then fail ("lockfile out of date: " ^ path);
   Kernel.hash_string expected
+
+let build_locked ?(write = true) manifest =
+  let lock_hash = check_lock manifest in
+  build ~write ~lock_hash manifest
 
 let check_project manifest =
   ignore (build ~write:false manifest)
