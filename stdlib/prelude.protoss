@@ -1,4 +1,4 @@
-; Protoss stdlib v0.29. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.30. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -171,7 +171,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.29")
+(def Stdlib.version String "v0.30")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -2517,6 +2517,22 @@
                   (true current)
                   (false ((String.concat current) ((String.concat " ") acc))))))))
         ")")))))
+
+(def Protoss.renderSexpForms (-> (List Sexp) String)
+  (lambda (forms (List Sexp))
+    ((String.join "\n")
+      (((inst List.map Sexp String) forms)
+        (lambda (form Sexp)
+          (Sexp.render form))))))
+
+(def Protoss.formatText (-> String (Result String String))
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (variant Err err))
+      (Ok decls
+        (case (Sexp.parseText source)
+          (Err err (variant Err err))
+          (Ok forms (variant Ok (Protoss.renderSexpForms forms))))))))
 
 (def Json.null Json
   (variant JNull unit))

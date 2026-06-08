@@ -551,6 +551,15 @@
 (def protossParsedBadParams (Result String (List ProtossDecl))
   (Protoss.parseText "(record Bad (params A (List String)) (value Nat))"))
 
+(def protossFormattedDef (Result String String)
+  (Protoss.formatText "  (def   greeting   String   \"Ada\")"))
+
+(def protossFormattedMultiple (Result String String)
+  (Protoss.formatText "(def one Nat 1)\n\n(def two Nat (succ one))"))
+
+(def protossFormattedInvalid (Result String String)
+  (Protoss.formatText "(let x String \"Ada\")"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

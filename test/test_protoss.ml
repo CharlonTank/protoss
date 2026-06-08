@@ -2242,6 +2242,22 @@ let () =
   in
   assert_equal "stdlib Protoss.parseText bad params" "Err \"expected parameter name\""
     (Runtime.value_to_string protoss_parsed_bad_params);
+  let protoss_formatted_def, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedDef"
+  in
+  assert_equal "stdlib Protoss.formatText def" "Ok \"(def greeting String \\\"Ada\\\")\""
+    (Runtime.value_to_string protoss_formatted_def);
+  let protoss_formatted_multiple, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedMultiple"
+  in
+  assert_equal "stdlib Protoss.formatText multiple"
+    "Ok \"(def one Nat 1)\\n(def two Nat (succ one))\""
+    (Runtime.value_to_string protoss_formatted_multiple);
+  let protoss_formatted_invalid, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedInvalid"
+  in
+  assert_equal "stdlib Protoss.formatText invalid" "Err \"expected declaration tag\""
+    (Runtime.value_to_string protoss_formatted_invalid);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
