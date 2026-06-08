@@ -1,4 +1,4 @@
-; Protoss stdlib v0.12. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.13. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -7,6 +7,10 @@
 (type Assoc (K V) (List (Pair K V)))
 (type Map (K V) (Assoc K V))
 (type Set (A) (List A))
+(variant Sexp
+  (SAtom String)
+  (SString String)
+  (SList (List Sexp)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -15,7 +19,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.12")
+(def Stdlib.version String "v0.13")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -532,6 +536,54 @@
         (((inst List.filter A) left)
           (lambda (item A)
             (Bool.not ((((inst Set.contains A) eq) item) right))))))))
+
+(def Sexp.atom (-> String Sexp)
+  (lambda (value String)
+    (variant SAtom value)))
+
+(def Sexp.string (-> String Sexp)
+  (lambda (value String)
+    (variant SString value)))
+
+(def Sexp.list (-> (List Sexp) Sexp)
+  (lambda (items (List Sexp))
+    (variant SList items)))
+
+(def Sexp.isAtom (-> Sexp Bool)
+  (lambda (value Sexp)
+    (case value
+      (SAtom atom true)
+      (_ false))))
+
+(def Sexp.isString (-> Sexp Bool)
+  (lambda (value Sexp)
+    (case value
+      (SString string true)
+      (_ false))))
+
+(def Sexp.isList (-> Sexp Bool)
+  (lambda (value Sexp)
+    (case value
+      (SList items true)
+      (_ false))))
+
+(def Sexp.expectAtom (-> Sexp (Result String String))
+  (lambda (value Sexp)
+    (case value
+      (SAtom atom (variant Ok atom))
+      (_ (variant Err "expected Sexp atom")))))
+
+(def Sexp.expectString (-> Sexp (Result String String))
+  (lambda (value Sexp)
+    (case value
+      (SString string (variant Ok string))
+      (_ (variant Err "expected Sexp string")))))
+
+(def Sexp.expectList (-> Sexp (Result String (List Sexp)))
+  (lambda (value Sexp)
+    (case value
+      (SList items (variant Ok items))
+      (_ (variant Err "expected Sexp list")))))
 
 (def Json.null Json
   (variant JNull unit))

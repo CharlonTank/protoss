@@ -1777,6 +1777,19 @@ let () =
   let set_difference, _ = Runtime.normalize_def stdlib_generics "setDifference" in
   assert_equal "stdlib generic Set.difference" "[1, 3]"
     (Runtime.value_to_string set_difference);
+  let sexp_is_atom, _ = Runtime.normalize_def stdlib_generics "sexpIsAtom" in
+  assert_equal "stdlib Sexp.isAtom" "true" (Runtime.value_to_string sexp_is_atom);
+  let sexp_is_list, _ = Runtime.normalize_def stdlib_generics "sexpIsList" in
+  assert_equal "stdlib Sexp.isList" "true" (Runtime.value_to_string sexp_is_list);
+  let sexp_atom_result, _ = Runtime.normalize_def stdlib_generics "sexpAtomResult" in
+  assert_equal "stdlib Sexp.expectAtom" "Ok \"def\""
+    (Runtime.value_to_string sexp_atom_result);
+  let sexp_list_result, _ = Runtime.normalize_def stdlib_generics "sexpListResult" in
+  assert_equal "stdlib Sexp.expectList" "Ok [SAtom \"def\", SString \"main\"]"
+    (Runtime.value_to_string sexp_list_result);
+  let sexp_string_miss, _ = Runtime.normalize_def stdlib_generics "sexpStringMiss" in
+  assert_equal "stdlib Sexp.expectString miss" "Err \"expected Sexp string\""
+    (Runtime.value_to_string sexp_string_miss);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
