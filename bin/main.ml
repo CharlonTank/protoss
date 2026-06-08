@@ -21,6 +21,8 @@ let usage () =
      \       protoss invariants file <file> | graph <graph.json> | alpha <file-a> <file-b>\n\
      \       protoss invariants process <file> --entry <name> --response <value>\n\
      \       protoss invariants process --graph <graph.json> --entry <name> --response <value>\n\
+     \       protoss invariants ledger <file> --entry <name> --response <value> [--ledger <root>]\n\
+     \       protoss invariants ledger --graph <graph.json> --entry <name> --response <value> [--ledger <root>]\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss repl\n\
@@ -429,6 +431,20 @@ let command_invariants = function
       print_string
         (Protoss.Invariants.describe_process
            (Protoss.Invariants.check_process file entry response))
+  | "ledger" :: "--graph" :: file :: args ->
+      let entry = fst (find_entry args) in
+      let response = required_arg "--response" args in
+      print_string
+        (Protoss.Invariants.describe_ledger
+           (Protoss.Invariants.check_graph_ledger_process ?ledger:(find_arg "--ledger" args)
+              file entry response))
+  | "ledger" :: file :: args ->
+      let entry = fst (find_entry args) in
+      let response = required_arg "--response" args in
+      print_string
+        (Protoss.Invariants.describe_ledger
+           (Protoss.Invariants.check_ledger_process ?ledger:(find_arg "--ledger" args) file
+              entry response))
   | _ -> usage ()
 
 let command_fmt = function

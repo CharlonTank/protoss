@@ -1178,6 +1178,19 @@ let () =
   let process_invariants = Invariants.check_process ask_human_path "askName" "String:Ada" in
   assert_equal "invariants process result" "Done \"Ada\""
     process_invariants.Invariants.result;
+  let ledger_invariants_root = temp_dir "invariants-ledger" in
+  let ledger_invariants =
+    Invariants.check_ledger_process ~ledger:ledger_invariants_root ask_human_path "askName"
+      "String:Ada"
+  in
+  assert_equal "invariants ledger result" "Done \"Ada\""
+    ledger_invariants.Invariants.result;
+  assert_equal "invariants ledger capability" "Human.ask"
+    ledger_invariants.Invariants.capability;
+  assert_equal "invariants ledger request tag" "AskHuman"
+    ledger_invariants.Invariants.request_tag;
+  assert_equal "invariants ledger response type" "String"
+    ledger_invariants.Invariants.response_type;
   let process_graph_dir = temp_dir "invariants-process-graph" in
   ensure_dir process_graph_dir;
   let process_graph_path = Filename.concat process_graph_dir "ask_human.graph.json" in
@@ -1187,6 +1200,12 @@ let () =
   in
   assert_equal "invariants graph process result" process_invariants.result
     graph_process_invariants.Invariants.result;
+  let graph_ledger_invariants =
+    Invariants.check_graph_ledger_process ~ledger:(temp_dir "invariants-graph-ledger")
+      process_graph_path "askName" "String:Ada"
+  in
+  assert_equal "invariants graph ledger result" process_invariants.result
+    graph_ledger_invariants.Invariants.result;
   let inferred_suspended =
     match fst (Runtime.eval_entry process_resume_inferred "askName") with
     | Runtime.VProcessRequest s -> Runtime.parse_suspended (Runtime.serialize_suspended s)

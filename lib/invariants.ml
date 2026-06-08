@@ -22,6 +22,21 @@ type process_result = {
   result : string;
 }
 
+type ledger_result = {
+  source : string;
+  entry : string;
+  ledger : string;
+  program_hash : string;
+  request_event : string;
+  resume_event : string;
+  request_id : string;
+  continuation_id : string;
+  capability : string;
+  request_tag : string;
+  response_type : string;
+  result : string;
+}
+
 let fail = Kernel.fail
 
 let validate_checked source checked =
@@ -109,6 +124,67 @@ let check_process file entry response =
 let check_graph_process file entry response =
   check_process_checked file (Canonical_ir.checked_of_graph (Store.read_file file)) entry response
 
+let default_ledger_root source entry =
+  Filename.concat (Filename.get_temp_dir_name ())
+    ("protoss-invariants-ledger-" ^ string_of_int (Unix.getpid ()) ^ "-"
+    ^ Kernel.hash_string (source ^ ":" ^ entry))
+
+let check_ledger_process_checked ?ledger source checked entry response =
+  match fst (Runtime.eval_entry checked entry) with
+  | Runtime.VProcessRequest suspended ->
+      let ledger = Option.value ledger ~default:(default_ledger_root source entry) in
+      let world = Ledger.init ledger in
+      let serialized = Runtime.serialize_suspended suspended in
+      let request_event, next_world =
+        Ledger.record_request ledger world suspended.Runtime.req serialized
+          (Runtime.request_id suspended) (Runtime.continuation_id suspended)
+          suspended.Runtime.cap_scope
+      in
+      let request_fields = Ledger.event_fields ledger request_event in
+      let field name =
+        match Ledger.field name request_fields with
+        | Some value -> value
+        | None -> fail ("ledger invariant missing request field: " ^ name)
+      in
+      let parsed = Runtime.parse_suspended serialized in
+      let response_value = Runtime.response_value parsed.Runtime.req response in
+      let result = Runtime.resume checked parsed response_value in
+      let result_text = Runtime.value_to_string result in
+      let resume_event, _resume_world =
+        Ledger.record_resume ledger next_world request_event response result_text
+      in
+      ignore (Ledger.event_fields ledger resume_event);
+      {
+        source;
+        entry;
+        ledger;
+        program_hash = Kernel.hash_program checked;
+        request_event;
+        resume_event;
+        request_id = Runtime.request_id suspended;
+        continuation_id = Runtime.continuation_id suspended;
+        capability = field "capability";
+        request_tag = field "request-tag";
+        response_type = field "response-type";
+        result = result_text;
+      }
+  | Runtime.VProcessDone value ->
+      fail
+        ("process entry did not suspend for ledger invariant: " ^ entry ^ " finished with "
+       ^ Runtime.value_to_string value)
+  | value ->
+      fail
+        ("entry is not a Process suspension for ledger invariant: " ^ entry ^ " = "
+       ^ Runtime.value_to_string value)
+
+let check_ledger_process ?ledger file entry response =
+  check_ledger_process_checked ?ledger file (Loader.check_file file) entry response
+
+let check_graph_ledger_process ?ledger file entry response =
+  check_ledger_process_checked ?ledger file
+    (Canonical_ir.checked_of_graph (Store.read_file file))
+    entry response
+
 let describe_file (result : file_result) =
   "Invariants OK\nkind=file\nsource=" ^ result.source ^ "\ndefs="
   ^ string_of_int result.defs ^ "\nprogram_hash=" ^ result.program_hash
@@ -124,4 +200,14 @@ let describe_process (result : process_result) =
   "Invariants OK\nkind=process\nsource=" ^ result.source ^ "\nentry="
   ^ result.entry ^ "\nprogram_hash=" ^ result.program_hash ^ "\nrequest_id="
   ^ result.request_id ^ "\ncontinuation_id=" ^ result.continuation_id
+  ^ "\nresult=" ^ result.result ^ "\n"
+
+let describe_ledger (result : ledger_result) =
+  "Invariants OK\nkind=ledger\nsource=" ^ result.source ^ "\nentry="
+  ^ result.entry ^ "\nledger=" ^ result.ledger ^ "\nprogram_hash="
+  ^ result.program_hash ^ "\nrequest_event=" ^ result.request_event
+  ^ "\nresume_event=" ^ result.resume_event ^ "\nrequest_id="
+  ^ result.request_id ^ "\ncontinuation_id=" ^ result.continuation_id
+  ^ "\ncapability=" ^ result.capability ^ "\nrequest_tag="
+  ^ result.request_tag ^ "\nresponse_type=" ^ result.response_type
   ^ "\nresult=" ^ result.result ^ "\n"
