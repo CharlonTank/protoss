@@ -1402,6 +1402,25 @@ let () =
   assert_true "patch audit records program hash" (contains_substring patch_ok_audit "program-hash=p2:");
   assert_true "patch audit records operation"
     (contains_substring patch_ok_audit "op=1 kind=AddDef name=two target=two");
+  let verified_patch_ok = Patch.verify_audit store in
+  assert_equal "patch audit verify latest ref" patch_ok_ref verified_patch_ok.Patch.audit_ref;
+  assert_equal "patch audit verify ops" "1" (string_of_int verified_patch_ok.Patch.ops);
+  assert_true "patch audit verify source hash"
+    (contains_substring verified_patch_ok.Patch.source_hash "p2:");
+  let inspected_patch_ok = Patch.inspect_audit ~ref:patch_ok_ref store in
+  assert_true "patch audit inspect returns content"
+    (contains_substring inspected_patch_ok ("Patch audit OK " ^ patch_ok_ref)
+    && contains_substring inspected_patch_ok "op=1 kind=AddDef name=two");
+  let corrupt_audit_store = temp_dir "patch-audit-corrupt" in
+  let corrupt_ref = Patch.apply corrupt_audit_store patch_ok in
+  let corrupt_path = patch_audit_path corrupt_audit_store corrupt_ref in
+  Store.write_file_atomic corrupt_path (Store.read_file corrupt_path ^ "corrupt\n");
+  (try
+     ignore (Patch.inspect_audit corrupt_audit_store);
+     fail "corrupt patch audit should be rejected"
+   with Patch.Error msg ->
+     assert_true "corrupt patch audit detects hash mismatch"
+       (contains_substring msg "patch audit hash mismatch"));
   let inferred_lambda_patch_store = temp_dir "patch-inferred-lambda" in
   let inferred_lambda_patch =
     patch_file "protoss-inferred-lambda-patch.json"

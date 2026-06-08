@@ -14,7 +14,7 @@ let usage () =
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check [interface.json]|--json]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
-     \       protoss patch check|apply <store> <patch.json>\n\
+     \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref]\n\
      \       protoss patch from-diff <store-a> <store-b>\n\
      \       protoss diff [--json] <store-a> <store-b>\n\
      \       protoss audit [project]\n\
@@ -276,6 +276,9 @@ let command_patch = function
   | "apply" :: store :: patch :: [] ->
       let hash = Protoss.Patch.apply store patch in
       Printf.printf "Patch accepted %s\n" hash
+  | "audit" :: store :: [] -> print_string (Protoss.Patch.inspect_audit store)
+  | "audit" :: store :: patch_ref :: [] ->
+      print_string (Protoss.Patch.inspect_audit ~ref:patch_ref store)
   | _ -> usage ()
 
 let command_store = function
