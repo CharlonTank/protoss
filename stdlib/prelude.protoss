@@ -1,4 +1,4 @@
-; Protoss stdlib v0.17. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.18. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -21,7 +21,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.17")
+(def Stdlib.version String "v0.18")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -42,6 +42,22 @@
   (lambda (n Nat)
     (prim.Nat.toString n)))
 
+(def Nat.pred (-> Nat Nat)
+  (lambda (n Nat)
+    (get
+      (foldNat n
+        (record (previous 0) (current 0))
+        (lambda (state (Record (previous Nat) (current Nat)))
+          (record
+            (previous (get state current))
+            (current (succ (get state current))))))
+      previous)))
+
+(def Nat.sub (-> Nat (-> Nat Nat))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      (foldNat b a (lambda (acc Nat) (Nat.pred acc))))))
+
 (def Bool.not (-> Bool Bool)
   (lambda (b Bool)
     (case b (true false) (false true))))
@@ -55,6 +71,26 @@
   (lambda (a Bool)
     (lambda (b Bool)
       (case a (true true) (false b)))))
+
+(def Nat.lte (-> Nat (-> Nat Bool))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      ((Nat.eqNat ((Nat.sub a) b)) 0))))
+
+(def Nat.lt (-> Nat (-> Nat Bool))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      ((Bool.and ((Nat.lte a) b)) (Bool.not ((Nat.eqNat a) b))))))
+
+(def Nat.gte (-> Nat (-> Nat Bool))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      ((Nat.lte b) a))))
+
+(def Nat.gt (-> Nat (-> Nat Bool))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      ((Nat.lt b) a))))
 
 (def String.empty String "")
 
@@ -83,10 +119,27 @@
       (lambda (count Nat)
         (((prim.String.slice value) start) count)))))
 
+(def String.take (-> String (-> Nat String))
+  (lambda (value String)
+    (lambda (count Nat)
+      (((String.slice value) 0) count))))
+
+(def String.drop (-> String (-> Nat String))
+  (lambda (value String)
+    (lambda (count Nat)
+      (((String.slice value) count) ((Nat.sub (String.length value)) count)))))
+
 (def String.startsWith (-> String (-> String Bool))
   (lambda (value String)
     (lambda (prefix String)
       ((String.eqString (((String.slice value) 0) (String.length prefix))) prefix))))
+
+(def String.charAt (-> String (-> Nat (Maybe String)))
+  (lambda (value String)
+    (lambda (index Nat)
+      (case ((Nat.lt index) (String.length value))
+        (true (variant Some (((String.slice value) index) 1)))
+        (false (variant None unit))))))
 
 (def String.isEmpty (-> String Bool)
   (lambda (value String)

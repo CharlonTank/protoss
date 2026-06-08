@@ -1730,6 +1730,31 @@ let () =
   let greeting_starts_with, _ = Runtime.normalize_def stdlib_generics "greetingStartsWith" in
   assert_equal "stdlib String.startsWith" "true"
     (Runtime.value_to_string greeting_starts_with);
+  let greeting_take, _ = Runtime.normalize_def stdlib_generics "greetingTake" in
+  assert_equal "stdlib String.take" "\"Ada \"" (Runtime.value_to_string greeting_take);
+  let greeting_drop, _ = Runtime.normalize_def stdlib_generics "greetingDrop" in
+  assert_equal "stdlib String.drop" "\"Lovelace\"" (Runtime.value_to_string greeting_drop);
+  let greeting_char, _ = Runtime.normalize_def stdlib_generics "greetingChar" in
+  assert_equal "stdlib String.charAt hit" "Some \"d\"" (Runtime.value_to_string greeting_char);
+  let greeting_char_missing, _ =
+    Runtime.normalize_def stdlib_generics "greetingCharMissing"
+  in
+  assert_equal "stdlib String.charAt miss" "None unit"
+    (Runtime.value_to_string greeting_char_missing);
+  let pred_zero, _ = Runtime.normalize_def stdlib_generics "predZero" in
+  assert_equal "stdlib Nat.pred zero" "0" (Runtime.value_to_string pred_zero);
+  let pred_three, _ = Runtime.normalize_def stdlib_generics "predThree" in
+  assert_equal "stdlib Nat.pred" "2" (Runtime.value_to_string pred_three);
+  let subtract_floor, _ = Runtime.normalize_def stdlib_generics "subtractFloor" in
+  assert_equal "stdlib Nat.sub floor" "0" (Runtime.value_to_string subtract_floor);
+  let subtract_value, _ = Runtime.normalize_def stdlib_generics "subtractValue" in
+  assert_equal "stdlib Nat.sub" "3" (Runtime.value_to_string subtract_value);
+  let nat_less, _ = Runtime.normalize_def stdlib_generics "natLess" in
+  assert_equal "stdlib Nat.lt" "true" (Runtime.value_to_string nat_less);
+  let nat_not_less, _ = Runtime.normalize_def stdlib_generics "natNotLess" in
+  assert_equal "stdlib Nat.lt equal" "false" (Runtime.value_to_string nat_not_less);
+  let nat_gte, _ = Runtime.normalize_def stdlib_generics "natGte" in
+  assert_equal "stdlib Nat.gte" "true" (Runtime.value_to_string nat_gte);
   let nat_text, _ = Runtime.normalize_def stdlib_generics "natText" in
   assert_equal "stdlib Nat.toString" "\"42\"" (Runtime.value_to_string nat_text);
   let source_span_text, _ = Runtime.normalize_def stdlib_generics "sourceSpanText" in

@@ -32,6 +32,39 @@
 (def greetingStartsWith Bool
   ((String.startsWith greeting) "Ada"))
 
+(def greetingTake String
+  ((String.take greeting) 4))
+
+(def greetingDrop String
+  ((String.drop greeting) 4))
+
+(def greetingChar (Maybe String)
+  ((String.charAt greeting) 1))
+
+(def greetingCharMissing (Maybe String)
+  ((String.charAt greeting) 99))
+
+(def predZero Nat
+  (Nat.pred 0))
+
+(def predThree Nat
+  (Nat.pred 3))
+
+(def subtractFloor Nat
+  ((Nat.sub 2) 5))
+
+(def subtractValue Nat
+  ((Nat.sub 7) 4))
+
+(def natLess Bool
+  ((Nat.lt 2) 3))
+
+(def natNotLess Bool
+  ((Nat.lt 3) 3))
+
+(def natGte Bool
+  ((Nat.gte 3) 3))
+
 (def natText String
   (Nat.toString 42))
 
