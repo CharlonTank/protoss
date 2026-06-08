@@ -68,6 +68,7 @@ type manifest = {
   capabilities : string list;
   package_imports : (string * string) list;
   package_interfaces : (string * string) list;
+  package_contracts : (string * string) list;
 }
 
 let manifest_name = "protoss.toml"
@@ -124,6 +125,8 @@ let parse_package_import s = parse_manifest_pair "package import" s
 
 let parse_package_interface s = parse_manifest_pair "package interface constraint" s
 
+let parse_package_contract s = parse_manifest_pair "package contract constraint" s
+
 let parse_manifest root =
   let root = realpath_or root in
   let path = manifest_path root in
@@ -172,6 +175,8 @@ let parse_manifest root =
     package_imports = array_field "package_imports" [] |> List.map parse_package_import;
     package_interfaces =
       array_field "package_interfaces" [] |> List.map parse_package_interface;
+    package_contracts =
+      array_field "package_contracts" [] |> List.map parse_package_contract;
   }
 
 let path_in_project manifest path = normalize_path manifest.root path
@@ -206,7 +211,8 @@ let init ?(force = false) root =
      cache_dir = \".protoss/cache\"\n\
      capabilities = []\n\
      package_imports = []\n\
-     package_interfaces = []\n";
+     package_interfaces = []\n\
+     package_contracts = []\n";
   let main = Filename.concat src "main.protoss" in
   if not (Sys.file_exists main) then write_file main "(def main Nat 0)\n";
   manifest
@@ -828,11 +834,165 @@ let package_interface_items manifest prepared =
 let package_interface_hash manifest prepared =
   Kernel.hash_string (lock_item "interface" (package_interface_items manifest prepared))
 
+let package_pair_list_field name items =
+  package_string_list_field name items
+  |> List.map (fun item ->
+         match split_once '=' item with
+         | Some (name, value) when trim name <> "" && trim value <> "" -> (trim name, trim value)
+         | _ -> fail ("invalid package pair field " ^ name ^ ": " ^ item))
+
+let assoc_value name pairs =
+  pairs
+  |> List.find_opt (fun (n, _) -> String.equal n name)
+  |> Option.map snd
+  |> Option.value ~default:"-"
+
+type package_interface_export =
+  | PackageDefExport of {
+      export_name : string;
+      export_type_canonical : string;
+      export_type_hash : string;
+      export_capabilities : string list;
+    }
+  | PackageTypeExport of {
+      export_name : string;
+      export_params : string list;
+      export_type_canonical : string;
+      export_type_hash : string;
+    }
+
+type package_interface = {
+  interface_project : string;
+  interface_package : string;
+  interface_package_version : string;
+  interface_package_ref : string;
+  interface_lock_hash : string;
+  interface_build_id : string;
+  interface_hash : string;
+  interface_imports : (string * string * string * string * string) list;
+  interface_exports : package_interface_export list;
+}
+
+let package_interface_export_of_sexp = function
+  | Sexp.List (Sexp.Atom "def" :: fields) ->
+      let name = package_string_field "name" fields in
+      let type_canonical = package_string_field "type-canonical" fields in
+      let type_hash = package_atom_field "type-hash" fields in
+      let caps = package_string_list_field "capability-scope" fields in
+      if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
+        fail ("package interface type hash mismatch: " ^ name);
+      PackageDefExport
+        {
+          export_name = name;
+          export_type_canonical = type_canonical;
+          export_type_hash = type_hash;
+          export_capabilities = caps;
+        }
+  | Sexp.List (Sexp.Atom "type" :: fields) ->
+      let name = package_string_field "name" fields in
+      let params = package_string_list_field "params" fields in
+      let type_canonical = package_string_field "type-canonical" fields in
+      let type_hash = package_atom_field "type-hash" fields in
+      if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
+        fail ("package interface type hash mismatch: " ^ name);
+      PackageTypeExport
+        {
+          export_name = name;
+          export_params = params;
+          export_type_canonical = type_canonical;
+          export_type_hash = type_hash;
+        }
+  | item -> fail ("invalid package interface item: " ^ Sexp.to_string item)
+
+let package_interface_exports_from_items items =
+  package_list_field "interface" items |> List.map package_interface_export_of_sexp
+
+let package_interface_imports_from_items items =
+  let imports = package_pair_list_field "package-imports" items in
+  let import_locks = package_pair_list_field "package-import-locks" items in
+  let import_interfaces = package_pair_list_field "package-import-interfaces" items in
+  let import_contracts = package_pair_list_field "package-import-contracts" items in
+  imports
+  |> List.map (fun (name, package_ref) ->
+         ( name,
+           package_ref,
+           assoc_value name import_locks,
+           assoc_value name import_interfaces,
+           assoc_value name import_contracts ))
+
+let package_interface_export_contract_item = function
+  | PackageDefExport
+      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
+      lock_item "def"
+        [
+          lock_item "name" [ lock_string export_name ];
+          lock_item "type-canonical" [ lock_string export_type_canonical ];
+          lock_item "type-hash" [ export_type_hash ];
+          lock_string_list "capability-scope" export_capabilities;
+        ]
+  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
+      lock_item "type"
+        [
+          lock_item "name" [ lock_string export_name ];
+          lock_string_list "params" export_params;
+          lock_item "type-canonical" [ lock_string export_type_canonical ];
+          lock_item "type-hash" [ export_type_hash ];
+        ]
+
+let package_interface_import_contract_item
+    (name, package_ref, lock_hash, interface_hash, contract_hash) =
+  lock_item "import"
+    [
+      lock_item "name" [ lock_string name ];
+      lock_item "package-ref" [ package_ref ];
+      lock_item "lock-hash" [ lock_hash ];
+      lock_item "interface-hash" [ interface_hash ];
+      lock_item "contract-hash" [ contract_hash ];
+    ]
+
+let package_interface_contract_hash interface =
+  let imports =
+    interface.interface_imports
+    |> List.map package_interface_import_contract_item
+    |> List.sort String.compare
+  in
+  let exports =
+    interface.interface_exports
+    |> List.map package_interface_export_contract_item
+    |> List.sort String.compare
+  in
+  Kernel.hash_string
+    (lock_item "package-interface-contract-v1"
+       [
+         lock_item "package" [ lock_string interface.interface_package ];
+         lock_item "version" [ lock_string interface.interface_package_version ];
+         lock_item "package-ref" [ interface.interface_package_ref ];
+         lock_item "lock-hash" [ interface.interface_lock_hash ];
+         lock_item "build-id" [ interface.interface_build_id ];
+         lock_item "interface-hash" [ interface.interface_hash ];
+         lock_item "imports" imports;
+         lock_item "exports" exports;
+       ])
+
+let package_interface_from_items ?(project = "") package_ref items =
+  {
+    interface_project = project;
+    interface_package = package_string_field "package" items;
+    interface_package_version = package_string_field "version" items;
+    interface_package_ref = package_ref;
+    interface_lock_hash = package_atom_field "lock-hash" items;
+    interface_build_id = package_atom_field "program-hash" items;
+    interface_hash = package_atom_field "interface-hash" items;
+    interface_imports = package_interface_imports_from_items items;
+    interface_exports = package_interface_exports_from_items items;
+  }
+
 type package_import_info = {
   import_name : string;
   import_ref : string;
   import_lock_hash : string;
   import_interface_hash : string;
+  import_contract_hash : string;
 }
 
 let package_import_manifest manifest (name, path) =
@@ -892,11 +1052,15 @@ let read_package_import manifest import =
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (Kernel.hash_string prepared.program_graph);
   expect_atom "interface-hash" current_interface_hash;
+  let current_contract_hash =
+    package_interface_contract_hash (package_interface_from_items package_ref items)
+  in
   {
     import_name = imported.name;
     import_ref = package_ref;
     import_lock_hash = current_lock_hash;
     import_interface_hash = current_interface_hash;
+    import_contract_hash = current_contract_hash;
   }
 
 let package_imports manifest =
@@ -943,7 +1107,11 @@ let lock_content manifest prepared =
       "  "
       ^ lock_pair_list "package-import-interfaces"
           (List.map (fun i -> (i.import_name, i.import_interface_hash)) imports);
+      "  "
+      ^ lock_pair_list "package-import-contracts"
+          (List.map (fun i -> (i.import_name, i.import_contract_hash)) imports);
       "  " ^ lock_pair_list "package-interfaces" manifest.package_interfaces;
+      "  " ^ lock_pair_list "package-contracts" manifest.package_contracts;
       "  "
       ^ lock_item "defs"
           (prepared.checked.defs
@@ -998,9 +1166,10 @@ let check_project manifest =
   ignore (build ~write:false manifest)
 
 let validate_package_interface_constraints manifest interface_hash =
+  let imports = package_imports manifest in
   let available =
     (manifest.name, interface_hash)
-    :: (package_imports manifest |> List.map (fun i -> (i.import_name, i.import_interface_hash)))
+    :: (imports |> List.map (fun i -> (i.import_name, i.import_interface_hash)))
   in
   List.iter
     (fun (name, expected) ->
@@ -1011,7 +1180,20 @@ let validate_package_interface_constraints manifest interface_hash =
               ("package interface mismatch for " ^ name ^ ": expected " ^ expected ^ ", got "
              ^ actual)
       | None -> fail ("unknown package interface constraint: " ^ name))
-    manifest.package_interfaces
+    manifest.package_interfaces;
+  let contract_available =
+    imports |> List.map (fun i -> (i.import_name, i.import_contract_hash))
+  in
+  List.iter
+    (fun (name, expected) ->
+      match List.find_opt (fun (n, _) -> String.equal n name) contract_available with
+      | Some (_, actual) ->
+          if not (String.equal expected actual) then
+            fail
+              ("package contract mismatch for " ^ name ^ ": expected " ^ expected ^ ", got "
+             ^ actual)
+      | None -> fail ("unknown package contract constraint: " ^ name))
+    manifest.package_contracts
 
 let package_content manifest prepared lock_hash =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
@@ -1042,7 +1224,11 @@ let package_content manifest prepared lock_hash =
       "  "
       ^ lock_pair_list "package-import-interfaces"
           (List.map (fun i -> (i.import_name, i.import_interface_hash)) imports);
+      "  "
+      ^ lock_pair_list "package-import-contracts"
+          (List.map (fun i -> (i.import_name, i.import_contract_hash)) imports);
       "  " ^ lock_pair_list "package-interfaces" manifest.package_interfaces;
+      "  " ^ lock_pair_list "package-contracts" manifest.package_contracts;
       "  " ^ lock_item "interface" interface_items;
       "  " ^ lock_item "types" (List.map package_type_item prepared.checked.program.type_aliases);
       "  " ^ lock_item "defs" (List.map package_def_item prepared.checked.defs);
@@ -1122,103 +1308,11 @@ let check_package manifest =
   validate_package_interface_constraints manifest interface_hash;
   { package_ref; package_path; lock_hash; build_id = prepared.build_id; store = store_root manifest }
 
-let package_pair_list_field name items =
-  package_string_list_field name items
-  |> List.map (fun item ->
-         match split_once '=' item with
-         | Some (name, value) when trim name <> "" && trim value <> "" -> (trim name, trim value)
-         | _ -> fail ("invalid package pair field " ^ name ^ ": " ^ item))
-
-let assoc_value name pairs =
-  pairs
-  |> List.find_opt (fun (n, _) -> String.equal n name)
-  |> Option.map snd
-  |> Option.value ~default:"-"
-
-type package_interface_export =
-  | PackageDefExport of {
-      export_name : string;
-      export_type_canonical : string;
-      export_type_hash : string;
-      export_capabilities : string list;
-    }
-  | PackageTypeExport of {
-      export_name : string;
-      export_params : string list;
-      export_type_canonical : string;
-      export_type_hash : string;
-    }
-
-type package_interface = {
-  interface_project : string;
-  interface_package : string;
-  interface_package_version : string;
-  interface_package_ref : string;
-  interface_lock_hash : string;
-  interface_build_id : string;
-  interface_hash : string;
-  interface_imports : (string * string * string * string) list;
-  interface_exports : package_interface_export list;
-}
-
-let package_interface_export_of_sexp = function
-  | Sexp.List (Sexp.Atom "def" :: fields) ->
-      let name = package_string_field "name" fields in
-      let type_canonical = package_string_field "type-canonical" fields in
-      let type_hash = package_atom_field "type-hash" fields in
-      let caps = package_string_list_field "capability-scope" fields in
-      if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
-        fail ("package interface type hash mismatch: " ^ name);
-      PackageDefExport
-        {
-          export_name = name;
-          export_type_canonical = type_canonical;
-          export_type_hash = type_hash;
-          export_capabilities = caps;
-        }
-  | Sexp.List (Sexp.Atom "type" :: fields) ->
-      let name = package_string_field "name" fields in
-      let params = package_string_list_field "params" fields in
-      let type_canonical = package_string_field "type-canonical" fields in
-      let type_hash = package_atom_field "type-hash" fields in
-      if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
-        fail ("package interface type hash mismatch: " ^ name);
-      PackageTypeExport
-        {
-          export_name = name;
-          export_params = params;
-          export_type_canonical = type_canonical;
-          export_type_hash = type_hash;
-        }
-  | item -> fail ("invalid package interface item: " ^ Sexp.to_string item)
-
 let read_package_interface manifest =
   let checked = check_package manifest in
   let content = read_file checked.package_path in
   let items = package_items content in
-  let imports = package_pair_list_field "package-imports" items in
-  let import_locks = package_pair_list_field "package-import-locks" items in
-  let import_interfaces = package_pair_list_field "package-import-interfaces" items in
-  let exports =
-    package_list_field "interface" items |> List.map package_interface_export_of_sexp
-  in
-  {
-    interface_project = manifest.root;
-    interface_package = manifest.name;
-    interface_package_version = manifest.version;
-    interface_package_ref = checked.package_ref;
-    interface_lock_hash = checked.lock_hash;
-    interface_build_id = checked.build_id;
-    interface_hash = package_atom_field "interface-hash" items;
-    interface_imports =
-      imports
-      |> List.map (fun (name, package_ref) ->
-             ( name,
-               package_ref,
-               assoc_value name import_locks,
-               assoc_value name import_interfaces ));
-    interface_exports = exports;
-  }
+  package_interface_from_items ~project:manifest.root checked.package_ref items
 
 let package_interface_export_text = function
   | PackageDefExport
@@ -1238,58 +1332,6 @@ let package_json_field name value = package_json_string name ^ ": " ^ value
 let package_json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
 
 let package_json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
-
-let package_interface_export_contract_item = function
-  | PackageDefExport
-      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
-      lock_item "def"
-        [
-          lock_item "name" [ lock_string export_name ];
-          lock_item "type-canonical" [ lock_string export_type_canonical ];
-          lock_item "type-hash" [ export_type_hash ];
-          lock_string_list "capability-scope" export_capabilities;
-        ]
-  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
-      lock_item "type"
-        [
-          lock_item "name" [ lock_string export_name ];
-          lock_string_list "params" export_params;
-          lock_item "type-canonical" [ lock_string export_type_canonical ];
-          lock_item "type-hash" [ export_type_hash ];
-        ]
-
-let package_interface_import_contract_item (name, package_ref, lock_hash, interface_hash) =
-  lock_item "import"
-    [
-      lock_item "name" [ lock_string name ];
-      lock_item "package-ref" [ package_ref ];
-      lock_item "lock-hash" [ lock_hash ];
-      lock_item "interface-hash" [ interface_hash ];
-    ]
-
-let package_interface_contract_hash interface =
-  let imports =
-    interface.interface_imports
-    |> List.map package_interface_import_contract_item
-    |> List.sort String.compare
-  in
-  let exports =
-    interface.interface_exports
-    |> List.map package_interface_export_contract_item
-    |> List.sort String.compare
-  in
-  Kernel.hash_string
-    (lock_item "package-interface-contract-v1"
-       [
-         lock_item "package" [ lock_string interface.interface_package ];
-         lock_item "version" [ lock_string interface.interface_package_version ];
-         lock_item "package-ref" [ interface.interface_package_ref ];
-         lock_item "lock-hash" [ interface.interface_lock_hash ];
-         lock_item "build-id" [ interface.interface_build_id ];
-         lock_item "interface-hash" [ interface.interface_hash ];
-         lock_item "imports" imports;
-         lock_item "exports" exports;
-       ])
 
 let package_interface_export_json = function
   | PackageDefExport
@@ -1313,13 +1355,14 @@ let package_interface_export_json = function
           package_json_field "typeHash" (package_json_string export_type_hash);
         ]
 
-let package_interface_import_json (name, package_ref, lock_hash, interface_hash) =
+let package_interface_import_json (name, package_ref, lock_hash, interface_hash, contract_hash) =
   package_json_obj
     [
       package_json_field "name" (package_json_string name);
       package_json_field "packageRef" (package_json_string package_ref);
       package_json_field "lockHash" (package_json_string lock_hash);
       package_json_field "interfaceHash" (package_json_string interface_hash);
+      package_json_field "contractHash" (package_json_string contract_hash);
     ]
 
 let package_interface_json manifest =
@@ -1353,9 +1396,9 @@ let package_interface_text manifest =
   let interface = read_package_interface manifest in
   let import_lines =
     interface.interface_imports
-    |> List.map (fun (name, package_ref, lock_hash, interface_hash) ->
+    |> List.map (fun (name, package_ref, lock_hash, interface_hash, contract_hash) ->
            "import " ^ name ^ " package=" ^ package_ref ^ " lock="
-           ^ lock_hash ^ " interface=" ^ interface_hash)
+           ^ lock_hash ^ " interface=" ^ interface_hash ^ " contract=" ^ contract_hash)
   in
   let exports = List.map package_interface_export_text interface.interface_exports in
   String.concat "\n"
@@ -1402,7 +1445,8 @@ let package_interface_import_of_json obj =
   ( package_json_string_field "name" obj,
     package_json_string_field "packageRef" obj,
     package_json_string_field "lockHash" obj,
-    package_json_string_field "interfaceHash" obj )
+    package_json_string_field "interfaceHash" obj,
+    package_json_string_field "contractHash" obj )
 
 let package_interface_export_of_json obj =
   let kind = package_json_string_field "kind" obj in

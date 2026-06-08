@@ -1796,7 +1796,8 @@ let () =
   let consumer_manifest_base = Store.read_file consumer_manifest_path in
   write_file consumer_manifest_path
     (consumer_manifest_base ^ "package_imports = [\"workspace-a=" ^ ws_a
-   ^ "\"]\npackage_interfaces = [\"workspace-a=" ^ interface_hash ^ "\"]\n");
+   ^ "\"]\npackage_interfaces = [\"workspace-a=" ^ interface_hash
+   ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash ^ "\"]\n");
   let consumer_manifest = Workspace.parse_manifest consumer_ws in
   let consumer_package = Workspace.write_package consumer_manifest in
   let consumer_package_content = Store.read_file consumer_package.package_path in
@@ -1804,11 +1805,15 @@ let () =
     (contains_substring consumer_package_content ("workspace-a=" ^ package_a.package_ref));
   assert_true "package dependency records interface hash"
     (contains_substring consumer_package_content ("workspace-a=" ^ interface_hash));
+  assert_true "package dependency records contract hash"
+    (contains_substring consumer_package_content ("workspace-a=" ^ package_interface_contract_hash));
   let consumer_interface_text = Workspace.package_interface_text consumer_manifest in
   assert_true "package interface prints imported package"
     (contains_substring consumer_interface_text ("import workspace-a package=" ^ package_a.package_ref));
   assert_true "package interface prints imported interface"
     (contains_substring consumer_interface_text ("interface=" ^ interface_hash));
+  assert_true "package interface prints imported contract"
+    (contains_substring consumer_interface_text ("contract=" ^ package_interface_contract_hash));
   let consumer_interface_obj = Json.parse (Workspace.package_interface_json consumer_manifest) in
   let consumer_imports = json_array_field "imports" consumer_interface_obj in
   let workspace_import =
@@ -1823,6 +1828,8 @@ let () =
     (json_string_field "packageRef" workspace_import);
   assert_equal "package interface json imported interface" interface_hash
     (json_string_field "interfaceHash" workspace_import);
+  assert_equal "package interface json imported contract" package_interface_contract_hash
+    (json_string_field "contractHash" workspace_import);
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
   let consumer_package_invariants = Invariants.check_package consumer_ws in
@@ -1867,6 +1874,17 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "bad imported package interface leaves package store untouched"
     (consumer_dot_before_bad = snapshot (Filename.concat consumer_ws ".protoss"));
+  let consumer_dot_before_bad_contract = snapshot (Filename.concat consumer_ws ".protoss") in
+  write_file consumer_manifest_path
+    (consumer_manifest_base ^ "package_imports = [\"workspace-a=" ^ ws_a
+   ^ "\"]\npackage_contracts = [\"workspace-a=p2:bad\"]\n");
+  let consumer_bad_contract = Workspace.parse_manifest consumer_ws in
+  (try
+     ignore (Workspace.write_package consumer_bad_contract);
+     fail "bad imported package contract should reject without mutation"
+   with Workspace.Error _ -> ());
+  assert_true "bad imported package contract leaves package store untouched"
+    (consumer_dot_before_bad_contract = snapshot (Filename.concat consumer_ws ".protoss"));
   let mismatch_ws = make_workspace "workspace-import-mismatch" 6 "q" in
   let mismatch_manifest_path = Filename.concat mismatch_ws "protoss.toml" in
   let mismatch_manifest_base = Store.read_file mismatch_manifest_path in
