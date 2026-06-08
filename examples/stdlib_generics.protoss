@@ -392,6 +392,15 @@
 (def sexpRenderNested String
   (Sexp.render sexpNestedForm))
 
+(def sexpTokens (Result String (List SexpToken))
+  (Sexp.lexTokens "(def main \"Ada\")"))
+
+(def sexpTokensWithComment (Result String (List SexpToken))
+  (Sexp.lexTokens "(def main 1) ; ignored\n(next)"))
+
+(def sexpTokensUnterminated (Result String (List SexpToken))
+  (Sexp.lexTokens "(def bad \"oops)"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

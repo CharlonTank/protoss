@@ -1937,6 +1937,21 @@ let () =
   let sexp_render_nested, _ = Runtime.normalize_def stdlib_generics "sexpRenderNested" in
   assert_equal "stdlib Sexp.render nested list" "\"((def \\\"main\\\") def)\""
     (Runtime.value_to_string sexp_render_nested);
+  let sexp_tokens, _ = Runtime.normalize_def stdlib_generics "sexpTokens" in
+  assert_equal "stdlib Sexp.lexTokens"
+    "Ok [SLParen unit, SAtomToken \"def\", SAtomToken \"main\", SStringToken \"Ada\", SRParen unit]"
+    (Runtime.value_to_string sexp_tokens);
+  let sexp_tokens_with_comment, _ =
+    Runtime.normalize_def stdlib_generics "sexpTokensWithComment"
+  in
+  assert_equal "stdlib Sexp.lexTokens comment"
+    "Ok [SLParen unit, SAtomToken \"def\", SAtomToken \"main\", SAtomToken \"1\", SRParen unit, SLParen unit, SAtomToken \"next\", SRParen unit]"
+    (Runtime.value_to_string sexp_tokens_with_comment);
+  let sexp_tokens_unterminated, _ =
+    Runtime.normalize_def stdlib_generics "sexpTokensUnterminated"
+  in
+  assert_equal "stdlib Sexp.lexTokens unterminated string" "Err \"unterminated string\""
+    (Runtime.value_to_string sexp_tokens_unterminated);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

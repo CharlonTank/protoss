@@ -1,4 +1,4 @@
-; Protoss stdlib v0.19. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.20. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -14,6 +14,21 @@
   (SAtom String)
   (SString String)
   (SList (List Sexp)))
+(variant SexpToken
+  (SLParen Unit)
+  (SRParen Unit)
+  (SAtomToken String)
+  (SStringToken String))
+(variant SexpLexMode
+  (SexpLexDefault Unit)
+  (SexpLexAtom String)
+  (SexpLexString String)
+  (SexpLexComment Unit))
+(record SexpLexerState
+  (cursor TextCursor)
+  (mode SexpLexMode)
+  (tokens (List SexpToken))
+  (error (Maybe String)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -22,7 +37,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.19")
+(def Stdlib.version String "v0.20")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -707,6 +722,133 @@
         (((inst List.filter A) left)
           (lambda (item A)
             (Bool.not ((((inst Set.contains A) eq) item) right))))))))
+
+(def SexpLexerState.make (-> TextCursor (-> SexpLexMode (-> (List SexpToken) (-> (Maybe String) SexpLexerState))))
+  (lambda (cursor TextCursor)
+    (lambda (mode SexpLexMode)
+      (lambda (tokens (List SexpToken))
+        (lambda (error (Maybe String))
+          (record (cursor cursor) (mode mode) (tokens tokens) (error error)))))))
+
+(def SexpLexerState.ok (-> TextCursor (-> SexpLexMode (-> (List SexpToken) SexpLexerState)))
+  (lambda (cursor TextCursor)
+    (lambda (mode SexpLexMode)
+      (lambda (tokens (List SexpToken))
+        ((((SexpLexerState.make cursor) mode) tokens) (variant None unit))))))
+
+(def SexpLexerState.fail (-> String (-> SexpLexerState SexpLexerState))
+  (lambda (message String)
+    (lambda (state SexpLexerState)
+      ((((SexpLexerState.make (get state cursor)) (get state mode)) (get state tokens))
+        (variant Some message)))))
+
+(def SexpLexerState.withMode (-> SexpLexMode (-> SexpLexerState SexpLexerState))
+  (lambda (mode SexpLexMode)
+    (lambda (state SexpLexerState)
+      ((((SexpLexerState.make (get state cursor)) mode) (get state tokens)) (get state error)))))
+
+(def SexpLexerState.advance (-> SexpLexerState SexpLexerState)
+  (lambda (state SexpLexerState)
+    ((((SexpLexerState.make (TextCursor.advance (get state cursor))) (get state mode))
+      (get state tokens))
+      (get state error))))
+
+(def SexpLexerState.addToken (-> SexpToken (-> SexpLexerState SexpLexerState))
+  (lambda (token SexpToken)
+    (lambda (state SexpLexerState)
+      ((((SexpLexerState.make (get state cursor)) (get state mode))
+        (Cons SexpToken token (get state tokens)))
+        (get state error)))))
+
+(def Sexp.lexDefaultChar (-> SexpLexerState (-> String SexpLexerState))
+  (lambda (state SexpLexerState)
+    (lambda (ch String)
+      (case (String.isWhitespace ch)
+        (true state)
+        (false
+          (case ((String.eqString ch) ";")
+            (true ((SexpLexerState.withMode (variant SexpLexComment unit)) state))
+            (false
+              (case ((String.eqString ch) "(")
+                (true ((SexpLexerState.addToken (variant SLParen unit)) state))
+                (false
+                  (case ((String.eqString ch) ")")
+                    (true ((SexpLexerState.addToken (variant SRParen unit)) state))
+                    (false
+                      (case ((String.eqString ch) "\"")
+                        (true ((SexpLexerState.withMode (variant SexpLexString "")) state))
+                        (false
+                          ((SexpLexerState.withMode (variant SexpLexAtom ch)) state))))))))))))))
+
+(def Sexp.lexAtomChar (-> SexpLexerState (-> String (-> String SexpLexerState)))
+  (lambda (state SexpLexerState)
+    (lambda (atom String)
+      (lambda (ch String)
+        (case (String.isAtomChar ch)
+          (true ((SexpLexerState.withMode (variant SexpLexAtom ((String.concat atom) ch))) state))
+          (false
+            ((Sexp.lexDefaultChar
+              ((SexpLexerState.addToken (variant SAtomToken atom))
+                ((SexpLexerState.withMode (variant SexpLexDefault unit)) state)))
+              ch)))))))
+
+(def Sexp.lexStringChar (-> SexpLexerState (-> String (-> String SexpLexerState)))
+  (lambda (state SexpLexerState)
+    (lambda (text String)
+      (lambda (ch String)
+        (case ((String.eqString ch) "\"")
+          (true
+            ((SexpLexerState.addToken (variant SStringToken text))
+              ((SexpLexerState.withMode (variant SexpLexDefault unit)) state)))
+          (false
+            ((SexpLexerState.withMode (variant SexpLexString ((String.concat text) ch))) state)))))))
+
+(def Sexp.lexCommentChar (-> SexpLexerState (-> String SexpLexerState))
+  (lambda (state SexpLexerState)
+    (lambda (ch String)
+      (case ((String.eqString ch) "\n")
+        (true ((SexpLexerState.withMode (variant SexpLexDefault unit)) state))
+        (false state)))))
+
+(def Sexp.lexStep (-> SexpLexerState (-> String SexpLexerState))
+  (lambda (state SexpLexerState)
+    (lambda (ch String)
+      (case (get state error)
+        (Some message state)
+        (None
+          (case (get state mode)
+            (SexpLexDefault (Sexp.lexDefaultChar state ch))
+            (SexpLexAtom atom (((Sexp.lexAtomChar state) atom) ch))
+            (SexpLexString text (((Sexp.lexStringChar state) text) ch))
+            (SexpLexComment (Sexp.lexCommentChar state ch))))))))
+
+(def Sexp.lexCurrent (-> SexpLexerState SexpLexerState)
+  (lambda (state SexpLexerState)
+    (case (TextCursor.current (get state cursor))
+      (None state)
+      (Some ch (SexpLexerState.advance ((Sexp.lexStep state) ch))))))
+
+(def Sexp.lexFinalize (-> SexpLexerState (Result String (List SexpToken)))
+  (lambda (state SexpLexerState)
+    (case (get state error)
+      (Some message (variant Err message))
+      (None
+        (case (get state mode)
+          (SexpLexDefault (variant Ok ((inst List.reverse SexpToken) (get state tokens))))
+          (SexpLexComment (variant Ok ((inst List.reverse SexpToken) (get state tokens))))
+          (SexpLexAtom atom
+            (variant Ok
+              ((inst List.reverse SexpToken)
+                (Cons SexpToken (variant SAtomToken atom) (get state tokens)))))
+          (SexpLexString text (variant Err "unterminated string")))))))
+
+(def Sexp.lexTokens (-> String (Result String (List SexpToken)))
+  (lambda (source String)
+    (Sexp.lexFinalize
+      (foldNat (String.length source)
+        (((SexpLexerState.ok (TextCursor.start source)) (variant SexpLexDefault unit)) (Nil SexpToken))
+        (lambda (state SexpLexerState)
+          (Sexp.lexCurrent state))))))
 
 (def Sexp.atom (-> String Sexp)
   (lambda (value String)
