@@ -1,4 +1,4 @@
-; Protoss stdlib v0.31. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.32. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -159,7 +159,11 @@
   (typeParams (List String))
   (rest (List Sexp)))
 (variant ProtossDecl
+  (PDCapabilities (List String))
   (PDDef ProtossDef)
+  (PDExport (List String))
+  (PDImport String)
+  (PDModule String)
   (PDRecord ProtossRecordDecl)
   (PDType ProtossTypeAlias)
   (PDVariant ProtossVariantDecl))
@@ -171,7 +175,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.31")
+(def Stdlib.version String "v0.32")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -2136,6 +2140,20 @@
                 (Ok names (Protoss.stringListOk (Cons String name names)))))
             (_ (Protoss.stringListErr "expected parameter name"))))))))
 
+(def Protoss.parseNames
+  (-> String (-> (List Sexp) (Result String (List String))))
+  (lambda (message String)
+    (lambda (items (List Sexp))
+      (foldList items (Protoss.stringListOk (Nil String))
+        (lambda (item Sexp)
+          (lambda (acc (Result String (List String)))
+            (case item
+              (SAtom name
+                (case acc
+                  (Err err (Protoss.stringListErr err))
+                  (Ok names (Protoss.stringListOk (Cons String name names)))))
+              (_ (Protoss.stringListErr message)))))))))
+
 (def Protoss.paramTailOk (-> (List String) (-> (List Sexp) (Result String ProtossParamTail)))
   (lambda (params (List String))
     (lambda (rest (List Sexp))
@@ -2177,6 +2195,80 @@
 (def Protoss.declErr (-> String (Result String ProtossDecl))
   (lambda (message String)
     (variant Err message)))
+
+(def Protoss.parseModuleDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected module name"))
+      (Cons nameNode rest
+        (caseList rest
+          (Nil
+            (case nameNode
+              (SAtom name (Protoss.declOk (variant PDModule name)))
+              (_ (Protoss.declErr "expected module name"))))
+          (Cons extraHead extraTail
+            (Protoss.declErr "too many module fields")))))))
+
+(def Protoss.parseImportDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected import path"))
+      (Cons pathNode rest
+        (caseList rest
+          (Nil
+            (case pathNode
+              (SString path (Protoss.declOk (variant PDImport path)))
+              (_ (Protoss.declErr "expected import path"))))
+          (Cons extraHead extraTail
+            (Protoss.declErr "too many import fields")))))))
+
+(def Protoss.parseExportDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (case ((Protoss.parseNames "expected export name") tail)
+      (Err err (Protoss.declErr err))
+      (Ok names (Protoss.declOk (variant PDExport names))))))
+
+(def Protoss.parseCapabilitiesDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (case ((Protoss.parseNames "expected capability name") tail)
+      (Err err (Protoss.declErr err))
+      (Ok names (Protoss.declOk (variant PDCapabilities names))))))
+
+(def Protoss.parseDefDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected def name"))
+      (Cons nameNode defTail
+        (case nameNode
+          (SAtom name ((Protoss.parseDefTail name) defTail))
+          (_ (Protoss.declErr "expected def name")))))))
+
+(def Protoss.parseTypeDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected type name"))
+      (Cons nameNode typeTail
+        (case nameNode
+          (SAtom name ((Protoss.parseTypeAliasTail name) typeTail))
+          (_ (Protoss.declErr "expected type name")))))))
+
+(def Protoss.parseRecordDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected record name"))
+      (Cons nameNode recordTail
+        (case nameNode
+          (SAtom name ((Protoss.parseRecordTail name) recordTail))
+          (_ (Protoss.declErr "expected record name")))))))
+
+(def Protoss.parseVariantDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected variant name"))
+      (Cons nameNode variantTail
+        (case nameNode
+          (SAtom name ((Protoss.parseVariantTail name) variantTail))
+          (_ (Protoss.declErr "expected variant name")))))))
 
 (def Protoss.parseDefTail
   (-> String (-> (List Sexp) (Result String ProtossDecl)))
@@ -2388,43 +2480,32 @@
           (Cons head tail
             (case head
               (SAtom tag
-                (case ((String.eqString tag) "def")
-                  (true
-                    (caseList tail
-                      (Nil (variant Err "expected def name"))
-                      (Cons nameNode defTail
-                        (case nameNode
-                          (SAtom name ((Protoss.parseDefTail name) defTail))
-                          (_ (variant Err "expected def name"))))))
+                (case ((String.eqString tag) "module")
+                  (true (Protoss.parseModuleDecl tail))
                   (false
-                    (case ((String.eqString tag) "type")
-                      (true
-                        (caseList tail
-                          (Nil (Protoss.declErr "expected type name"))
-                          (Cons nameNode typeTail
-                            (case nameNode
-                              (SAtom name ((Protoss.parseTypeAliasTail name) typeTail))
-                              (_ (Protoss.declErr "expected type name"))))))
+                    (case ((String.eqString tag) "import")
+                      (true (Protoss.parseImportDecl tail))
                       (false
-                        (case ((String.eqString tag) "record")
-                          (true
-                            (caseList tail
-                              (Nil (Protoss.declErr "expected record name"))
-                              (Cons nameNode recordTail
-                                (case nameNode
-                                  (SAtom name ((Protoss.parseRecordTail name) recordTail))
-                                  (_ (Protoss.declErr "expected record name"))))))
+                        (case ((String.eqString tag) "export")
+                          (true (Protoss.parseExportDecl tail))
                           (false
-                            (case ((String.eqString tag) "variant")
-                              (true
-                                (caseList tail
-                                  (Nil (Protoss.declErr "expected variant name"))
-                                  (Cons nameNode variantTail
-                                    (case nameNode
-                                      (SAtom name
-                                        ((Protoss.parseVariantTail name) variantTail))
-                                      (_ (Protoss.declErr "expected variant name"))))))
-                              (false (Protoss.declErr "expected declaration tag"))))))))))
+                            (case ((String.eqString tag) "capabilities")
+                              (true (Protoss.parseCapabilitiesDecl tail))
+                              (false
+                                (case ((String.eqString tag) "def")
+                                  (true (Protoss.parseDefDecl tail))
+                                  (false
+                                    (case ((String.eqString tag) "type")
+                                      (true (Protoss.parseTypeDecl tail))
+                                      (false
+                                        (case ((String.eqString tag) "record")
+                                          (true (Protoss.parseRecordDecl tail))
+                                          (false
+                                            (case ((String.eqString tag) "variant")
+                                              (true (Protoss.parseVariantDecl tail))
+                                              (false
+                                                (Protoss.declErr
+                                                  "expected declaration tag"))))))))))))))))))
               (_ (variant Err "expected declaration tag")))))))))
 
 (def Protoss.parseDecls (-> (List Sexp) (Result String (List ProtossDecl)))
@@ -2778,12 +2859,24 @@
 (def Protoss.renderDecl (-> ProtossDecl String)
   (lambda (decl ProtossDecl)
     (case decl
+      (PDCapabilities names
+        (Protoss.renderForm "capabilities" names))
       (PDDef def
         (Protoss.renderForm "def"
           (Cons String (get def name)
             (Cons String (Protoss.renderType (get def typ))
               (Cons String (Protoss.renderExpr (get def expr))
                 (Nil String))))))
+      (PDExport names
+        (Protoss.renderForm "export" names))
+      (PDImport path
+        (Protoss.renderForm "import"
+          (Cons String (Sexp.renderFlatString path)
+            (Nil String))))
+      (PDModule name
+        (Protoss.renderForm "module"
+          (Cons String name
+            (Nil String))))
       (PDRecord recordDecl
         (Protoss.renderForm "record"
           (((inst List.append String)

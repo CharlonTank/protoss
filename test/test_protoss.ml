@@ -2256,6 +2256,17 @@ let () =
   assert_equal "stdlib Protoss.parseText variant"
     "Ok [PDVariant {cases = [{name = \"Leaf\", payload = PTName \"A\"}, {name = \"Node\", payload = PTApply {args = [PTName \"A\"], name = \"Tree\"}}], name = \"Tree\", typeParams = [\"A\"]}]"
     (Runtime.value_to_string protoss_parsed_variant);
+  let protoss_parsed_module_file, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedModuleFile"
+  in
+  assert_equal "stdlib Protoss.parseText module file"
+    "Ok [PDModule \"Demo.Math\", PDImport \"prelude.protoss\", PDExport [\"Number\", \"double\"], PDCapabilities [\"Human.ask\", \"Clock.read\"]]"
+    (Runtime.value_to_string protoss_parsed_module_file);
+  let protoss_parsed_bad_import, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadImport"
+  in
+  assert_equal "stdlib Protoss.parseText bad import" "Err \"expected import path\""
+    (Runtime.value_to_string protoss_parsed_bad_import);
   let protoss_parsed_bad_field, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadField"
   in
@@ -2306,6 +2317,12 @@ let () =
   assert_equal "stdlib Protoss.formatText named decls"
     "Ok \"(record Pair (params A B) (first A) (second B))\\n(variant Tree (params A) (Leaf A) (Node (Tree A)))\""
     (Runtime.value_to_string protoss_formatted_named_decls);
+  let protoss_formatted_module_file, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedModuleFile"
+  in
+  assert_equal "stdlib Protoss.formatText module file"
+    "Ok \"(module Demo.Math)\\n(import \\\"prelude.protoss\\\")\\n(export Number double)\\n(capabilities Human.ask Clock.read)\""
+    (Runtime.value_to_string protoss_formatted_module_file);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

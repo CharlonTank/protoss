@@ -545,6 +545,12 @@
 (def protossParsedVariant (Result String (List ProtossDecl))
   (Protoss.parseText "(variant Tree (params A) (Leaf A) (Node (Tree A)))"))
 
+(def protossParsedModuleFile (Result String (List ProtossDecl))
+  (Protoss.parseText "(module Demo.Math)\n(import \"prelude.protoss\")\n(export Number double)\n(capabilities Human.ask Clock.read)"))
+
+(def protossParsedBadImport (Result String (List ProtossDecl))
+  (Protoss.parseText "(import prelude.protoss)"))
+
 (def protossParsedBadField (Result String (List ProtossDecl))
   (Protoss.parseText "(record Bad (name))"))
 
@@ -571,6 +577,9 @@
 
 (def protossFormattedNamedDecls (Result String String)
   (Protoss.formatText "(record Pair (params A B) (first A) (second B))\n(variant Tree (params A) (Leaf A) (Node (Tree A)))"))
+
+(def protossFormattedModuleFile (Result String String)
+  (Protoss.formatText " (module   Demo.Math)\n(import \"prelude.protoss\")\n(export   Number   double)\n(capabilities Human.ask Clock.read)"))
 
 (def jsonProfile Json
   (Json.object
