@@ -1501,6 +1501,26 @@ let () =
    with Loader.Error msg ->
      assert_true "loader syntax error has file line column"
        (contains_substring msg (bad_syntax_file ^ ":1:1: unterminated list")));
+  let bad_defcap_file = Filename.concat import_root "bad_defcap.protoss" in
+  write_file bad_defcap_file
+    "; ignored comment mentioning (defcap fake ...)\n\n\
+     (capabilities Human.ask)\n\
+     (defcap askName (capabilities) (Process String) (Human.ask \"Name?\"))\n";
+  (try
+     ignore (Loader.check_file bad_defcap_file);
+     fail "loader defcap error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader defcap error has exact line"
+       (contains_substring msg (bad_defcap_file ^ ":4:1: definition askName")));
+  let bad_defrec_file = Filename.concat import_root "bad_defrec.protoss" in
+  write_file bad_defrec_file
+    "\n(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc true))\n";
+  (try
+     ignore (Loader.check_file bad_defrec_file);
+     fail "loader defrec error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader defrec error has exact line"
+       (contains_substring msg (bad_defrec_file ^ ":2:1: definition count")));
 
   expect_check_error "(def loop Nat loop)";
   expect_check_error "(def a Nat b)\n(def b Nat a)";

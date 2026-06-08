@@ -2949,7 +2949,7 @@ let check_program (program : program) =
             (fun cap ->
               if not (List.exists (String.equal cap) program.capabilities) then
                 fail
-                  ("definition " ^ d.name ^ " declares undeclared capability: " ^ cap))
+                  ("definition " ^ d.name ^ ": declares undeclared capability: " ^ cap))
             caps)
     program.defs;
   check_duplicate_names program.defs;
@@ -3033,7 +3033,7 @@ let check_program (program : program) =
             let declared = List.sort_uniq String.compare declared in
             if declared <> capabilities then
               fail
-                ("definition " ^ d.name ^ " capability scope mismatch: declared ["
+                ("definition " ^ d.name ^ ": capability scope mismatch: declared ["
                ^ String.concat ", " declared ^ "], actual ["
                ^ String.concat ", " capabilities ^ "]"));
         {

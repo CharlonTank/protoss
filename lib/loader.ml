@@ -33,6 +33,46 @@ let is_space = function ' ' | '\t' | '\r' | '\n' -> true | _ -> false
 
 let is_delim c = is_space c || c = '(' || c = ')' || c = ';' || c = '"'
 
+let def_keywords = [ "def"; "defcap"; "defpoly"; "defpolycap"; "defrec" ]
+
+let is_def_keyword keyword = List.exists (String.equal keyword) def_keywords
+
+let skip_spaces source i =
+  let len = String.length source in
+  let rec loop i =
+    if i < len && is_space source.[i] then loop (i + 1) else i
+  in
+  loop i
+
+let atom_at source i =
+  let len = String.length source in
+  if i >= len || is_delim source.[i] then None
+  else
+    let rec loop j =
+      if j < len && not (is_delim source.[j]) then loop (j + 1) else j
+    in
+    let j = loop i in
+    Some (String.sub source i (j - i), j)
+
+let skip_string source i =
+  let len = String.length source in
+  let rec loop j =
+    if j >= len then len
+    else
+      match source.[j] with
+      | '\\' when j + 1 < len -> loop (j + 2)
+      | '"' -> j + 1
+      | _ -> loop (j + 1)
+  in
+  loop (i + 1)
+
+let skip_comment source i =
+  let len = String.length source in
+  let rec loop j =
+    if j >= len || source.[j] = '\n' then j else loop (j + 1)
+  in
+  loop (i + 1)
+
 let line_col source offset =
   let limit = min (max 0 offset) (String.length source) in
   let line = ref 1 and col = ref 1 in
@@ -46,20 +86,22 @@ let line_col source offset =
 
 let find_def_offset source name =
   let len = String.length source in
-  let name_len = String.length name in
   let rec loop i =
-    if i + 4 + name_len > len then None
-    else if String.sub source i 4 = "(def" then
-      let j = ref (i + 4) in
-      while !j < len && is_space source.[!j] do
-        incr j
-      done;
-      if !j + name_len <= len
-         && String.sub source !j name_len = name
-         && (!j + name_len = len || is_delim source.[!j + name_len])
-      then Some i
-      else loop (i + 1)
-    else loop (i + 1)
+    if i >= len then None
+    else
+      match source.[i] with
+      | '"' -> loop (skip_string source i)
+      | ';' -> loop (skip_comment source i)
+      | '(' -> (
+          let keyword_start = skip_spaces source (i + 1) in
+          match atom_at source keyword_start with
+          | Some (keyword, after_keyword) when is_def_keyword keyword -> (
+              let name_start = skip_spaces source after_keyword in
+              match atom_at source name_start with
+              | Some (candidate, _) when String.equal candidate name -> Some i
+              | _ -> loop (i + 1))
+          | _ -> loop (i + 1))
+      | _ -> loop (i + 1)
   in
   loop 0
 
