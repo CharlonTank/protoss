@@ -806,8 +806,47 @@ let package_def_item (d : Kernel.checked_def) =
       lock_string_list "capability-scope" d.capabilities;
     ]
 
+let package_public_symbols manifest prepared =
+  let stdlib_path = Option.map (path_in_project manifest) manifest.stdlib in
+  prepared.units
+  |> List.filter (fun u ->
+         match stdlib_path with Some path -> not (String.equal u.path path) | None -> true)
+  |> List.concat_map (fun u -> u.public_symbols)
+  |> sort_uniq
+
+let package_interface_item checked symbol =
+  match checked_def_by_name checked symbol with
+  | Some d ->
+      lock_item "def"
+        [
+          lock_item "name" [ lock_string d.def.name ];
+          lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+        ]
+  | None -> (
+      match
+        List.find_opt
+          (fun (a : type_alias) -> String.equal a.type_name symbol)
+          checked.Kernel.program.type_aliases
+      with
+      | Some alias ->
+          lock_item "type"
+            [
+              lock_item "name" [ lock_string alias.type_name ];
+              lock_string_list "params" alias.type_params;
+              lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical alias.type_body) ];
+            ]
+      | None -> fail ("package public symbol is not a definition or type: " ^ symbol))
+
+let package_interface_items manifest prepared =
+  package_public_symbols manifest prepared
+  |> List.map (package_interface_item prepared.checked)
+
+let package_interface_hash manifest prepared =
+  Kernel.hash_string (lock_item "interface" (package_interface_items manifest prepared))
+
 let package_content manifest prepared lock_hash =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
+  let interface_items = package_interface_items manifest prepared in
   String.concat "\n"
     [
       "(protoss-package-v1";
@@ -820,9 +859,11 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_item "program-hash" [ prepared.build_id ];
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
       "  " ^ lock_item "program-graph-hash" [ Kernel.hash_string prepared.program_graph ];
+      "  " ^ lock_item "interface-hash" [ package_interface_hash manifest prepared ];
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_item "interface" interface_items;
       "  " ^ lock_item "types" (List.map package_type_item prepared.checked.program.type_aliases);
       "  " ^ lock_item "defs" (List.map package_def_item prepared.checked.defs);
       "  " ^ lock_item "units" (List.map (unit_lock manifest) units);
@@ -896,6 +937,8 @@ let check_package manifest =
   let items = package_items content in
   let prepared = prepare_build manifest in
   let lock_hash = check_lock_prepared manifest prepared in
+  let expected_content = package_content manifest prepared lock_hash in
+  if not (String.equal content expected_content) then fail "package descriptor out of date";
   let expect_atom name expected =
     let actual = package_atom_field name items in
     if not (String.equal actual expected) then
@@ -917,6 +960,7 @@ let check_package manifest =
   expect_atom "program-hash" prepared.build_id;
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (Kernel.hash_string prepared.program_graph);
+  expect_atom "interface-hash" (package_interface_hash manifest prepared);
   { package_ref; package_path; lock_hash; build_id = prepared.build_id; store = store_root manifest }
 
 let stats_to_string stats =

@@ -1610,6 +1610,10 @@ let () =
     (contains_substring package_content build_a.build_id);
   assert_true "project package records lock hash in content"
     (contains_substring package_content lock_hash);
+  assert_true "project package records interface hash"
+    (contains_substring package_content "(interface-hash p1:");
+  assert_true "project package records public interface"
+    (contains_substring package_content "(interface ");
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
   let package_checked = Workspace.check_package manifest_a in
@@ -1686,6 +1690,30 @@ let () =
   (try
      ignore (Workspace.audit package_corrupt_manifest);
      fail "audit should reject corrupt package descriptor"
+   with Workspace.Error _ -> ());
+  let package_outdated_root = temp_dir "workspace-package-outdated" in
+  copy_tree ws_a package_outdated_root;
+  let package_outdated_manifest = Workspace.parse_manifest package_outdated_root in
+  let package_outdated_ref =
+    String.trim (Store.read_file (Workspace.package_current_path package_outdated_manifest))
+  in
+  let package_outdated_content =
+    Store.read_file
+      (Filename.concat (Workspace.packages_dir package_outdated_manifest)
+         (Workspace.sanitize_id package_outdated_ref ^ ".package"))
+    |> fun content -> replace_once content "(interface-hash p1:" "(interface-hash p1:bad"
+  in
+  let package_outdated_ref = Kernel.hash_string package_outdated_content in
+  let package_outdated_path =
+    Filename.concat (Workspace.packages_dir package_outdated_manifest)
+      (Workspace.sanitize_id package_outdated_ref ^ ".package")
+  in
+  write_file package_outdated_path package_outdated_content;
+  write_file (Workspace.package_current_path package_outdated_manifest)
+    (package_outdated_ref ^ "\n");
+  (try
+     ignore (Workspace.check_package package_outdated_manifest);
+     fail "package check should reject out-of-date descriptor"
    with Workspace.Error _ -> ());
   let graph_corrupt_root = temp_dir "workspace-graph-corrupt" in
   copy_tree ws_a graph_corrupt_root;
