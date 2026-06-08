@@ -32,6 +32,7 @@ type expr =
   | EApp of expr * expr
   | ELet of string * expr * expr
   | ELetAnnot of string * typ * expr * expr
+  | ELetRecord of expr * (string * string) list * expr
   | ERecord of (string * expr) list
   | EField of expr * string
   | EVariant of typ * string * expr
@@ -193,6 +194,14 @@ let rec string_of_expr_with_params params = function
       "(let (" ^ x ^ " " ^ string_of_typ_with_params params t ^ " "
       ^ string_of_expr_with_params params e ^ ") "
       ^ string_of_expr_with_params params body ^ ")"
+  | ELetRecord (record, fields, body) ->
+      "(letRecord " ^ string_of_expr_with_params params record ^ " ("
+      ^ String.concat " "
+          (List.map
+             (fun (field, binder) ->
+               if String.equal field binder then field else "(" ^ field ^ " " ^ binder ^ ")")
+             fields)
+      ^ ") " ^ string_of_expr_with_params params body ^ ")"
   | ERecord fields ->
       "(record "
       ^ String.concat " "

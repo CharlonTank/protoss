@@ -1,0 +1,18 @@
+(record Model
+  (name String)
+  (count Nat))
+
+(def model Model
+  (record
+    (name "Ada")
+    (count 3)))
+
+(def count Nat
+  (letRecord model
+    (name (count n))
+    n))
+
+(def greeting String
+  (letRecord model
+    (name)
+    name))

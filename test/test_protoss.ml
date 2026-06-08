@@ -445,6 +445,59 @@ let () =
   in
   assert_equal "record canonical order" (Kernel.hash_program record_order_a)
     (Kernel.hash_program record_order_b);
+  let record_destructure =
+    check
+      "(def p (Record (name String) (count Nat)) (record (name \"Ada\") (count 3)))\n\
+       (def out Nat (letRecord p (name (count n)) n))"
+  in
+  let record_destructure_explicit =
+    check
+      "(def p (Record (name String) (count Nat)) (record (name \"Ada\") (count 3)))\n\
+       (def out Nat \
+       (let (__record0 p) \
+       (let (n (get __record0 count)) \
+       (let (name (get __record0 name)) n))))"
+  in
+  assert_equal "letRecord hashes as explicit field lets"
+    (Kernel.hash_program record_destructure_explicit)
+    (Kernel.hash_program record_destructure);
+  let record_destructure_out, _ = Runtime.normalize_def record_destructure "out" in
+  assert_equal "letRecord normalizes" "3" (Runtime.value_to_string record_destructure_out);
+  let record_destructure_order =
+    check
+      "(def p (Record (name String) (count Nat)) (record (name \"Ada\") (count 3)))\n\
+       (def out Nat (letRecord p ((count n) name) n))"
+  in
+  assert_equal "letRecord field order stable hash"
+    (Kernel.hash_program record_destructure)
+    (Kernel.hash_program record_destructure_order);
+  let record_destructure_renamed =
+    check
+      "(def p (Record (name String) (count Nat)) (record (name \"Ada\") (count 3)))\n\
+       (def out Nat (letRecord p (name (count value)) value))"
+  in
+  assert_equal "letRecord binder alpha-stable hash"
+    (Kernel.hash_program record_destructure)
+    (Kernel.hash_program record_destructure_renamed);
+  assert_true "letRecord is surface-only canonical syntax"
+    (not (contains_substring (Kernel.serialize_checked_program record_destructure) "letRecord"));
+  let record_destructure_fresh =
+    check
+      "(def out Nat \
+       (let (__record0 9) \
+       (letRecord (record (value 3)) (value) __record0)))"
+  in
+  let record_destructure_fresh_out, _ = Runtime.normalize_def record_destructure_fresh "out" in
+  assert_equal "letRecord temp avoids source names" "9"
+    (Runtime.value_to_string record_destructure_fresh_out);
+  expect_parse_error
+    "(def bad Nat (letRecord (record (a 1)) (a a) a))";
+  expect_parse_error
+    "(def bad Nat (letRecord (record (a 1) (b 2)) ((a x) (b x)) x))";
+  expect_check_error
+    "(def p (Record (name String)) (record (name \"Ada\")))\n\
+     (def bad Nat (letRecord p (count) count))";
+  expect_check_error "(def bad Nat (letRecord 1 (count) count))";
 
   let named_model =
     check

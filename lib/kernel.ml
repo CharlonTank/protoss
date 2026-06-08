@@ -316,6 +316,11 @@ let rec expand_expr_types recursive_names aliases vars = function
           expand_type recursive_names aliases vars [] t,
           expand_expr_types recursive_names aliases vars e,
           expand_expr_types recursive_names aliases vars body )
+  | ELetRecord (record, fields, body) ->
+      ELetRecord
+        ( expand_expr_types recursive_names aliases vars record,
+          fields,
+          expand_expr_types recursive_names aliases vars body )
   | ERecord fields ->
       ERecord
         (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types recursive_names aliases vars e)) fields))
@@ -435,6 +440,9 @@ let collect_deps defs =
     | EApp (f, x) -> expr bound (expr bound acc f) x
     | ELet (x, e, body) | ELetAnnot (x, _, e, body) ->
         expr (x :: bound) (expr bound acc e) body
+    | ELetRecord (record, fields, body) ->
+        let binders = List.map snd fields in
+        expr (binders @ bound) (expr bound acc record) body
     | ERecord fields -> List.fold_left (fun a (_, e) -> expr bound a e) acc fields
     | EField (e, _) -> expr bound acc e
     | EVariant (_, _, e) | EVariantInferred (_, e) -> expr bound acc e
@@ -531,6 +539,61 @@ let bind_local ctx name typ =
   { ctx with locals = (name, typ) :: ctx.locals; fold_scope = shadow_fold_scope ctx.fold_scope name }
 
 let bind_lambda ctx name typ = { ctx with locals = (name, typ) :: ctx.locals; fold_scope = None }
+
+let rec expr_names = function
+  | EUnit | EBool _ | ENat _ | EString _ | ERequest _ | ENilInfer -> []
+  | EName n -> [ n ]
+  | ELambda (x, _, body) | ELambdaInfer (x, body) -> x :: expr_names body
+  | EApp (f, x) -> expr_names f @ expr_names x
+  | ELet (x, e, body) -> x :: expr_names e @ expr_names body
+  | ELetAnnot (x, _, e, body) -> x :: expr_names e @ expr_names body
+  | ELetRecord (record, fields, body) ->
+      expr_names record @ List.map snd fields @ expr_names body
+  | ERecord fields -> List.concat_map (fun (_, e) -> expr_names e) fields
+  | EField (e, _) -> expr_names e
+  | EVariant (_, _, e) | EVariantInferred (_, e) -> expr_names e
+  | EInst (name, _) -> [ name ]
+  | ECase (e, branches) -> expr_names e @ List.concat_map branch_names_in_expr branches
+  | EFoldNat (n, z, step) -> expr_names n @ expr_names z @ expr_names step
+  | EFoldVariant (_, _, scrut, branches) ->
+      expr_names scrut @ List.concat_map branch_names_in_expr branches
+  | ERecur e -> expr_names e
+  | ENil _ -> []
+  | ECons (_, head, tail) | EConsInfer (head, tail) -> expr_names head @ expr_names tail
+  | EFoldList (xs, z, step) -> expr_names xs @ expr_names z @ expr_names step
+  | ECaseList (xs, nil_body, head, tail, cons_body) ->
+      expr_names xs @ expr_names nil_body @ [ head; tail ] @ expr_names cons_body
+  | EText e | EColumn e | ERow e | EDone e -> expr_names e
+  | EImage (a, b) | EButton (a, b) | EInput (a, b) | EListView (a, b)
+  | EWhenView (a, b) ->
+      expr_names a @ expr_names b
+  | EBind (p, x, _, body) | EBindInfer (p, x, body) -> expr_names p @ (x :: expr_names body)
+
+and branch_names_in_expr = function
+  | BBool (_, e) -> expr_names e
+  | BVariant (_, x, e) -> x :: expr_names e
+  | BVariantUnit (_, e) -> expr_names e
+
+let fresh_record_name ctx record fields body =
+  let taken =
+    List.map fst ctx.locals @ List.map fst ctx.globals @ expr_names record
+    @ List.map snd fields @ expr_names body
+    |> List.sort_uniq String.compare
+  in
+  let rec loop i =
+    let candidate = "__record" ^ string_of_int i in
+    if List.exists (String.equal candidate) taken then loop (i + 1) else candidate
+  in
+  loop 0
+
+let desugar_let_record ctx record fields body =
+  let record_name = fresh_record_name ctx record fields body in
+  let body =
+    List.fold_right
+      (fun (field, binder) body -> ELet (binder, EField (EName record_name, field), body))
+      fields body
+  in
+  ELet (record_name, record, body)
 
 let rec subst_type args = function
   | TUnit -> TUnit
@@ -745,6 +808,7 @@ let rec infer ctx = function
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
       body_ty
+  | ELetRecord (record, fields, body) -> infer ctx (desugar_let_record ctx record fields body)
   | ERecord fields ->
       let fields = List.map (fun (n, e) -> (n, infer ctx e, e)) fields in
       List.iter
@@ -1006,6 +1070,7 @@ let rec infer_elab ctx expr =
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
       (body_ty, ELet (x, e, body))
+  | ELetRecord (record, fields, body) -> infer_elab ctx (desugar_let_record ctx record fields body)
   | ERecord fields ->
       let fields =
         List.map
@@ -1266,6 +1331,8 @@ and check_elab ctx expected expr =
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ expected ^ ", expression " ^ string_of_expr body);
       (expected, ELet (x, e, body))
+  | _, ELetRecord (record, fields, body) ->
+      check_elab ctx expected (desugar_let_record ctx record fields body)
   | TProcess _, EBind (p, x, annotation, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
@@ -1557,6 +1624,7 @@ let rec canonical_expr env = function
   | EApp (f, x) -> CApp (canonical_expr env f, canonical_expr env x)
   | ELet (x, e, body) -> CLet (canonical_expr env e, canonical_expr (x :: env) body)
   | ELetAnnot _ -> fail "unelaborated annotated let in canonicalization"
+  | ELetRecord _ -> fail "unelaborated record destructuring in canonicalization"
   | ERecord fields ->
       CRecord (sort_fields (List.map (fun (n, e) -> (n, canonical_expr env e)) fields))
   | EField (e, field) -> CField (canonical_expr env e, field)

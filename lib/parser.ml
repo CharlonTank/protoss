@@ -66,6 +66,22 @@ let parse_lambda_binding = function
   | Sexp.List [ Sexp.Atom x ] | Sexp.Atom x -> `Inferred x
   | x -> fail ("invalid lambda binding: " ^ Sexp.to_string x)
 
+let parse_record_destructure_bindings = function
+  | Sexp.List bindings ->
+      let fields =
+        List.map
+          (function
+            | Sexp.Atom n -> (n, n)
+            | Sexp.List [ Sexp.Atom field; Sexp.Atom binder ] -> (field, binder)
+            | x -> fail ("invalid letRecord field binding: " ^ Sexp.to_string x))
+          bindings
+      in
+      if fields = [] then fail "letRecord requires at least one field";
+      ensure_unique "letRecord field" (List.map fst fields);
+      ensure_unique "letRecord binder" (List.map snd fields);
+      sort_fields fields
+  | x -> fail ("letRecord fields must be a list: " ^ Sexp.to_string x)
+
 let parse_named_type_params = function
   | Sexp.List (Sexp.Atom "params" :: params) :: rest -> (List.map atom params, rest)
   | rest -> ([], rest)
@@ -97,6 +113,10 @@ let rec parse_expr = function
       ELet (x, parse_expr e, parse_expr body)
   | Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom x; ty; e ]; body ] ->
       ELetAnnot (x, parse_type ty, parse_expr e, parse_expr body)
+  | Sexp.List [ Sexp.Atom "letRecord"; record; fields; body ] ->
+      ELetRecord (parse_expr record, parse_record_destructure_bindings fields, parse_expr body)
+  | Sexp.List (Sexp.Atom "letRecord" :: _) ->
+      fail "letRecord syntax is (letRecord recordExpr (field (source binder) ...) body)"
   | Sexp.List (Sexp.Atom "record" :: fields) ->
       let fields =
         List.map
@@ -293,6 +313,12 @@ let rec qualify_expr local_defs local_types type_params bound = function
           qualify_type local_types type_params t,
           qualify_expr local_defs local_types type_params bound e,
           qualify_expr local_defs local_types type_params (x :: bound) body )
+  | ELetRecord (record, fields, body) ->
+      let binders = List.map snd fields in
+      ELetRecord
+        ( qualify_expr local_defs local_types type_params bound record,
+          fields,
+          qualify_expr local_defs local_types type_params (binders @ bound) body )
   | ERecord fields ->
       ERecord
         (sort_fields
