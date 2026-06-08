@@ -290,6 +290,33 @@ let () =
   expect_check_error
     "(def xs (List Nat) (Cons 1 Nil))\n\
      (def bad Nat (caseList xs (Nil 0) (Cons head tail true)))";
+  let bool_match = check "(def out Nat (match true (true 1) (false 0)))" in
+  let bool_case = check "(def out Nat (case true (true 1) (false 0)))" in
+  assert_equal "match Bool hashes as case" (Kernel.hash_program bool_case)
+    (Kernel.hash_program bool_match);
+  let bool_match_out, _ = Runtime.normalize_def bool_match "out" in
+  assert_equal "match Bool normalizes" "1" (Runtime.value_to_string bool_match_out);
+  let list_match =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def first Nat (match xs (Cons head tail head) (Nil 0)))"
+  in
+  let list_match_explicit =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def first Nat (caseList xs (Nil 0) (Cons head tail head)))"
+  in
+  assert_equal "match List hashes as caseList" (Kernel.hash_program list_match_explicit)
+    (Kernel.hash_program list_match);
+  let list_match_first, _ = Runtime.normalize_def list_match "first" in
+  assert_equal "match List normalizes" "1" (Runtime.value_to_string list_match_first);
+  assert_true "match List has no canonical match node"
+    (not (contains_substring (Kernel.serialize_checked_program list_match) "match"));
+  expect_parse_error
+    "(def xs (List Nat) (Nil Nat))\n(def bad Nat (match xs (Nil 0)))";
+  expect_parse_error
+    "(def xs (List Nat) (Nil Nat))\n(def bad Nat (match xs (Nil 0) (Cons x x x)))";
+  expect_check_error "(def bad Nat (match 1 (Nil 0) (Cons head tail head)))";
   expect_check_error "(def bad Nat Nil)";
   expect_check_error "(def bad (List Nat) (Cons true Nil))";
   expect_check_error "(def bad (List Nat) (Cons 1 true))";
@@ -555,6 +582,17 @@ let () =
     (Kernel.hash_program record_destructure_renamed);
   assert_true "letRecord is surface-only canonical syntax"
     (not (contains_substring (Kernel.serialize_checked_program record_destructure) "letRecord"));
+  let record_match =
+    check
+      "(def p (Record (name String) (count Nat)) (record (name \"Ada\") (count 3)))\n\
+       (def out Nat (match p ((record name (count n)) n)))"
+  in
+  assert_equal "match Record hashes as letRecord" (Kernel.hash_program record_destructure)
+    (Kernel.hash_program record_match);
+  let record_match_out, _ = Runtime.normalize_def record_match "out" in
+  assert_equal "match Record normalizes" "3" (Runtime.value_to_string record_match_out);
+  assert_true "match Record has no canonical match node"
+    (not (contains_substring (Kernel.serialize_checked_program record_match) "match"));
   let record_destructure_fresh =
     check
       "(def out Nat \
@@ -568,6 +606,8 @@ let () =
     "(def bad Nat (letRecord (record (a 1)) (a a) a))";
   expect_parse_error
     "(def bad Nat (letRecord (record (a 1) (b 2)) ((a x) (b x)) x))";
+  expect_parse_error
+    "(def bad Nat (match (record (a 1)) ((record (a x)) x) ((record (a y)) y)))";
   expect_check_error
     "(def p (Record (name String)) (record (name \"Ada\")))\n\
      (def bad Nat (letRecord p (count) count))";
@@ -635,6 +675,14 @@ let () =
     (Kernel.hash_program maybe_variant_decl);
   assert_equal "unit variant branch shorthand hash" (Kernel.hash_program maybe_inferred_ctor)
     (Kernel.hash_program maybe_unit_branch_shorthand);
+  let maybe_match =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (def value (Maybe Nat) (variant Some 4))\n\
+       (def out Nat (match value (None 0) (Some n n)))"
+  in
+  assert_equal "match Variant hashes as case" (Kernel.hash_program maybe_unit_branch_shorthand)
+    (Kernel.hash_program maybe_match);
   let maybe_out, _ = Runtime.normalize_def maybe_alias "out" in
   assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
   let maybe_short_out, _ = Runtime.normalize_def maybe_unit_branch_shorthand "out" in

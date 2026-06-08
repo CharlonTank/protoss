@@ -1,0 +1,11 @@
+(variant Maybe (params A) (None Unit) (Some A))
+(record Lead (name String) (status String))
+
+(def maybe (Maybe Nat) (variant Some 4))
+(def selected Nat (match maybe (None 0) (Some n n)))
+
+(def xs (List Nat) (Cons 1 (Cons 2 Nil)))
+(def first Nat (match xs (Nil 0) (Cons head tail head)))
+
+(def lead Lead (record (name "Ada") (status "open")))
+(def leadStatus String (match lead ((record name (status s)) s)))

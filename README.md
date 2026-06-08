@@ -13,6 +13,7 @@ What works now:
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Named records and variants also work as alias syntax: `(record Model (name String))`, `(record Pair (params A B) (first A) (second B))`, and `(variant Maybe (params A) (None Unit) (Some A))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
 - Records can be destructured with `(letRecord recordExpr (field (source binder) ...) body)`. It elaborates to one record `let` plus canonical `get` field accesses, so destructuring field order and binder names do not affect the graph beyond the body references they bind.
+- `match` is surface syntax over existing eliminators: Bool/variant branches elaborate to `case`, list `(Nil ...)`/`(Cons head tail ...)` branches elaborate to `caseList`, and a single `((record field (source binder) ...) body)` branch elaborates to `letRecord`. No canonical `match` node is introduced.
 - Named variants may be recursively self-referential when recursive occurrences are guarded by a variant constructor, for example a finite `Tree A` with `Leaf A` and `Node (Tree A) (Tree A)`. Unguarded recursive type aliases are rejected.
 - Recursive named variants can be consumed with `foldVariant`; branch-local `recur` is accepted only for direct structural subterms of the current constructor payload, and non-structural recursion is rejected.
 - Polymorphic value definitions work with explicit type application, for example `(defpoly id (params A) (-> A A) (lambda (x A) x))` and `((inst id Nat) 4)`. Calls such as `(id 4)`, `(some 9)`, and `((List.map xs) (lambda x (succ x)))` infer type arguments when arguments or the expected result type make them unambiguous. The elaborated canonical graph still uses explicit `inst`, so inferred and explicit sources hash the same.
@@ -105,6 +106,7 @@ dune exec protoss -- check examples/polymorphic_defs.protoss
 dune exec protoss -- check examples/polymorphic_inference.protoss
 dune exec protoss -- check examples/inferred_lambdas.protoss
 dune exec protoss -- check examples/list_case.protoss
+dune exec protoss -- check examples/pattern_match.protoss
 dune exec protoss -- check examples/record_destructure.protoss
 dune exec protoss -- check examples/recursive_tree.protoss
 dune exec protoss -- nf examples/recursive_tree.protoss

@@ -136,6 +136,8 @@ let rec parse_expr = function
       EInst (n, List.map parse_type args)
   | Sexp.List (Sexp.Atom "case" :: scrut :: branches) ->
       ECase (parse_expr scrut, List.map parse_branch branches)
+  | Sexp.List (Sexp.Atom "match" :: scrut :: branches) ->
+      parse_match_expr scrut branches
   | Sexp.List [ Sexp.Atom "foldNat"; n; z; step ] ->
       EFoldNat (parse_expr n, parse_expr z, parse_expr step)
   | Sexp.List (Sexp.Atom "foldVariant" :: target :: result :: scrut :: branches) ->
@@ -195,6 +197,54 @@ let rec parse_expr = function
   | Sexp.List [] -> fail "empty expression list"
   | Sexp.List (f :: args) ->
       List.fold_left (fun acc arg -> EApp (acc, parse_expr arg)) (parse_expr f) args
+
+and parse_match_expr scrut branches =
+  match parse_match_record scrut branches with
+  | Some expr -> expr
+  | None -> (
+      match parse_match_list scrut branches with
+      | Some expr -> expr
+      | None -> ECase (parse_expr scrut, List.map parse_branch branches))
+
+and parse_match_record scrut = function
+  | [ Sexp.List [ Sexp.List (Sexp.Atom "record" :: fields); body ] ] ->
+      Some
+        (ELetRecord
+           ( parse_expr scrut,
+             parse_record_destructure_bindings (Sexp.List fields),
+             parse_expr body ))
+  | branches
+    when List.exists
+           (function
+             | Sexp.List (Sexp.List (Sexp.Atom "record" :: _) :: _) -> true
+             | _ -> false)
+           branches ->
+      fail "record match syntax is (match recordExpr ((record field (source binder) ...) body))"
+  | _ -> None
+
+and parse_match_list scrut branches =
+  let nil_branch = ref None in
+  let cons_branch = ref None in
+  let saw_list_branch = ref false in
+  let parse_one = function
+    | Sexp.List [ Sexp.Atom "Nil"; nil_body ] ->
+        saw_list_branch := true;
+        if Option.is_some !nil_branch then fail "duplicate match Nil branch";
+        nil_branch := Some nil_body
+    | Sexp.List [ Sexp.Atom "Cons"; Sexp.Atom head; Sexp.Atom tail; cons_body ] ->
+        saw_list_branch := true;
+        if String.equal head tail then fail ("duplicate match Cons binder: " ^ head);
+        if Option.is_some !cons_branch then fail "duplicate match Cons branch";
+        cons_branch := Some (head, tail, cons_body)
+    | _ -> ()
+  in
+  List.iter parse_one branches;
+  if not !saw_list_branch then None
+  else
+    match (!nil_branch, !cons_branch, branches) with
+    | Some nil_body, Some (head, tail, cons_body), [ _; _ ] ->
+        Some (ECaseList (parse_expr scrut, parse_expr nil_body, head, tail, parse_expr cons_body))
+    | _ -> fail "list match syntax is (match xs (Nil nilExpr) (Cons head tail consExpr))"
 
 and parse_branch = function
   | Sexp.List [ Sexp.Atom "true"; e ] -> BBool (true, parse_expr e)
