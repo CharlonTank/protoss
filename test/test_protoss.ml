@@ -1719,6 +1719,22 @@ let () =
   in
   assert_true "ledger event inspectable" (String.length (Ledger.inspect_event ledger_root event) > 0);
   assert_true "ledger world inspectable" (String.length (Ledger.inspect_world ledger_root next_world) > 0);
+  let resume_event, resume_world =
+    Ledger.record_resume ledger_root next_world event "String:Ada" "Done \"Ada\""
+  in
+  assert_true "ledger resume event inspectable"
+    (String.length (Ledger.inspect_event ledger_root resume_event) > 0);
+  assert_true "ledger resume records response type"
+    (contains_substring (Ledger.inspect_event ledger_root resume_event) "response-type=String");
+  assert_true "ledger resume world inspectable"
+    (String.length (Ledger.inspect_world ledger_root resume_world) > 0);
+  let before_bad_resume = snapshot ledger_root in
+  (try
+     ignore (Ledger.record_resume ledger_root next_world event "Nat:1" "bad");
+     fail "ledger resume wrong response type should be rejected"
+   with Failure _ -> ());
+  assert_true "invalid ledger resume must not create files"
+    (snapshot ledger_root = before_bad_resume);
   let invalid_scope_ledger = temp_dir "ledger-invalid-cap-scope" in
   (try
      ignore
@@ -1758,6 +1774,27 @@ let () =
   (try
      ignore (Ledger.inspect_event ledger_root unknown_scope_event);
      fail "ledger event with unknown cap should be rejected"
+   with Failure _ -> ());
+  let bad_resume_event = "p1:bad-resume-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_event)
+    ("world=x\nkind=resume\nresume=" ^ event
+   ^ "\nresponse-type=String\nresponse=Nat:1\nresult=bad\n");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_resume_event);
+     fail "ledger resume event with wrong response type should be rejected"
+   with Failure _ -> ());
+  let mismatched_request_event = "p1:mismatched-request-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root mismatched_request_event)
+    ("world=x\nkind=request\nrequest-id=req\nrequest=HttpGet:https://example.invalid\n\
+      continuation-id=cont\ncap-scope=Http.get\nsuspended="
+    ^ String.escaped suspended ^ "\n");
+  let bad_resume_mismatch_event = "p1:bad-resume-mismatch-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_mismatch_event)
+    ("world=x\nkind=resume\nresume=" ^ mismatched_request_event
+   ^ "\nresponse-type=String\nresponse=String:Ada\nresult=bad\n");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_resume_mismatch_event);
+     fail "ledger resume event with mismatched suspended request should be rejected"
    with Failure _ -> ());
   (try
      ignore (Runtime.parse_suspended "(protoss-runtime-v2 (suspended (request ReadClock)))");

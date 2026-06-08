@@ -96,11 +96,6 @@ let record_request root world req suspended request_id continuation_id cap_scope
    ^ String.concat "," (List.sort_uniq String.compare cap_scope)
    ^ "\nsuspended=" ^ String.escaped suspended)
 
-let record_resume root world event response result =
-  add_event root world
-    ("kind=resume\nresume=" ^ event ^ "\nresponse=" ^ String.escaped response ^ "\nresult="
-   ^ String.escaped result)
-
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -130,7 +125,48 @@ let parse_lines content =
 let field name fields =
   List.find_opt (fun (k, _) -> String.equal k name) fields |> Option.map snd
 
-let validate_event event content =
+let validate_resume_response root event resume response =
+  let target_fields = parse_lines (read_event root resume) in
+  let target_need name =
+    match field name target_fields with
+    | Some value -> value
+    | None ->
+        failwith
+          ("maltyped event " ^ event ^ ": resume target missing " ^ name)
+  in
+  (match field "kind" target_fields with
+  | Some "request" -> ()
+  | Some kind ->
+      failwith
+        ("maltyped event " ^ event ^ ": resume target is not a request event: " ^ kind)
+  | None -> failwith ("maltyped event " ^ event ^ ": resume target missing kind"));
+  ignore (target_need "request-id");
+  ignore (target_need "continuation-id");
+  let request = target_need "request" in
+  validate_cap_scope event request (target_need "cap-scope");
+  let suspended =
+    target_need "suspended" |> Scanf.unescaped
+  in
+  let suspended =
+    try Runtime.parse_suspended suspended with Kernel.Error msg ->
+      failwith ("maltyped event " ^ event ^ ": invalid suspended process: " ^ msg)
+  in
+  let suspended_request = request_payload suspended.Runtime.req in
+  if not (String.equal request suspended_request) then
+    failwith
+      ("maltyped event " ^ event ^ ": suspended request mismatch: expected "
+     ^ request ^ ", got " ^ suspended_request);
+  (try ignore (Runtime.response_value suspended.Runtime.req response)
+   with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": invalid response: " ^ msg));
+  Ast.string_of_typ (Kernel.req_result_type suspended.Runtime.req)
+
+let record_resume root world event response result =
+  let response_type = validate_resume_response root "<new>" event response in
+  add_event root world
+    ("kind=resume\nresume=" ^ event ^ "\nresponse-type=" ^ response_type ^ "\nresponse="
+   ^ String.escaped response ^ "\nresult=" ^ String.escaped result)
+
+let validate_event root event content =
   let fields = parse_lines content in
   let need name =
     match field name fields with
@@ -145,18 +181,29 @@ let validate_event event content =
       validate_cap_scope event
         (Option.value (field "request" fields) ~default:"")
         (Option.value (field "cap-scope" fields) ~default:"")
-  | Some "resume" -> List.iter need [ "resume"; "response"; "result" ]
+  | Some "resume" ->
+      List.iter need [ "resume"; "response"; "result" ];
+      let resume = Option.value (field "resume" fields) ~default:"" in
+      let response = Option.value (field "response" fields) ~default:"" |> Scanf.unescaped in
+      let response_type = validate_resume_response root event resume response in
+      (match field "response-type" fields with
+      | None -> ()
+      | Some declared when String.equal declared response_type -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": response-type mismatch: expected "
+           ^ response_type ^ ", got " ^ declared))
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
   fields
 
 let event_fields root event =
   let content = read_event root event in
-  validate_event event content
+  validate_event root event content
 
 let inspect_event root event =
   let content = read_event root event in
-  ignore (validate_event event content);
+  ignore (validate_event root event content);
   content
 
 let inspect_world root world =
