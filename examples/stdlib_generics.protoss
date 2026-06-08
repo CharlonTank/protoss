@@ -560,6 +560,18 @@
 (def protossFormattedInvalid (Result String String)
   (Protoss.formatText "(let x String \"Ada\")"))
 
+(def protossFormattedCaseExpr (Result String String)
+  (Protoss.formatText "(def local Nat (let (x Nat 1) (case flag (true (succ x)) (false 0))))"))
+
+(def protossFormattedRecordExpr (Result String String)
+  (Protoss.formatText "(def person Person (record (name \"Ada\") (active true)))"))
+
+(def protossFormattedFoldVariantExpr (Result String String)
+  (Protoss.formatText "(def size Nat (foldVariant Tree Nat tree (Leaf x 1) (Node pair (recur (get pair left)))))"))
+
+(def protossFormattedNamedDecls (Result String String)
+  (Protoss.formatText "(record Pair (params A B) (first A) (second B))\n(variant Tree (params A) (Leaf A) (Node (Tree A)))"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

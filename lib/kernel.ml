@@ -750,20 +750,26 @@ let rec expr_equal a b =
   | EField (a, fa), EField (b, fb) -> String.equal fa fb && expr_equal a b
   | _ -> false
 
-let direct_recur_terms ctx target payload_name payload_ty =
-  let base = if equal_typ target payload_ty then [ EName payload_name ] else [] in
-  match unfold_type ctx payload_ty with
+let direct_recur_terms_for_value ctx target value value_ty =
+  let base = if equal_typ target value_ty then [ value ] else [] in
+  match unfold_type ctx value_ty with
   | TRecord fields ->
       base
       @ (fields
         |> List.filter_map (fun (field, field_ty) ->
-               if equal_typ target field_ty then Some (EField (EName payload_name, field)) else None))
+               if equal_typ target field_ty then Some (EField (value, field)) else None))
   | _ -> base
+
+let direct_recur_terms ctx target payload_name payload_ty =
+  direct_recur_terms_for_value ctx target (EName payload_name) payload_ty
+
+let has_direct_recur_terms ctx target item_ty =
+  direct_recur_terms_for_value ctx target (EName "__item") item_ty <> []
 
 let direct_recur_list_terms ctx target payload_name payload_ty =
   let base =
     match unfold_type ctx payload_ty with
-    | TList item_ty when equal_typ target item_ty -> [ EName payload_name ]
+    | TList item_ty when has_direct_recur_terms ctx target item_ty -> [ EName payload_name ]
     | _ -> []
   in
   match unfold_type ctx payload_ty with
@@ -772,7 +778,7 @@ let direct_recur_list_terms ctx target payload_name payload_ty =
       @ (fields
         |> List.filter_map (fun (field, field_ty) ->
                match unfold_type ctx field_ty with
-               | TList item_ty when equal_typ target item_ty ->
+               | TList item_ty when has_direct_recur_terms ctx target item_ty ->
                    Some (EField (EName payload_name, field))
                | _ -> None))
   | _ -> base
@@ -932,7 +938,7 @@ let fold_branch_ctx ctx target result payload_name payload_ty =
 let structural_list_recur_allowed ctx xs item_ty =
   match ctx.fold_scope with
   | Some s ->
-      equal_typ item_ty s.fold_target
+      has_direct_recur_terms ctx s.fold_target item_ty
       && List.exists (expr_equal xs) s.fold_list_allowed
   | None -> false
 
@@ -940,7 +946,14 @@ let bind_recur_item ctx name typ =
   let scope =
     match shadow_fold_scope ctx.fold_scope name with
     | None -> None
-    | Some s -> Some { s with fold_allowed = EName name :: s.fold_allowed }
+    | Some s ->
+        Some
+          {
+            s with
+            fold_allowed =
+              direct_recur_terms_for_value ctx s.fold_target (EName name) typ
+              @ s.fold_allowed;
+          }
   in
   { ctx with locals = (name, typ) :: ctx.locals; fold_scope = scope }
 

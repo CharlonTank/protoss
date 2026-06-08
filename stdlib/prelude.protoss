@@ -1,4 +1,4 @@
-; Protoss stdlib v0.30. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.31. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -171,7 +171,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.30")
+(def Stdlib.version String "v0.31")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -2518,6 +2518,309 @@
                   (false ((String.concat current) ((String.concat " ") acc))))))))
         ")")))))
 
+(def Protoss.renderFormParts (-> (List String) String)
+  (lambda (parts (List String))
+    ((String.concat "(") ((String.concat ((String.join " ") parts)) ")"))))
+
+(def Protoss.renderForm (-> String (-> (List String) String))
+  (lambda (head String)
+    (lambda (parts (List String))
+      (Protoss.renderFormParts (Cons String head parts)))))
+
+(defrec Protoss.renderType (-> ProtossType String)
+  (variant typ)
+  (PTName name name)
+  (PTFun pair
+    (Protoss.renderForm "->"
+      (Cons String (recur (get pair first))
+        (Cons String (recur (get pair second))
+          (Nil String)))))
+  (PTApply app
+    (Protoss.renderForm (get app name)
+      (foldList (get app args) (Nil String)
+        (lambda (arg ProtossType)
+          (lambda (acc (List String))
+            (Cons String (recur arg) acc)))))))
+
+(def Protoss.renderParam (-> ProtossParam String)
+  (lambda (param ProtossParam)
+    (Protoss.renderForm (get param name)
+      (Cons String (Protoss.renderType (get param typ))
+        (Nil String)))))
+
+(def Protoss.renderBranchForm (-> String (-> (Maybe String) (-> String String)))
+  (lambda (constructor String)
+    (lambda (binder (Maybe String))
+      (lambda (body String)
+        (case binder
+          (None _ (Protoss.renderForm constructor (Cons String body (Nil String))))
+          (Some name
+            (Protoss.renderForm constructor
+              (Cons String name
+                (Cons String body
+                  (Nil String))))))))))
+
+(def Protoss.renderRequest (-> ProtossRequest String)
+  (lambda (request ProtossRequest)
+    (case request
+      (PRAskHuman prompt
+        (Protoss.renderForm "Human.ask"
+          (Cons String (Sexp.renderFlatString prompt)
+            (Nil String))))
+      (PRHttpGet url
+        (Protoss.renderForm "Http.get"
+          (Cons String (Sexp.renderFlatString url)
+            (Nil String))))
+      (PRClockRead
+        (Protoss.renderForm "Clock.read" (Nil String)))
+      (PRSaveLocal save
+        (Protoss.renderForm "Local.save"
+          (Cons String (Sexp.renderFlatString (get save key))
+            (Cons String (Sexp.renderFlatString (get save value))
+              (Nil String)))))
+      (PRLoadLocal key
+        (Protoss.renderForm "Local.load"
+          (Cons String (Sexp.renderFlatString key)
+            (Nil String))))
+      (PRServerRequest request
+        (Protoss.renderForm "Server.request"
+          (Cons String (Sexp.renderFlatString (get request route))
+            (Cons String (Sexp.renderFlatString (get request payload))
+              (Nil String))))))))
+
+(defrec Protoss.renderExpr (-> ProtossExpr String)
+  (variant expr)
+  (PEApply call
+    (Protoss.renderForm (recur (get call fn))
+      (foldList (get call args) (Nil String)
+        (lambda (arg ProtossExpr)
+          (lambda (acc (List String))
+            (Cons String (recur arg) acc))))))
+  (PEBind bindExpr
+    (Protoss.renderForm "bind"
+      (Cons String (recur (get bindExpr process))
+        (Cons String
+          (Protoss.renderForm "lambda"
+            (Cons String
+              (Protoss.renderForm (get bindExpr param)
+                (Cons String (Protoss.renderType (get bindExpr typ))
+                  (Nil String)))
+              (Cons String (recur (get bindExpr body))
+                (Nil String))))
+          (Nil String)))))
+  (PEBool value
+    (case value
+      (true "true")
+      (false "false")))
+  (PECase caseExpr
+    (Protoss.renderForm "case"
+      (Cons String (recur (get caseExpr scrutinee))
+        (foldList (get caseExpr branches) (Nil String)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List String))
+              (Cons String
+                (((Protoss.renderBranchForm (get branch constructor))
+                  (get branch binder))
+                  (recur (get branch body)))
+                acc)))))))
+  (PECaseList caseListExpr
+    (Protoss.renderForm "caseList"
+      (Cons String (recur (get caseListExpr target))
+        (Cons String
+          (Protoss.renderForm "Nil"
+            (Cons String (recur (get caseListExpr nilBody))
+              (Nil String)))
+          (Cons String
+            (Protoss.renderForm "Cons"
+              (Cons String (get caseListExpr head)
+                (Cons String (get caseListExpr tail)
+                  (Cons String (recur (get caseListExpr consBody))
+                    (Nil String)))))
+            (Nil String))))))
+  (PEDone value
+    (Protoss.renderForm "done"
+      (Cons String (recur value)
+        (Nil String))))
+  (PEField fieldExpr
+    (Protoss.renderForm "get"
+      (Cons String (recur (get fieldExpr target))
+        (Cons String (get fieldExpr field)
+          (Nil String)))))
+  (PEFoldNat foldNatExpr
+    (Protoss.renderForm "foldNat"
+      (Cons String (recur (get foldNatExpr target))
+        (Cons String (recur (get foldNatExpr zero))
+          (Cons String (recur (get foldNatExpr step))
+            (Nil String))))))
+  (PEFoldVariant foldVariantExpr
+    (Protoss.renderForm "foldVariant"
+      (((inst List.append String)
+        (Cons String (Protoss.renderType (get foldVariantExpr target))
+          (Cons String (Protoss.renderType (get foldVariantExpr result))
+            (Cons String (recur (get foldVariantExpr scrutinee))
+              (Nil String)))))
+        (foldList (get foldVariantExpr branches) (Nil String)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List String))
+              (Cons String
+                (((Protoss.renderBranchForm (get branch constructor))
+                  (get branch binder))
+                  (recur (get branch body)))
+                acc)))))))
+  (PEFoldList foldListExpr
+    (Protoss.renderForm "foldList"
+      (Cons String (recur (get foldListExpr target))
+        (Cons String (recur (get foldListExpr zero))
+          (Cons String (recur (get foldListExpr step))
+            (Nil String))))))
+  (PEInst instExpr
+    (Protoss.renderForm "inst"
+      (Cons String (get instExpr name)
+        (foldList (get instExpr typeArgs) (Nil String)
+          (lambda (typ ProtossType)
+            (lambda (acc (List String))
+              (Cons String (Protoss.renderType typ) acc)))))))
+  (PELambda lam
+    (Protoss.renderForm "lambda"
+      (Cons String (Protoss.renderParam (get lam param))
+        (Cons String (recur (get lam body))
+          (Nil String)))))
+  (PELet letExpr
+    (Protoss.renderForm "let"
+      (Cons String
+        (case (get letExpr typ)
+          (None _
+            (Protoss.renderForm (get letExpr name)
+              (Cons String (recur (get letExpr value))
+                (Nil String))))
+          (Some typ
+            (Protoss.renderForm (get letExpr name)
+              (Cons String (Protoss.renderType typ)
+                (Cons String (recur (get letExpr value))
+                  (Nil String))))))
+        (Cons String (recur (get letExpr body))
+          (Nil String)))))
+  (PECons consExpr
+    (case (get consExpr typ)
+      (None _
+        (Protoss.renderForm "Cons"
+          (Cons String (recur (get consExpr head))
+            (Cons String (recur (get consExpr tail))
+              (Nil String)))))
+      (Some typ
+        (Protoss.renderForm "Cons"
+          (Cons String (Protoss.renderType typ)
+            (Cons String (recur (get consExpr head))
+              (Cons String (recur (get consExpr tail))
+                (Nil String))))))))
+  (PENil nilExpr
+    (case (get nilExpr typ)
+      (None _ "Nil")
+      (Some typ
+        (Protoss.renderForm "Nil"
+          (Cons String (Protoss.renderType typ)
+            (Nil String))))))
+  (PERecord fields
+    (Protoss.renderForm "record"
+      (foldList fields (Nil String)
+        (lambda (field ProtossRecordFieldExpr)
+          (lambda (acc (List String))
+            (Cons String
+              (Protoss.renderForm (get field name)
+                (Cons String (recur (get field expr))
+                  (Nil String)))
+              acc))))))
+  (PERecur value
+    (Protoss.renderForm "recur"
+      (Cons String (recur value)
+        (Nil String))))
+  (PERequest request
+    (Protoss.renderRequest request))
+  (PEString value
+    (Sexp.renderFlatString value))
+  (PEUnit
+    "unit")
+  (PEVariant variantExpr
+    (case (get variantExpr typeHint)
+      (None _
+        (Protoss.renderForm "variant"
+          (Cons String (get variantExpr constructor)
+            (Cons String (recur (get variantExpr payload))
+              (Nil String)))))
+      (Some typ
+        (Protoss.renderForm "variant"
+          (Cons String (Protoss.renderType typ)
+            (Cons String (get variantExpr constructor)
+              (Cons String (recur (get variantExpr payload))
+                (Nil String))))))))
+  (PEVar name name))
+
+(def Protoss.renderFieldDecl (-> ProtossField String)
+  (lambda (field ProtossField)
+    (Protoss.renderForm (get field name)
+      (Cons String (Protoss.renderType (get field typ))
+        (Nil String)))))
+
+(def Protoss.renderVariantCase (-> ProtossVariantCase String)
+  (lambda (caseDecl ProtossVariantCase)
+    (Protoss.renderForm (get caseDecl name)
+      (Cons String (Protoss.renderType (get caseDecl payload))
+        (Nil String)))))
+
+(def Protoss.renderParamsClause (-> (List String) (List String))
+  (lambda (params (List String))
+    (caseList params
+      (Nil (Nil String))
+      (Cons first rest
+        (Cons String (Protoss.renderForm "params" params)
+          (Nil String))))))
+
+(def Protoss.renderDecl (-> ProtossDecl String)
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def
+        (Protoss.renderForm "def"
+          (Cons String (get def name)
+            (Cons String (Protoss.renderType (get def typ))
+              (Cons String (Protoss.renderExpr (get def expr))
+                (Nil String))))))
+      (PDRecord recordDecl
+        (Protoss.renderForm "record"
+          (((inst List.append String)
+            (Cons String (get recordDecl name)
+              (Protoss.renderParamsClause (get recordDecl typeParams))))
+            (((inst List.map ProtossField String) (get recordDecl fields))
+              (lambda (field ProtossField)
+                (Protoss.renderFieldDecl field))))))
+      (PDType typeDecl
+        (caseList (get typeDecl typeParams)
+          (Nil
+            (Protoss.renderForm "type"
+              (Cons String (get typeDecl name)
+                (Cons String (Protoss.renderType (get typeDecl body))
+                  (Nil String)))))
+          (Cons first rest
+            (Protoss.renderForm "type"
+              (Cons String (get typeDecl name)
+                (Cons String (Protoss.renderFormParts (get typeDecl typeParams))
+                  (Cons String (Protoss.renderType (get typeDecl body))
+                    (Nil String))))))))
+      (PDVariant variantDecl
+        (Protoss.renderForm "variant"
+          (((inst List.append String)
+            (Cons String (get variantDecl name)
+              (Protoss.renderParamsClause (get variantDecl typeParams))))
+            (((inst List.map ProtossVariantCase String) (get variantDecl cases))
+              (lambda (caseDecl ProtossVariantCase)
+                (Protoss.renderVariantCase caseDecl)))))))))
+
+(def Protoss.renderDecls (-> (List ProtossDecl) String)
+  (lambda (decls (List ProtossDecl))
+    ((String.join "\n")
+      (((inst List.map ProtossDecl String) decls)
+        (lambda (decl ProtossDecl)
+          (Protoss.renderDecl decl))))))
+
 (def Protoss.renderSexpForms (-> (List Sexp) String)
   (lambda (forms (List Sexp))
     ((String.join "\n")
@@ -2529,10 +2832,7 @@
   (lambda (source String)
     (case (Protoss.parseText source)
       (Err err (variant Err err))
-      (Ok decls
-        (case (Sexp.parseText source)
-          (Err err (variant Err err))
-          (Ok forms (variant Ok (Protoss.renderSexpForms forms))))))))
+      (Ok decls (variant Ok (Protoss.renderDecls decls))))))
 
 (def Json.null Json
   (variant JNull unit))

@@ -1042,6 +1042,30 @@ let () =
   let forest_size, _ = Runtime.normalize_def forest_rec "forestSize" in
   assert_equal "defrec Variant list payload recursion" "2"
     (Runtime.value_to_string forest_size);
+  let forest_record_item_rec =
+    check
+      (forest_rec_base
+     ^ "(variant ForestBox \
+          (LeafBox Nat) \
+          (ManyBox (List (Record (child ForestBox)))))\n\
+        (def leafBox ForestBox (variant LeafBox 1))\n\
+        (def forestRefs ForestBox \
+          (variant ManyBox \
+            (Cons (Record (child ForestBox)) \
+              (record (child leafBox)) \
+              (Cons (Record (child ForestBox)) (record (child leafBox)) Nil))))\n\
+        (defrec sizeForestRefs (-> ForestBox Nat) \
+          (variant value) \
+          (LeafBox n 1) \
+          (ManyBox refs \
+            (foldList refs 0 \
+              (lambda (ref (Record (child ForestBox))) \
+                (lambda (acc Nat) ((add (recur (get ref child))) acc))))))\n\
+        (def forestRefsSize Nat (sizeForestRefs forestRefs))")
+  in
+  let forest_refs_size, _ = Runtime.normalize_def forest_record_item_rec "forestRefsSize" in
+  assert_equal "defrec Variant list record field recursion" "2"
+    (Runtime.value_to_string forest_refs_size);
   expect_check_error_contains
     (forest_rec_base
    ^ "(def bad Nat \
@@ -2258,6 +2282,30 @@ let () =
   in
   assert_equal "stdlib Protoss.formatText invalid" "Err \"expected declaration tag\""
     (Runtime.value_to_string protoss_formatted_invalid);
+  let protoss_formatted_case_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedCaseExpr"
+  in
+  assert_equal "stdlib Protoss.formatText case expr"
+    "Ok \"(def local Nat (let (x Nat 1) (case flag (true (succ x)) (false 0))))\""
+    (Runtime.value_to_string protoss_formatted_case_expr);
+  let protoss_formatted_record_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedRecordExpr"
+  in
+  assert_equal "stdlib Protoss.formatText record expr"
+    "Ok \"(def person Person (record (name \\\"Ada\\\") (active true)))\""
+    (Runtime.value_to_string protoss_formatted_record_expr);
+  let protoss_formatted_fold_variant_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedFoldVariantExpr"
+  in
+  assert_equal "stdlib Protoss.formatText foldVariant expr"
+    "Ok \"(def size Nat (foldVariant Tree Nat tree (Leaf x 1) (Node pair (recur (get pair left)))))\""
+    (Runtime.value_to_string protoss_formatted_fold_variant_expr);
+  let protoss_formatted_named_decls, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedNamedDecls"
+  in
+  assert_equal "stdlib Protoss.formatText named decls"
+    "Ok \"(record Pair (params A B) (first A) (second B))\\n(variant Tree (params A) (Leaf A) (Node (Tree A)))\""
+    (Runtime.value_to_string protoss_formatted_named_decls);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
