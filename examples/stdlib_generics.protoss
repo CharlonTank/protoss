@@ -137,6 +137,29 @@
 (def assocValues (List Nat)
   ((inst Assoc.values String Nat) assoc))
 
+(def map (Map String Nat)
+  ((((inst Map.insert String Nat) "age") 41)
+    ((((inst Map.insert String Nat) "count") 2)
+      (inst Map.empty String Nat))))
+
+(def mapAge (Maybe Nat)
+  ((((inst Map.get String Nat) String.eqString) "age") map))
+
+(def mapHasCount Bool
+  ((((inst Map.contains String Nat) String.eqString) "count") map))
+
+(def mapKeys (List String)
+  ((inst Map.keys String Nat) map))
+
+(def mapValues (List Nat)
+  ((inst Map.values String Nat) map))
+
+(def mapRemoved (Map String Nat)
+  ((((inst Map.remove String Nat) String.eqString) "count") map))
+
+(def mapRemovedKeys (List String)
+  ((inst Map.keys String Nat) mapRemoved))
+
 (def setA (Set Nat)
   ((((inst Set.insert Nat) Nat.eqNat) 2)
     ((((inst Set.insert Nat) Nat.eqNat) 1)

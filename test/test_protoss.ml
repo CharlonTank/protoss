@@ -1718,6 +1718,20 @@ let () =
   let assoc_values, _ = Runtime.normalize_def stdlib_generics "assocValues" in
   assert_equal "stdlib generic Assoc.values" "[41, 2]"
     (Runtime.value_to_string assoc_values);
+  let map_age, _ = Runtime.normalize_def stdlib_generics "mapAge" in
+  assert_equal "stdlib generic Map.get" "Some 41" (Runtime.value_to_string map_age);
+  let map_has_count, _ = Runtime.normalize_def stdlib_generics "mapHasCount" in
+  assert_equal "stdlib generic Map.contains" "true"
+    (Runtime.value_to_string map_has_count);
+  let map_keys, _ = Runtime.normalize_def stdlib_generics "mapKeys" in
+  assert_equal "stdlib generic Map.keys" "[\"age\", \"count\"]"
+    (Runtime.value_to_string map_keys);
+  let map_values, _ = Runtime.normalize_def stdlib_generics "mapValues" in
+  assert_equal "stdlib generic Map.values" "[41, 2]"
+    (Runtime.value_to_string map_values);
+  let map_removed_keys, _ = Runtime.normalize_def stdlib_generics "mapRemovedKeys" in
+  assert_equal "stdlib generic Map.remove" "[\"age\"]"
+    (Runtime.value_to_string map_removed_keys);
   let set_has_two, _ = Runtime.normalize_def stdlib_generics "setHasTwo" in
   assert_equal "stdlib generic Set.contains" "true" (Runtime.value_to_string set_has_two);
   let set_union, _ = Runtime.normalize_def stdlib_generics "setUnion" in

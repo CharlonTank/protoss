@@ -1,9 +1,10 @@
-; Protoss stdlib v0.8. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.9. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Result (E A) (Variant (Err E) (Ok A)))
 (type Pair (A B) (Record (first A) (second B)))
 (type Assoc (K V) (List (Pair K V)))
+(type Map (K V) (Assoc K V))
 (type Set (A) (List A))
 (variant Json
   (JArray (List Json))
@@ -13,7 +14,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.8")
+(def Stdlib.version String "v0.9")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -325,6 +326,50 @@
     (((inst List.map (Pair K V) V) entries)
       (lambda (entry (Pair K V))
         (get entry second)))))
+
+(defpoly Map.empty (params K V)
+  (Map K V)
+  (inst Assoc.empty K V))
+
+(defpoly Map.insert (params K V)
+  (-> K (-> V (-> (Map K V) (Map K V))))
+  (lambda (key K)
+    (lambda (value V)
+      (lambda (entries (Map K V))
+        ((((inst Assoc.insert K V) key) value) entries)))))
+
+(defpoly Map.get (params K V)
+  (-> (-> K (-> K Bool)) (-> K (-> (Map K V) (Maybe V))))
+  (lambda (eq (-> K (-> K Bool)))
+    (lambda (key K)
+      (lambda (entries (Map K V))
+        ((((inst Assoc.get K V) eq) key) entries)))))
+
+(defpoly Map.contains (params K V)
+  (-> (-> K (-> K Bool)) (-> K (-> (Map K V) Bool)))
+  (lambda (eq (-> K (-> K Bool)))
+    (lambda (key K)
+      (lambda (entries (Map K V))
+        ((((inst Assoc.contains K V) eq) key) entries)))))
+
+(defpoly Map.keys (params K V)
+  (-> (Map K V) (List K))
+  (lambda (entries (Map K V))
+    ((inst Assoc.keys K V) entries)))
+
+(defpoly Map.values (params K V)
+  (-> (Map K V) (List V))
+  (lambda (entries (Map K V))
+    ((inst Assoc.values K V) entries)))
+
+(defpoly Map.remove (params K V)
+  (-> (-> K (-> K Bool)) (-> K (-> (Map K V) (Map K V))))
+  (lambda (eq (-> K (-> K Bool)))
+    (lambda (key K)
+      (lambda (entries (Map K V))
+        (((inst List.filter (Pair K V)) entries)
+          (lambda (entry (Pair K V))
+            (Bool.not ((eq (get entry first)) key))))))))
 
 (defpoly Set.empty (params A)
   (Set A)
