@@ -23,10 +23,13 @@ let usage () =
      \       protoss diff [--json] <store-a> <store-b>\n\
      \       protoss audit [project]\n\
      \       protoss invariants file <file> | graph <graph.json> | alpha <file-a> <file-b>\n\
+     \       protoss invariants graph --store-graph <project-or-store> <graphHash>\n\
      \       protoss invariants process <file> --entry <name> --response <value>\n\
      \       protoss invariants process --graph <graph.json> --entry <name> --response <value>\n\
+     \       protoss invariants process --store-graph <project-or-store> <graphHash> --entry <name> --response <value>\n\
      \       protoss invariants ledger <file> --entry <name> --response <value> [--ledger <root>]\n\
      \       protoss invariants ledger --graph <graph.json> --entry <name> --response <value> [--ledger <root>]\n\
+     \       protoss invariants ledger --store-graph <project-or-store> <graphHash> --entry <name> --response <value> [--ledger <root>]\n\
      \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
@@ -517,9 +520,20 @@ let command_invariants = function
       print_string (Protoss.Invariants.describe_file (Protoss.Invariants.check_file file))
   | [ "graph"; file ] ->
       print_string (Protoss.Invariants.describe_file (Protoss.Invariants.check_graph file))
+  | [ "graph"; "--store-graph"; project_or_store; graph_hash ] ->
+      print_string
+        (Protoss.Invariants.describe_file
+           (Protoss.Invariants.check_store_graph project_or_store graph_hash))
   | [ "alpha"; left; right ] ->
       print_string
         (Protoss.Invariants.describe_alpha (Protoss.Invariants.check_alpha left right))
+  | "process" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
+      let entry = fst (find_entry args) in
+      let response = required_arg "--response" args in
+      print_string
+        (Protoss.Invariants.describe_process
+           (Protoss.Invariants.check_store_graph_process project_or_store graph_hash entry
+              response))
   | "process" :: "--graph" :: file :: args ->
       let entry = fst (find_entry args) in
       let response = required_arg "--response" args in
@@ -532,6 +546,13 @@ let command_invariants = function
       print_string
         (Protoss.Invariants.describe_process
            (Protoss.Invariants.check_process file entry response))
+  | "ledger" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
+      let entry = fst (find_entry args) in
+      let response = required_arg "--response" args in
+      print_string
+        (Protoss.Invariants.describe_ledger
+           (Protoss.Invariants.check_store_graph_ledger_process
+              ?ledger:(find_arg "--ledger" args) project_or_store graph_hash entry response))
   | "ledger" :: "--graph" :: file :: args ->
       let entry = fst (find_entry args) in
       let response = required_arg "--response" args in

@@ -86,11 +86,14 @@ dune exec protoss -- run --graph /tmp/ask_human.protoss.graph.json --entry askNa
 dune exec protoss -- resume --graph /tmp/ask_human.protoss.graph.json --entry askName --event <EventRef> --response String:Ada --ledger /tmp/protoss-ledger
 dune exec protoss -- invariants file examples/basic.protoss
 dune exec protoss -- invariants graph /tmp/basic.protoss.graph.json
+dune exec protoss -- invariants graph --store-graph examples/workspace <graphHash>
 dune exec protoss -- invariants alpha examples/alpha_a.protoss examples/alpha_b.protoss
 dune exec protoss -- invariants process examples/ask_human.protoss --entry askName --response String:Ada
 dune exec protoss -- invariants process --graph /tmp/ask_human.protoss.graph.json --entry askName --response String:Ada
+dune exec protoss -- invariants process --store-graph examples/workspace <graphHash> --entry askName --response String:Ada
 dune exec protoss -- invariants ledger examples/ask_human.protoss --entry askName --response String:Ada --ledger /tmp/protoss-ledger-invariant
 dune exec protoss -- invariants ledger --graph /tmp/ask_human.protoss.graph.json --entry askName --response String:Ada --ledger /tmp/protoss-ledger-invariant-graph
+dune exec protoss -- invariants ledger --store-graph examples/workspace <graphHash> --entry askName --response String:Ada --ledger /tmp/protoss-ledger-invariant-store-graph
 dune exec protoss -- invariants package examples/workspace
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app

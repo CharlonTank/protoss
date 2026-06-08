@@ -2307,6 +2307,21 @@ let () =
     (Kernel.hash_program store_graph_checked);
   let store_graph_value, _ = Runtime.eval_entry store_graph_checked "appMain" in
   assert_equal "project checked store graph eval" "44" (Runtime.value_to_string store_graph_value);
+  let store_graph_invariants = Invariants.check_store_graph build_a.store store_graph_hash in
+  assert_equal "project store graph invariants hash" (Kernel.hash_program build_a.Workspace.checked)
+    store_graph_invariants.Invariants.program_hash;
+  let store_graph_process_invariants =
+    Invariants.check_store_graph_process build_a.store store_graph_hash "askName" "String:Ada"
+  in
+  assert_equal "project store graph process invariant result" "Done \"Ada\""
+    store_graph_process_invariants.Invariants.result;
+  let store_graph_ledger_invariants =
+    Invariants.check_store_graph_ledger_process
+      ~ledger:(temp_dir "workspace-store-graph-ledger-invariants")
+      build_a.store store_graph_hash "askName" "String:Ada"
+  in
+  assert_equal "project store graph ledger invariant result" "Done \"Ada\""
+    store_graph_ledger_invariants.Invariants.result;
   let store_graph_dot = Workspace.store_graph_dot build_a.store store_graph_hash in
   assert_true "project store graph dot header"
     (contains_substring store_graph_dot "digraph protoss");

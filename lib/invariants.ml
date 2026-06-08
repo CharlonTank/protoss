@@ -108,6 +108,13 @@ let check_graph file =
     fail ("canonical graph source mismatch: " ^ file);
   validate_checked file checked
 
+let store_graph_source store graph_hash = store ^ "#" ^ graph_hash
+
+let check_store_graph project_or_store graph_hash =
+  let store = Workspace.store_of_arg project_or_store in
+  validate_checked (store_graph_source store graph_hash)
+    (Workspace.checked_store_graph store graph_hash)
+
 let check_alpha left right =
   let left_checked = Loader.check_file left in
   let right_checked = Loader.check_file right in
@@ -155,6 +162,12 @@ let check_process file entry response =
 
 let check_graph_process file entry response =
   check_process_checked file (Canonical_ir.checked_of_graph (Store.read_file file)) entry response
+
+let check_store_graph_process project_or_store graph_hash entry response =
+  let store = Workspace.store_of_arg project_or_store in
+  check_process_checked (store_graph_source store graph_hash)
+    (Workspace.checked_store_graph store graph_hash)
+    entry response
 
 let default_ledger_root source entry =
   Filename.concat (Filename.get_temp_dir_name ())
@@ -217,6 +230,12 @@ let check_ledger_process ?ledger file entry response =
 let check_graph_ledger_process ?ledger file entry response =
   check_ledger_process_checked ?ledger file
     (Canonical_ir.checked_of_graph (Store.read_file file))
+    entry response
+
+let check_store_graph_ledger_process ?ledger project_or_store graph_hash entry response =
+  let store = Workspace.store_of_arg project_or_store in
+  check_ledger_process_checked ?ledger (store_graph_source store graph_hash)
+    (Workspace.checked_store_graph store graph_hash)
     entry response
 
 let check_package project =
