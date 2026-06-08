@@ -3,6 +3,7 @@ type file_result = {
   defs : int;
   program_hash : string;
   graph_hash : string;
+  graph_migration : bool;
   normalized : int;
 }
 
@@ -91,12 +92,20 @@ let validate_checked source checked =
     not
       (String.equal canonical (Kernel.serialize_checked_program graph_checked))
   then fail ("canonical graph checked serialization mismatch: " ^ source);
+  let migrated_current = Canonical_ir.migrate_graph graph in
+  if not (String.equal graph migrated_current) then
+    fail ("canonical graph migration is not stable: " ^ source);
+  let legacy_graph = Kernel.checked_to_graph_json_legacy_v1 checked in
+  let migrated_legacy = Canonical_ir.migrate_graph legacy_graph in
+  if not (String.equal graph migrated_legacy) then
+    fail ("legacy canonical graph migration mismatch: " ^ source);
   let normalized = Runtime.normalize_all checked in
   {
     source;
     defs = List.length checked.Kernel.defs;
     program_hash;
     graph_hash = Kernel.checked_to_graph_content_hash checked;
+    graph_migration = true;
     normalized = List.length normalized;
   }
 
@@ -313,8 +322,9 @@ let check_package project =
 let describe_file (result : file_result) =
   "Invariants OK\nkind=file\nsource=" ^ result.source ^ "\ndefs="
   ^ string_of_int result.defs ^ "\nprogram_hash=" ^ result.program_hash
-  ^ "\ngraph_hash=" ^ result.graph_hash ^ "\nnormalized="
-  ^ string_of_int result.normalized ^ "\n"
+  ^ "\ngraph_hash=" ^ result.graph_hash ^ "\ngraph_migration="
+  ^ (if result.graph_migration then "ok" else "failed")
+  ^ "\nnormalized=" ^ string_of_int result.normalized ^ "\n"
 
 let describe_alpha (result : alpha_result) =
   "Invariants OK\nkind=alpha\nleft=" ^ result.left ^ "\nright=" ^ result.right

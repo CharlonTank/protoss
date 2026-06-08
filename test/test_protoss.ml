@@ -599,6 +599,10 @@ let () =
   let basic_invariants = Invariants.check_file basic_path in
   assert_equal "invariants file hash" (Kernel.hash_program (Loader.check_file basic_path))
     basic_invariants.Invariants.program_hash;
+  assert_true "invariants file checks graph migration"
+    basic_invariants.Invariants.graph_migration;
+  assert_true "invariants file describes graph migration"
+    (contains_substring (Invariants.describe_file basic_invariants) "graph_migration=ok");
   let invariants_graph_dir = temp_dir "invariants-graph" in
   ensure_dir invariants_graph_dir;
   let invariants_graph_path = Filename.concat invariants_graph_dir "basic.graph.json" in
@@ -606,6 +610,8 @@ let () =
   let graph_invariants = Invariants.check_graph invariants_graph_path in
   assert_equal "invariants graph hash" basic_invariants.program_hash
     graph_invariants.Invariants.program_hash;
+  assert_true "invariants graph checks graph migration"
+    graph_invariants.Invariants.graph_migration;
   (try
      ignore (Canonical_ir.parse_graph (replace_once graph_json "\"value\": 1" "\"value\": 2"));
      fail "canonical graph typed node mismatch should be rejected"
