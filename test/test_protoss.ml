@@ -2298,6 +2298,21 @@ let () =
   assert_true "project store graph object" (Sys.file_exists store_graph_object_path);
   assert_equal "project store graph object content" (Store.read_file store_graph_path)
     (Store.read_file store_graph_object_path);
+  assert_true "project store graphs lists graph hash"
+    (contains_substring (Workspace.graphs_store build_a.store) store_graph_hash);
+  assert_equal "project store graph by hash" (Store.read_file store_graph_path)
+    (Workspace.graph_store build_a.store store_graph_hash);
+  let graph_hash_mismatch_store = temp_dir "workspace-graph-hash-mismatch-store" in
+  copy_tree build_a.store graph_hash_mismatch_store;
+  Store.write_file_atomic
+    (Store.graph_path graph_hash_mismatch_store "p2:bad")
+    (Store.read_file store_graph_path);
+  (try
+     ignore (Workspace.graph_store graph_hash_mismatch_store "p2:bad");
+     fail "store graph should reject content stored under wrong hash"
+   with Workspace.Error msg ->
+     assert_true "store graph reports graph hash mismatch"
+       (contains_substring msg "stored canonical graph hash mismatch"));
   assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
     (Store.read_file store_graph_path);
   let capability_scope_file name =

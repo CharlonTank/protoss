@@ -1738,6 +1738,36 @@ let get_store store id =
         ^ Option.value (read_trim (normal_path store d.s_name)) ~default:""
         ^ "\n"
 
+let graphs_store store =
+  let dir = Store.graphs_dir store in
+  if not (Sys.file_exists dir) then ""
+  else
+    Sys.readdir dir |> Array.to_list
+    |> List.filter (fun f -> has_suffix ".graph.json" f)
+    |> List.sort String.compare
+    |> List.map (fun f ->
+           String.sub f 0 (String.length f - String.length ".graph.json"))
+    |> String.concat "\n"
+    |> fun s -> if s = "" then "" else s ^ "\n"
+
+let graph_store store graph_hash =
+  let path = Store.graph_path store graph_hash in
+  if not (Sys.file_exists path) then fail ("graph not found: " ^ graph_hash);
+  let graph_json = read_file path in
+  let checked =
+    try Canonical_ir.checked_of_graph graph_json with
+    | Kernel.Error msg -> fail ("invalid stored canonical graph " ^ graph_hash ^ ": " ^ msg)
+  in
+  let expected_graph_json = Kernel.checked_to_graph_json checked in
+  if not (String.equal graph_json expected_graph_json) then
+    fail ("stored canonical graph is not exact canonical JSON: " ^ graph_hash);
+  let expected_graph_hash = Kernel.checked_to_graph_content_hash checked in
+  if not (String.equal graph_hash expected_graph_hash) then
+    fail
+      ("stored canonical graph hash mismatch: requested " ^ graph_hash ^ ", content "
+     ^ expected_graph_hash);
+  graph_json
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

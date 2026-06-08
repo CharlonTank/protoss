@@ -30,7 +30,7 @@ let usage () =
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
      \       protoss cache stats <dir>\n\
-     \       protoss store list|get|deps|roots|stats [args]";
+     \       protoss store list|get|deps|roots|graphs|graph|stats [args]";
   exit 2
 
 let parse_and_check file =
@@ -304,6 +304,18 @@ let command_store = function
   | [ "roots" ] -> print_string (Protoss.Workspace.roots_store (Protoss.Workspace.project_store_of_cwd ()))
   | [ "roots"; project_or_store ] ->
       print_string (Protoss.Workspace.roots_store (Protoss.Workspace.store_of_arg project_or_store))
+  | [ "graphs" ] ->
+      print_string (Protoss.Workspace.graphs_store (Protoss.Workspace.project_store_of_cwd ()))
+  | [ "graphs"; project_or_store ] ->
+      print_string (Protoss.Workspace.graphs_store (Protoss.Workspace.store_of_arg project_or_store))
+  | [ "graph"; graph_hash ] ->
+      print_string
+        (Protoss.Workspace.graph_store (Protoss.Workspace.project_store_of_cwd ()) graph_hash)
+  | [ "graph"; project_or_store; graph_hash ] ->
+      print_string
+        (Protoss.Workspace.graph_store
+           (Protoss.Workspace.store_of_arg project_or_store)
+           graph_hash)
   | [ "stats"; root ] ->
       let objects, defs, canonical = Protoss.Store.stats root in
       Printf.printf "objects=%d\ndefs=%d\ncanonical=%d\n" objects defs canonical
