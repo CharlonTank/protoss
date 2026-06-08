@@ -970,6 +970,23 @@ let () =
   let set_difference, _ = Runtime.normalize_def stdlib_generics "setDifference" in
   assert_equal "stdlib generic Set.difference" "[1, 3]"
     (Runtime.value_to_string set_difference);
+  let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
+  assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
+    (Runtime.value_to_string json_name);
+  let json_missing, _ = Runtime.normalize_def stdlib_generics "jsonMissing" in
+  assert_equal "stdlib Json.getField missing" "None unit"
+    (Runtime.value_to_string json_missing);
+  let json_name_string, _ = Runtime.normalize_def stdlib_generics "jsonNameString" in
+  assert_equal "stdlib Json.expectString" "Ok \"Ada\""
+    (Runtime.value_to_string json_name_string);
+  let json_age_nat, _ = Runtime.normalize_def stdlib_generics "jsonAgeNat" in
+  assert_equal "stdlib Json.expectNat" "Ok 41" (Runtime.value_to_string json_age_nat);
+  let json_null_is_null, _ = Runtime.normalize_def stdlib_generics "jsonNullIsNull" in
+  assert_equal "stdlib Json.isNull" "true" (Runtime.value_to_string json_null_is_null);
+  let json_profile_object, _ = Runtime.normalize_def stdlib_generics "jsonProfileObject" in
+  assert_equal "stdlib Json.expectObject"
+    "Ok [{first = \"name\", second = JString \"Ada\"}, {first = \"age\", second = JNat 41}]"
+    (Runtime.value_to_string json_profile_object);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in
@@ -1518,6 +1535,12 @@ let () =
     (String.concat "," (Workspace.read_deps build_a.store "appMain"));
   assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
   assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
+  let loaded_store_program = Store.load_program build_a.store in
+  assert_true "project store preserves recursive Json alias"
+    (List.exists
+       (fun (a : Ast.type_alias) -> String.equal a.type_name "Json")
+       loaded_store_program.type_aliases);
+  ignore (Kernel.check_program loaded_store_program);
   let store_graph_path = Filename.concat build_a.store "program.graph.json" in
   assert_true "project store canonical graph" (Sys.file_exists store_graph_path);
   let store_graph = Json.parse (Store.read_file store_graph_path) in

@@ -134,6 +134,34 @@
   ((((inst Set.difference Nat) Nat.eqNat) setUnion)
     (Cons Nat 2 (Nil Nat))))
 
+(def jsonProfile Json
+  (Json.object
+    ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
+      ((((inst Assoc.insert String Json) "age") (Json.nat 41))
+        (inst Assoc.empty String Json)))))
+
+(def jsonName (Maybe Json)
+  ((Json.getField "name") jsonProfile))
+
+(def jsonMissing (Maybe Json)
+  ((Json.getField "missing") jsonProfile))
+
+(def jsonNameString (Result String String)
+  (case jsonName
+    (None (variant Err "missing name"))
+    (Some value (Json.expectString value))))
+
+(def jsonAgeNat (Result String Nat)
+  (case ((Json.getField "age") jsonProfile)
+    (None (variant Err "missing age"))
+    (Some value (Json.expectNat value))))
+
+(def jsonNullIsNull Bool
+  (Json.isNull Json.null))
+
+(def jsonProfileObject (Result String (Assoc String Json))
+  (Json.expectObject jsonProfile))
+
 (def total Nat
   (foldList bumped 0
     (lambda (x Nat)

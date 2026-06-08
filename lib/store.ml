@@ -44,6 +44,8 @@ let defs_dir root = Filename.concat root "defs"
 
 let canonical_dir root = Filename.concat root "canonical"
 
+let type_aliases_path root = Filename.concat (defs_dir root) "__types.protoss"
+
 let ensure_store root =
   ensure_dir root;
   ensure_dir (objects_dir root);
@@ -82,6 +84,15 @@ let delete_def root name =
   ensure_store root;
   remove_if_exists (def_path root name);
   remove_if_exists (canonical_path root name)
+
+let write_type_aliases root aliases =
+  ensure_store root;
+  let path = type_aliases_path root in
+  match aliases with
+  | [] -> remove_if_exists path
+  | _ ->
+      let source = String.concat "\n" (List.map string_of_type_alias aliases) ^ "\n" in
+      write_file_atomic path source
 
 let load_program root =
   let defs_path = defs_dir root in

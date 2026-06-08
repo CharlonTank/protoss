@@ -643,6 +643,7 @@ let build ?(write = true) ?lock_hash manifest =
     List.iter (write_unit store) prepared.units;
     write_file (Filename.concat store "capabilities")
       (String.concat "\n" prepared.checked.program.capabilities ^ "\n");
+    Store.write_type_aliases store prepared.checked.program.type_aliases;
     write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
     write_file (Filename.concat store "program.graph.json") prepared.program_graph;
     cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);

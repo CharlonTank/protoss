@@ -353,6 +353,7 @@ let write_program_metadata store_root checked =
   let canonical = Kernel.serialize_checked_program checked in
   Store.write_file_atomic (Filename.concat store_root "capabilities")
     (String.concat "\n" checked.Kernel.program.capabilities ^ "\n");
+  Store.write_type_aliases store_root checked.Kernel.program.type_aliases;
   Store.write_file_atomic (Filename.concat store_root "program.canon") (canonical ^ "\n");
   Store.write_file_atomic (Filename.concat store_root "program.graph.json")
     (Kernel.checked_to_graph_json checked)

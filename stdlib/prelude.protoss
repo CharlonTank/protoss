@@ -1,12 +1,19 @@
-; Protoss stdlib v0.7. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.8. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Result (E A) (Variant (Err E) (Ok A)))
 (type Pair (A B) (Record (first A) (second B)))
 (type Assoc (K V) (List (Pair K V)))
 (type Set (A) (List A))
+(variant Json
+  (JArray (List Json))
+  (JBool Bool)
+  (JNat Nat)
+  (JNull Unit)
+  (JObject (Assoc String Json))
+  (JString String))
 
-(def Stdlib.version String "v0.7")
+(def Stdlib.version String "v0.8")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -330,3 +337,104 @@
         (((inst List.filter A) left)
           (lambda (item A)
             (Bool.not ((((inst Set.contains A) eq) item) right))))))))
+
+(def Json.null Json
+  (variant JNull unit))
+
+(def Json.bool (-> Bool Json)
+  (lambda (value Bool)
+    (variant JBool value)))
+
+(def Json.nat (-> Nat Json)
+  (lambda (value Nat)
+    (variant JNat value)))
+
+(def Json.string (-> String Json)
+  (lambda (value String)
+    (variant JString value)))
+
+(def Json.array (-> (List Json) Json)
+  (lambda (items (List Json))
+    (variant JArray items)))
+
+(def Json.object (-> (Assoc String Json) Json)
+  (lambda (fields (Assoc String Json))
+    (variant JObject fields)))
+
+(def Json.singleton (-> String (-> Json Json))
+  (lambda (key String)
+    (lambda (value Json)
+      (Json.object
+        ((((inst Assoc.insert String Json) key) value)
+          (inst Assoc.empty String Json))))))
+
+(def Json.isNull (-> Json Bool)
+  (lambda (json Json)
+    (case json
+      (JArray items false)
+      (JBool value false)
+      (JNat value false)
+      (JNull true)
+      (JObject fields false)
+      (JString value false))))
+
+(def Json.getField (-> String (-> Json (Maybe Json)))
+  (lambda (key String)
+    (lambda (json Json)
+      (case json
+        (JArray items (variant None unit))
+        (JBool value (variant None unit))
+        (JNat value (variant None unit))
+        (JNull (variant None unit))
+        (JObject fields ((((inst Assoc.get String Json) String.eqString) key) fields))
+        (JString value (variant None unit))))))
+
+(def Json.expectString (-> Json (Result String String))
+  (lambda (json Json)
+    (case json
+      (JArray items (variant Err "expected String"))
+      (JBool value (variant Err "expected String"))
+      (JNat value (variant Err "expected String"))
+      (JNull (variant Err "expected String"))
+      (JObject fields (variant Err "expected String"))
+      (JString value (variant Ok value)))))
+
+(def Json.expectNat (-> Json (Result String Nat))
+  (lambda (json Json)
+    (case json
+      (JArray items (variant Err "expected Nat"))
+      (JBool value (variant Err "expected Nat"))
+      (JNat value (variant Ok value))
+      (JNull (variant Err "expected Nat"))
+      (JObject fields (variant Err "expected Nat"))
+      (JString value (variant Err "expected Nat")))))
+
+(def Json.expectBool (-> Json (Result String Bool))
+  (lambda (json Json)
+    (case json
+      (JArray items (variant Err "expected Bool"))
+      (JBool value (variant Ok value))
+      (JNat value (variant Err "expected Bool"))
+      (JNull (variant Err "expected Bool"))
+      (JObject fields (variant Err "expected Bool"))
+      (JString value (variant Err "expected Bool")))))
+
+(def Json.expectArray (-> Json (Result String (List Json)))
+  (lambda (json Json)
+    (case json
+      (JArray items (variant Ok items))
+      (JBool value (variant Err "expected Array"))
+      (JNat value (variant Err "expected Array"))
+      (JNull (variant Err "expected Array"))
+      (JObject fields (variant Err "expected Array"))
+      (JString value (variant Err "expected Array")))))
+
+(def Json.expectObject (-> Json (Result String (Assoc String Json)))
+  (lambda (json Json)
+    (case json
+      (JArray items (variant Err "expected Object"))
+      (JBool value (variant Err "expected Object"))
+      (JNat value (variant Err "expected Object"))
+      (JNull (variant Err "expected Object"))
+      (JObject fields (variant Ok fields))
+      (JString value (variant Err "expected Object")))))
