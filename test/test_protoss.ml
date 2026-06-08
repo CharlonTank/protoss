@@ -1451,6 +1451,39 @@ let () =
       patch_request_id patch_continuation_id [ "Human.ask" ]
   in
   let ledger_before = count_files ledger in
+  let malformed_json_patch =
+    patch_file "protoss-malformed-json.json"
+      "{\n\
+       \  \"op\":\"AddDef\"\n\
+       \  \"name\":\"bad\"\n\
+       }\n"
+  in
+  let malformed_json_before = snapshot store in
+  (try
+     ignore (Patch.apply store malformed_json_patch);
+     fail "malformed JSON patch should be rejected"
+   with Patch.Error msg ->
+     assert_true "malformed JSON patch has file location"
+       (contains_substring msg (malformed_json_patch ^ ":3:3:"));
+     assert_true "malformed JSON patch names JSON parse"
+       (contains_substring msg "invalid JSON patch"));
+  assert_true "malformed JSON patch must not modify store"
+    (snapshot store = malformed_json_before);
+  let missing_deps_patch =
+    patch_file "protoss-missing-deps.json"
+      "{ \"op\":\"AddDef\", \"name\":\"noDeps\", \"type\":\"Nat\", \"expr\":0 }"
+  in
+  let missing_deps_before = snapshot store in
+  (try
+     ignore (Patch.apply store missing_deps_patch);
+     fail "missing deps patch should be rejected"
+   with Patch.Error msg ->
+     assert_true "missing deps patch has file context"
+       (contains_substring msg (missing_deps_patch ^ ": patch op #1 AddDef noDeps field deps"));
+     assert_true "missing deps patch names field"
+       (contains_substring msg "patch missing field: deps"));
+  assert_true "missing deps patch must not modify store"
+    (snapshot store = missing_deps_before);
   let patch_bad =
     patch_file "protoss-bad.json"
       "{ \"op\":\"AddDef\", \"name\":\"bad\", \"deps\":[], \"type\":\"Nat\", \"expr\":true }"
@@ -1459,6 +1492,7 @@ let () =
      let _ = Patch.apply store patch_bad in
      fail "invalid patch should be rejected"
    with Patch.Error msg ->
+     assert_true "invalid patch includes file path" (contains_substring msg patch_bad);
      assert_true "invalid patch names patch op"
        (contains_substring msg "patch op #1 AddDef bad");
      assert_true "invalid patch keeps kernel definition context"

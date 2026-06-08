@@ -64,6 +64,37 @@ let is_prefix prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let split_line_col_prefix s =
+  let len = String.length s in
+  let rec digits i =
+    if i < len && is_digit s.[i] then digits (i + 1) else i
+  in
+  let line_end = digits 0 in
+  if line_end = 0 || line_end >= len || s.[line_end] <> ':' then None
+  else
+    let col_start = line_end + 1 in
+    let col_end = digits col_start in
+    if col_end = col_start || col_end >= len || s.[col_end] <> ':' then None
+    else
+      let rest_start =
+        let i = col_end + 1 in
+        if i < len && s.[i] = ' ' then i + 1 else i
+      in
+      Some (String.sub s 0 (col_end + 1), String.sub s rest_start (len - rest_start))
+
+let has_line_col_prefix s =
+  match split_line_col_prefix s with Some _ -> true | None -> false
+
+let locate path msg =
+  if has_line_col_prefix msg then path ^ ":" ^ msg else path ^ ": " ^ msg
+
+let invalid_json_patch msg =
+  match split_line_col_prefix msg with
+  | Some (loc, rest) -> loc ^ " invalid JSON patch: " ^ rest
+  | None -> "invalid JSON patch: " ^ msg
+
 let take_until_colon s =
   match String.index_opt s ':' with
   | Some i -> Some (String.sub s 0 i)
@@ -207,13 +238,13 @@ let parse_one_json ?(index = 1) obj =
 
 let parse_json input =
   let obj =
-    try Json.parse input with Json.Error msg -> fail ("invalid JSON patch: " ^ msg)
+    try Json.parse input with Json.Error msg -> fail (invalid_json_patch msg)
   in
   parse_one_json obj
 
 let parse_ops_json input =
   let value =
-    try Json.parse input with Json.Error msg -> fail ("invalid JSON patch: " ^ msg)
+    try Json.parse input with Json.Error msg -> fail (invalid_json_patch msg)
   in
   match Json.field "ops" value with
   | None -> [ parse_one_json ~index:1 value ]
@@ -221,9 +252,11 @@ let parse_ops_json input =
       ops |> List.mapi (fun i op -> parse_one_json ~index:(i + 1) op)
   | Some _ -> fail "patch ops must be an array"
 
-let parse_file path = parse_json (read_file path)
+let parse_file path =
+  try parse_json (read_file path) with Error msg -> fail (locate path msg)
 
-let parse_ops_file path = parse_ops_json (read_file path)
+let parse_ops_file path =
+  try parse_ops_json (read_file path) with Error msg -> fail (locate path msg)
 
 let def_by_name (defs : def list) name =
   List.find_opt (fun (d : def) -> String.equal d.name name) defs
@@ -326,10 +359,10 @@ let merge_defs (patch : t) (defs : def list) =
         Some patch.name,
         Some renamed )
 
-let fail_for_patch index patch msg =
-  fail_in (patch_context index patch) msg
+let fail_for_patch patch_path index patch msg =
+  fail_in (locate patch_path (patch_context index patch)) msg
 
-let fail_kernel_with_patch_context changes msg =
+let fail_kernel_with_patch_context patch_path changes msg =
   match extract_error_def_name msg with
   | Some name -> (
       match
@@ -338,7 +371,7 @@ let fail_kernel_with_patch_context changes msg =
                String.equal change.target_name name
                || Option.value ~default:"" change.previous_name = name)
       with
-      | Some change -> fail_for_patch change.index change.patch msg
+      | Some change -> fail_for_patch patch_path change.index change.patch msg
       | None -> fail msg)
   | None -> fail msg
 
@@ -354,7 +387,7 @@ let check store_root patch_path =
       (fun (defs, changes, index) patch ->
         let before_defs = defs in
         let defs, target_name, previous_name, changed_def =
-          try merge_defs patch defs with Error msg -> fail_for_patch index patch msg
+          try merge_defs patch defs with Error msg -> fail_for_patch patch_path index patch msg
         in
         let actual_deps =
           let source_defs = match patch.op with DeleteDef -> before_defs | _ -> defs in
@@ -362,7 +395,7 @@ let check store_root patch_path =
         in
         let declared_deps = List.sort_uniq String.compare patch.dependencies in
         if actual_deps <> declared_deps then
-          fail_for_patch index patch
+          fail_for_patch patch_path index patch
             ("dependency mismatch for " ^ patch.name ^ ": declared ["
             ^ String.concat ", " declared_deps ^ "], actual ["
             ^ String.concat ", " actual_deps ^ "]");
@@ -386,7 +419,7 @@ let check store_root patch_path =
   in
   let checked =
     try Kernel.check_program program with
-    | Kernel.Error msg -> fail_kernel_with_patch_context (List.rev changes) msg
+    | Kernel.Error msg -> fail_kernel_with_patch_context patch_path (List.rev changes) msg
   in
   let changes =
     List.rev changes
