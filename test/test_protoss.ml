@@ -3448,6 +3448,7 @@ let () =
       "protoss-app.json";
       "protoss-graph.json";
       "protoss-canon-graph.json";
+      "protoss-host-contract.json";
       "protoss-capabilities.json";
       "protoss-world.json";
     ];
@@ -3467,11 +3468,28 @@ let () =
   assert_true "web app embeds canonical node graph"
     (List.length (json_array_field "nodes" (json_field "nodeGraph" embedded_program)) > 0);
   assert_true "web embedded graph matches artifact" (web_canon_graph = embedded_program);
+  let web_host_contract = json_field "hostContract" web_app_json in
+  let web_host_contract_artifact =
+    Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-host-contract.json"))
+  in
+  assert_true "web host contract artifact matches app" (web_host_contract = web_host_contract_artifact);
+  assert_equal "web app embeds host contract format" "protoss-host-contract-v1"
+    (json_string_field "format" web_host_contract);
+  assert_equal "web app host contract graph hash"
+    (json_string_field "graphHash" web_canon_graph)
+    (json_string_field "graphHash" web_host_contract);
+  assert_equal "web app host codec version" Canonical_ir.host_codec_version
+    (json_string_field "hostCodecVersion" web_host_contract);
   let web_runtime_js = Store.read_file (Filename.concat web_dist_a "protoss-runtime.js") in
   assert_true "web runtime interprets canonical graph"
     (contains_substring web_runtime_js "evalProgram(app.program)");
   assert_true "web runtime exposes suspended requests"
     (contains_substring web_runtime_js "protoss:request");
+  assert_true "web runtime exposes request signature refs"
+    (contains_substring web_runtime_js "requestSignatureRef");
+  assert_true "web runtime exposes host codec refs"
+    (contains_substring web_runtime_js "requestCodecRef"
+    && contains_substring web_runtime_js "responseCodecRef");
   assert_true "web runtime is not Todo hardcoded"
     (not (contains_substring web_runtime_js "applyMsg")
     && not (contains_substring web_runtime_js "NewTodoChanged")
@@ -3493,6 +3511,27 @@ let () =
     (json_string_field "ref" local_storage_descriptor);
   assert_equal "web capability descriptor name" "Local.storage"
     (json_string_field "name" local_storage_descriptor);
+  let web_host_capabilities = json_array_field "capabilities" web_host_contract in
+  let local_storage_host = List.hd web_host_capabilities in
+  assert_equal "web host capability ref" local_storage_ref
+    (json_string_field "capabilityRef" local_storage_host);
+  let save_host_request =
+    match
+      json_array_field "requests" local_storage_host
+      |> List.find_opt (fun req -> String.equal (json_string_field "tag" req) "SaveLocal")
+    with
+    | Some req -> req
+    | None -> fail "missing web SaveLocal host request"
+  in
+  assert_equal "web host SaveLocal signature ref"
+    (Kernel.req_signature_ref (Ast.SaveLocal ("", "")))
+    (json_string_field "requestSignatureRef" save_host_request);
+  assert_equal "web host SaveLocal request codec"
+    (Canonical_ir.host_codec_ref (Kernel.req_payload_type (Ast.SaveLocal ("", ""))))
+    (json_string_field "codecRef" (json_field "requestCodec" save_host_request));
+  assert_equal "web host SaveLocal response codec"
+    (Canonical_ir.host_codec_ref (Kernel.req_result_type (Ast.SaveLocal ("", ""))))
+    (json_string_field "codecRef" (json_field "responseCodec" save_host_request));
   let local_storage_requests = json_array_field "requests" local_storage_descriptor in
   assert_true "web capability request signatures" (List.length local_storage_requests = 2);
   assert_true "web capability request refs"
@@ -3512,6 +3551,7 @@ let () =
       "protoss-app.json";
       "protoss-graph.json";
       "protoss-canon-graph.json";
+      "protoss-host-contract.json";
       "protoss-capabilities.json";
       "protoss-world.json";
     ];

@@ -293,6 +293,29 @@ let runtime_js =
     if (req.tag === "ServerRequest") return { route: req.route, payload: req.payload };
     return {};
   }
+  function hostContractIndex(contract) {
+    var bySignature = {};
+    var byCapabilityTag = {};
+    var hostCodecVersion = (contract && contract.hostCodecVersion) || "";
+    ((contract && contract.capabilities) || []).forEach(function (cap) {
+      (cap.requests || []).forEach(function (req) {
+        var entry = {
+          capability: cap.name,
+          capabilityRef: cap.capabilityRef,
+          requestTag: req.tag,
+          requestSignatureRef: req.requestSignatureRef,
+          payloadTypeCanonical: req.payloadTypeCanonical,
+          responseTypeCanonical: req.responseTypeCanonical,
+          hostCodecVersion: hostCodecVersion,
+          requestCodecRef: req.requestCodec && req.requestCodec.codecRef,
+          responseCodecRef: req.responseCodec && req.responseCodec.codecRef
+        };
+        bySignature[req.requestSignatureRef] = entry;
+        byCapabilityTag[cap.name + ":" + req.tag] = entry;
+      });
+    });
+    return { bySignature: bySignature, byCapabilityTag: byCapabilityTag };
+  }
   function evalProgram(program) {
     var maps = defMaps(program);
     var values = {};
@@ -536,6 +559,7 @@ let runtime_js =
     start: function (app) {
       var mount = document.getElementById("app");
       var machine = evalProgram(app.program);
+      var hostContract = hostContractIndex(app.hostContract || {});
       var modelValue = app.initialModel;
       var worldRef = app.worldRef;
       var ledger = [];
@@ -558,7 +582,14 @@ let runtime_js =
         var typed = typedResponse(request, response);
         if (request.expected !== typed.tag) throw new Error("protocol response type mismatch");
         delete pending[requestId];
-        record("resume", { requestId: requestId, response: typed });
+        record("resume", {
+          requestId: requestId,
+          requestSignatureRef: request.requestSignatureRef,
+          responseType: request.responseType,
+          hostCodecVersion: request.hostCodecVersion,
+          responseCodecRef: request.responseCodecRef,
+          response: typed
+        });
         handleProcess(machine.resume(request.process, typed));
       }
       function handleProcess(process) {
@@ -568,11 +599,24 @@ let runtime_js =
           return;
         }
         if (process.tag === "Request") {
+          var requestTerm = process.request || {};
+          var contract =
+            hostContract.bySignature[requestTerm.requestSignatureRef]
+            || hostContract.byCapabilityTag[(requestTerm.capability || "") + ":" + (requestTerm.tag || "")]
+            || {};
           var request = {
             requestId: process.requestId,
-            capability: process.request.capability,
-            request: process.request,
-            payload: requestPayload(process.request),
+            capability: requestTerm.capability,
+            capabilityRef: requestTerm.capabilityRef || contract.capabilityRef,
+            requestTag: requestTerm.tag,
+            requestSignatureRef: requestTerm.requestSignatureRef || contract.requestSignatureRef,
+            hostCodecVersion: contract.hostCodecVersion || "",
+            requestCodecRef: contract.requestCodecRef || "",
+            responseCodecRef: contract.responseCodecRef || "",
+            requestPayloadType: contract.payloadTypeCanonical || "",
+            responseType: contract.responseTypeCanonical || process.expected,
+            request: requestTerm,
+            payload: requestPayload(requestTerm),
             expected: process.expected,
             process: process
           };
@@ -802,6 +846,8 @@ let build ?out project =
   in
   ensure_dir out_dir;
   let model, view = initial_model_and_view contract in
+  let canonical_graph_json = Kernel.checked_to_graph_json build.checked in
+  let host_contract_json = Canonical_ir.graph_host_contract canonical_graph_json in
   let app_json =
     json_obj
       [
@@ -813,7 +859,8 @@ let build ?out project =
         json_field "init" (json_string contract.init_def.def_id);
         json_field "update" (json_string contract.update_def.def_id);
         json_field "view" (json_string contract.view_def.def_id);
-        json_field "program" (Kernel.checked_to_graph_json build.checked);
+        json_field "program" canonical_graph_json;
+        json_field "hostContract" host_contract_json;
         json_field "worldRef" (json_string Ledger.initial_world);
         json_field "initialModel" (value_to_json model);
         json_field "initialView" (view_to_json (Some contract.checked) view);
@@ -824,8 +871,8 @@ let build ?out project =
   write_file (Filename.concat out_dir "protoss-runtime.js") runtime_js;
   write_file (Filename.concat out_dir "protoss-app.json") app_json;
   write_file (Filename.concat out_dir "protoss-graph.json") (stored_graph_json build.store);
-  write_file (Filename.concat out_dir "protoss-canon-graph.json")
-    (Kernel.checked_to_graph_json build.checked);
+  write_file (Filename.concat out_dir "protoss-canon-graph.json") canonical_graph_json;
+  write_file (Filename.concat out_dir "protoss-host-contract.json") host_contract_json;
   write_file (Filename.concat out_dir "protoss-capabilities.json")
     (json_obj
        [
