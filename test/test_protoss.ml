@@ -1420,6 +1420,10 @@ let () =
     patch_file "protoss-chain-replace-two.json"
       "{ \"op\":\"ReplaceDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":[\"succ\",2] }"
   in
+  let chain_next_patch =
+    patch_file "protoss-chain-next-two.json"
+      "{ \"op\":\"ReplaceDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":[\"succ\",3] }"
+  in
   let chain_ref = Patch.apply store chain_replace_patch in
   let chain_audit = Store.read_file (patch_audit_path store chain_ref) in
   assert_true "second patch audit links previous"
@@ -1428,6 +1432,28 @@ let () =
     (String.trim (Store.read_file (patch_latest_path store)));
   assert_equal "patch audit chain latest matches store" chain_ref
     (Patch.verify_latest_matches_store store).Patch.audit_ref;
+  let stale_latest_store = temp_dir "patch-audit-stale-latest" in
+  let stale_first = Patch.apply stale_latest_store patch_ok in
+  let stale_second = Patch.apply stale_latest_store chain_replace_patch in
+  Store.write_file_atomic (patch_latest_path stale_latest_store) (stale_first ^ "\n");
+  (try
+     ignore (Patch.inspect_audit stale_latest_store);
+     fail "stale latest patch audit should reject store mismatch"
+   with Patch.Error msg ->
+     assert_true "stale latest detects store mismatch"
+       (contains_substring msg "patch audit program hash mismatch"));
+  assert_true "historical latest target remains inspectable by ref"
+    (contains_substring (Patch.inspect_audit ~ref:stale_second stale_latest_store)
+       ("Patch audit OK " ^ stale_second));
+  let stale_before = snapshot stale_latest_store in
+  (try
+     ignore (Patch.apply stale_latest_store chain_next_patch);
+     fail "patch apply should reject stale latest"
+   with Patch.Error msg ->
+     assert_true "patch apply rejects stale latest"
+       (contains_substring msg "patch audit program hash mismatch"));
+  assert_true "stale latest patch apply mutates nothing"
+    (snapshot stale_latest_store = stale_before);
   let broken_chain_store = temp_dir "patch-audit-chain-broken" in
   let broken_first = Patch.apply broken_chain_store patch_ok in
   let broken_second = Patch.apply broken_chain_store chain_replace_patch in
@@ -1440,10 +1466,6 @@ let () =
      assert_true "broken patch audit chain detects missing previous"
        (contains_substring msg ("patch audit not found: " ^ broken_first)));
   let broken_before = snapshot broken_chain_store in
-  let chain_next_patch =
-    patch_file "protoss-chain-next-two.json"
-      "{ \"op\":\"ReplaceDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":[\"succ\",3] }"
-  in
   (try
      ignore (Patch.apply broken_chain_store chain_next_patch);
      fail "patch apply should reject broken audit chain"

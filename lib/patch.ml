@@ -561,7 +561,9 @@ let apply store_root patch_path =
   let previous_ref =
     try
       let previous = Patch_audit.previous_latest_ref store_root in
-      (match previous with Some _ -> ignore (Patch_audit.verify_chain store_root) | None -> ());
+      (match previous with
+      | Some _ -> ignore (Patch_audit.verify_latest_matches_store store_root)
+      | None -> ());
       previous
     with Patch_audit.Error msg -> fail msg
   in
