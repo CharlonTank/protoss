@@ -2050,6 +2050,18 @@ let () =
   assert_equal "stdlib Protoss.parseText foldNat expr"
     "Ok [PDDef {expr = PEFoldNat {step = PELambda {body = PEApply {args = [PEVar \"acc\"], fn = PEVar \"succ\"}, param = {name = \"acc\", typ = PTName \"Nat\"}}, target = PEVar \"n\", zero = PEVar \"0\"}, name = \"two\", typ = PTName \"Nat\"}]"
     (Runtime.value_to_string protoss_parsed_fold_nat_expr);
+  let protoss_parsed_fold_variant_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedFoldVariantExpr"
+  in
+  assert_equal "stdlib Protoss.parseText foldVariant expr"
+    "Ok [PDDef {expr = PEFoldVariant {branches = [{binder = Some \"x\", body = PEVar \"1\", constructor = \"Leaf\"}, {binder = Some \"pair\", body = PEVar \"2\", constructor = \"Node\"}], result = PTName \"Nat\", scrutinee = PEVar \"tree\", target = PTName \"Tree\"}, name = \"size\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_fold_variant_expr);
+  let protoss_parsed_recur_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedRecurExpr"
+  in
+  assert_equal "stdlib Protoss.parseText recur expr"
+    "Ok [PDDef {expr = PERecur PEVar \"child\", name = \"step\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_recur_expr);
   let protoss_parsed_get_expr, _ =
     Runtime.normalize_def stdlib_generics "protossParsedGetExpr"
   in
@@ -2126,6 +2138,17 @@ let () =
   assert_equal "stdlib Protoss.parseText bad foldNat expr"
     "Err \"expected foldNat step\""
     (Runtime.value_to_string protoss_parsed_bad_fold_nat_expr);
+  let protoss_parsed_bad_fold_variant_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadFoldVariantExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad foldVariant expr"
+    "Err \"expected foldVariant branch\""
+    (Runtime.value_to_string protoss_parsed_bad_fold_variant_expr);
+  let protoss_parsed_bad_recur_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadRecurExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad recur expr" "Err \"expected recur value\""
+    (Runtime.value_to_string protoss_parsed_bad_recur_expr);
   let protoss_parsed_bad_get_expr, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadGetExpr"
   in

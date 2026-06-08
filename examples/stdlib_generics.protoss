@@ -449,6 +449,12 @@
 (def protossParsedFoldNatExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def two Nat (foldNat n 0 (lambda (acc Nat) (succ acc))))"))
 
+(def protossParsedFoldVariantExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def size Nat (foldVariant Tree Nat tree (Leaf x 1) (Node pair 2)))"))
+
+(def protossParsedRecurExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def step Nat (recur child))"))
+
 (def protossParsedGetExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def userName String (get user name))"))
 
@@ -487,6 +493,12 @@
 
 (def protossParsedBadFoldNatExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Nat (foldNat n 0))"))
+
+(def protossParsedBadFoldVariantExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Nat (foldVariant Tree Nat tree))"))
+
+(def protossParsedBadRecurExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Nat (recur))"))
 
 (def protossParsedBadGetExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad String (get user))"))
