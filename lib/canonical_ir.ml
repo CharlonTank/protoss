@@ -29,8 +29,6 @@ let json_array_field name obj =
   | Some xs -> xs
   | None -> fail ("canonical graph field must be array: " ^ name)
 
-let json_optional_field name obj = Json.field name obj
-
 let json_bool_field name obj =
   match json_field name obj with
   | Json.Bool b -> b
@@ -46,18 +44,6 @@ let json_string_array_field name obj =
   |> List.map (function
        | Json.String s -> s
        | _ -> fail ("canonical graph field must be string array: " ^ name))
-
-let json_optional_string_array_field name obj =
-  match json_optional_field name obj with
-  | None -> None
-  | Some (Json.Array xs) ->
-      Some
-        (List.map
-           (function
-             | Json.String s -> s
-             | _ -> fail ("canonical graph field must be string array: " ^ name))
-           xs)
-  | Some _ -> fail ("canonical graph field must be string array: " ^ name)
 
 let validate_hash_metadata context obj =
   let algorithm = json_string_field "hashAlgorithm" obj in
@@ -323,15 +309,15 @@ let validate_capability_scopes caps def_objs defs =
   in
   List.iter2
     (fun obj d ->
-      match json_optional_string_array_field "capabilityScope" obj with
-      | None -> ignore (capabilities_of_def d)
-      | Some declared ->
-          let declared = List.sort_uniq String.compare declared in
-          let actual = capabilities_of_def d in
-          if declared <> actual then
-            fail
-              ("canonical graph capabilityScope mismatch: " ^ d.Kernel.cname ^ " declared ["
-             ^ String.concat "," declared ^ "], actual [" ^ String.concat "," actual ^ "]"))
+      let declared = json_string_array_field "capabilityScope" obj in
+      let canonical_declared = List.sort_uniq String.compare declared in
+      if declared <> canonical_declared then
+        fail ("canonical graph capabilityScope not canonical: " ^ d.Kernel.cname);
+      let actual = capabilities_of_def d in
+      if declared <> actual then
+        fail
+          ("canonical graph capabilityScope mismatch: " ^ d.Kernel.cname ^ " declared ["
+         ^ String.concat "," declared ^ "], actual [" ^ String.concat "," actual ^ "]"))
     def_objs defs
 
 let validate_node_payload id kind canonical payload =

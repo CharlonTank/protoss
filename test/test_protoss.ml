@@ -1390,9 +1390,38 @@ let () =
      ignore
        (Canonical_ir.parse_graph
           (replace_once (Canonical_ir.serialize_graph scoped_process)
+             "\"capabilityScope\": [\"Human.ask\"]" "\"capabilityScopeMissing\": [\"Human.ask\"]"));
+     fail "canonical graph should reject missing capability scope"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing capability scope"
+       (contains_substring msg "canonical graph missing field: capabilityScope"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph scoped_process)
              "\"capabilityScope\": [\"Human.ask\"]" "\"capabilityScope\": [\"Clock.read\"]"));
      fail "canonical graph should reject corrupt capability scope"
-   with Kernel.Error _ -> ());
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt capability scope"
+       (contains_substring msg "canonical graph capabilityScope mismatch: ask"));
+  let multi_cap_process =
+    check
+      "(capabilities Human.ask Clock.read)\n\
+       (def both (Process String)\n\
+       \  (bind (Clock.read) (lambda (now String) (Human.ask \"Name?\"))))"
+  in
+  let multi_cap_graph_json = Canonical_ir.serialize_graph multi_cap_process in
+  ignore (Canonical_ir.parse_graph multi_cap_graph_json);
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once multi_cap_graph_json
+             "\"capabilityScope\": [\"Clock.read\", \"Human.ask\"]"
+             "\"capabilityScope\": [\"Human.ask\", \"Clock.read\"]"));
+     fail "canonical graph should reject unsorted capability scope"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects unsorted capability scope"
+       (contains_substring msg "canonical graph capabilityScope not canonical: both"));
   let scoped_suspended =
     match fst (Runtime.eval_entry scoped_process "wrapped") with
     | Runtime.VProcessRequest s -> s
