@@ -1131,48 +1131,154 @@ let assoc_value name pairs =
   |> Option.map snd
   |> Option.value ~default:"-"
 
-let package_interface_entry_text = function
+type package_interface_export =
+  | PackageDefExport of { export_name : string; export_type_hash : string; export_capabilities : string list }
+  | PackageTypeExport of { export_name : string; export_params : string list; export_type_hash : string }
+
+type package_interface = {
+  interface_project : string;
+  interface_package : string;
+  interface_package_version : string;
+  interface_package_ref : string;
+  interface_lock_hash : string;
+  interface_build_id : string;
+  interface_hash : string;
+  interface_imports : (string * string * string * string) list;
+  interface_exports : package_interface_export list;
+}
+
+let package_interface_export_of_sexp = function
   | Sexp.List (Sexp.Atom "def" :: fields) ->
       let name = package_string_field "name" fields in
       let type_hash = package_atom_field "type-hash" fields in
       let caps = package_string_list_field "capability-scope" fields in
-      "export def " ^ name ^ " type_hash=" ^ type_hash ^ " capabilities="
-      ^ (match caps with [] -> "-" | _ -> String.concat "," caps)
+      PackageDefExport
+        { export_name = name; export_type_hash = type_hash; export_capabilities = caps }
   | Sexp.List (Sexp.Atom "type" :: fields) ->
       let name = package_string_field "name" fields in
       let params = package_string_list_field "params" fields in
       let type_hash = package_atom_field "type-hash" fields in
-      "export type " ^ name ^ " params="
-      ^ (match params with [] -> "-" | _ -> String.concat "," params)
-      ^ " type_hash=" ^ type_hash
+      PackageTypeExport { export_name = name; export_params = params; export_type_hash = type_hash }
   | item -> fail ("invalid package interface item: " ^ Sexp.to_string item)
 
-let package_interface_text manifest =
+let read_package_interface manifest =
   let checked = check_package manifest in
   let content = read_file checked.package_path in
   let items = package_items content in
   let imports = package_pair_list_field "package-imports" items in
   let import_locks = package_pair_list_field "package-import-locks" items in
   let import_interfaces = package_pair_list_field "package-import-interfaces" items in
-  let import_lines =
-    imports
-    |> List.map (fun (name, package_ref) ->
-           "import " ^ name ^ " package=" ^ package_ref ^ " lock="
-           ^ assoc_value name import_locks ^ " interface="
-           ^ assoc_value name import_interfaces)
+  let exports =
+    package_list_field "interface" items |> List.map package_interface_export_of_sexp
   in
-  let exports = package_list_field "interface" items |> List.map package_interface_entry_text in
+  {
+    interface_project = manifest.root;
+    interface_package = manifest.name;
+    interface_package_version = manifest.version;
+    interface_package_ref = checked.package_ref;
+    interface_lock_hash = checked.lock_hash;
+    interface_build_id = checked.build_id;
+    interface_hash = package_atom_field "interface-hash" items;
+    interface_imports =
+      imports
+      |> List.map (fun (name, package_ref) ->
+             ( name,
+               package_ref,
+               assoc_value name import_locks,
+               assoc_value name import_interfaces ));
+    interface_exports = exports;
+  }
+
+let package_interface_export_text = function
+  | PackageDefExport { export_name; export_type_hash; export_capabilities } ->
+      "export def " ^ export_name ^ " type_hash=" ^ export_type_hash ^ " capabilities="
+      ^ (match export_capabilities with [] -> "-" | _ -> String.concat "," export_capabilities)
+  | PackageTypeExport { export_name; export_params; export_type_hash } ->
+      "export type " ^ export_name ^ " params="
+      ^ (match export_params with [] -> "-" | _ -> String.concat "," export_params)
+      ^ " type_hash=" ^ export_type_hash
+
+let package_json_string = Ast.quote
+
+let package_json_field name value = package_json_string name ^ ": " ^ value
+
+let package_json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
+
+let package_json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
+
+let package_interface_export_json = function
+  | PackageDefExport { export_name; export_type_hash; export_capabilities } ->
+      package_json_obj
+        [
+          package_json_field "kind" (package_json_string "def");
+          package_json_field "name" (package_json_string export_name);
+          package_json_field "typeHash" (package_json_string export_type_hash);
+          package_json_field "capabilities"
+            (package_json_array package_json_string export_capabilities);
+        ]
+  | PackageTypeExport { export_name; export_params; export_type_hash } ->
+      package_json_obj
+        [
+          package_json_field "kind" (package_json_string "type");
+          package_json_field "name" (package_json_string export_name);
+          package_json_field "params" (package_json_array package_json_string export_params);
+          package_json_field "typeHash" (package_json_string export_type_hash);
+        ]
+
+let package_interface_import_json (name, package_ref, lock_hash, interface_hash) =
+  package_json_obj
+    [
+      package_json_field "name" (package_json_string name);
+      package_json_field "packageRef" (package_json_string package_ref);
+      package_json_field "lockHash" (package_json_string lock_hash);
+      package_json_field "interfaceHash" (package_json_string interface_hash);
+    ]
+
+let package_interface_json manifest =
+  let interface = read_package_interface manifest in
+  package_json_obj
+    [
+      package_json_field "format" (package_json_string "protoss-package-interface-v1");
+      package_json_field "canonicalVersion" (package_json_string Kernel.canonical_version);
+      package_json_field "canonicalGraphVersion" (package_json_string Kernel.canonical_graph_version);
+      package_json_field "canonicalNodeGraphVersion"
+        (package_json_string Kernel.canonical_node_graph_version);
+      package_json_field "hashAlgorithm" (package_json_string Kernel.hash_algorithm);
+      package_json_field "hashPrefix" (package_json_string Kernel.hash_prefix);
+      package_json_field "project" (package_json_string interface.interface_project);
+      package_json_field "package" (package_json_string interface.interface_package);
+      package_json_field "packageVersion" (package_json_string interface.interface_package_version);
+      package_json_field "packageRef" (package_json_string interface.interface_package_ref);
+      package_json_field "lockHash" (package_json_string interface.interface_lock_hash);
+      package_json_field "buildId" (package_json_string interface.interface_build_id);
+      package_json_field "interfaceHash" (package_json_string interface.interface_hash);
+      package_json_field "imports"
+        (package_json_array package_interface_import_json interface.interface_imports);
+      package_json_field "exports"
+        (package_json_array package_interface_export_json interface.interface_exports);
+    ]
+  ^ "\n"
+
+let package_interface_text manifest =
+  let interface = read_package_interface manifest in
+  let import_lines =
+    interface.interface_imports
+    |> List.map (fun (name, package_ref, lock_hash, interface_hash) ->
+           "import " ^ name ^ " package=" ^ package_ref ^ " lock="
+           ^ lock_hash ^ " interface=" ^ interface_hash)
+  in
+  let exports = List.map package_interface_export_text interface.interface_exports in
   String.concat "\n"
     ([
        "PackageInterface OK";
-       "project=" ^ manifest.root;
-       "package=" ^ manifest.name;
-       "version=" ^ manifest.version;
-       "package_ref=" ^ checked.package_ref;
-       "lock_hash=" ^ checked.lock_hash;
-       "build_id=" ^ checked.build_id;
-       "interface_hash=" ^ package_atom_field "interface-hash" items;
-       "imports=" ^ string_of_int (List.length imports);
+       "project=" ^ interface.interface_project;
+       "package=" ^ interface.interface_package;
+       "version=" ^ interface.interface_package_version;
+       "package_ref=" ^ interface.interface_package_ref;
+       "lock_hash=" ^ interface.interface_lock_hash;
+       "build_id=" ^ interface.interface_build_id;
+       "interface_hash=" ^ interface.interface_hash;
+       "imports=" ^ string_of_int (List.length interface.interface_imports);
      ]
     @ import_lines
     @ (("exports=" ^ string_of_int (List.length exports)) :: exports))

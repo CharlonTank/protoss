@@ -12,7 +12,7 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
-     \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check]\n\
+     \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check|--json]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json>\n\
      \       protoss patch from-diff <store-a> <store-b>\n\
@@ -374,7 +374,8 @@ let command_project_package args =
 let command_project_interface args =
   let root = project_arg args in
   let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
-  print_string (Protoss.Workspace.package_interface_text manifest)
+  if has_flag "--json" args then print_string (Protoss.Workspace.package_interface_json manifest)
+  else print_string (Protoss.Workspace.package_interface_text manifest)
 
 let command_project = function
   | "init" :: args ->

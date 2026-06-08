@@ -1683,6 +1683,27 @@ let () =
   assert_true "project package interface prints capability scope"
     (contains_substring package_interface_text "export def askName"
     && contains_substring package_interface_text "capabilities=Human.ask");
+  let package_interface_json = Workspace.package_interface_json manifest_a in
+  let package_interface_obj = Json.parse package_interface_json in
+  assert_equal "project package interface json format" "protoss-package-interface-v1"
+    (json_string_field "format" package_interface_obj);
+  assert_equal "project package interface json package ref" package_a.package_ref
+    (json_string_field "packageRef" package_interface_obj);
+  assert_equal "project package interface json hash" interface_hash
+    (json_string_field "interfaceHash" package_interface_obj);
+  let package_interface_exports = json_array_field "exports" package_interface_obj in
+  let ask_export =
+    match
+      package_interface_exports
+      |> List.find_opt (fun item -> String.equal "askName" (json_string_field "name" item))
+    with
+    | Some item -> item
+    | None -> fail "missing askName interface export"
+  in
+  assert_equal "project package interface json capability scope" "Human.ask"
+    (String.concat "," (json_string_array_field "capabilities" ask_export));
+  assert_equal "project package interface json deterministic" package_interface_json
+    (Workspace.package_interface_json manifest_a);
   assert_equal "project package audit" "Audit OK\n" (Workspace.audit manifest_a);
   let package_again = Workspace.write_package manifest_a in
   assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
@@ -1733,6 +1754,20 @@ let () =
     (contains_substring consumer_interface_text ("import workspace-a package=" ^ package_a.package_ref));
   assert_true "package interface prints imported interface"
     (contains_substring consumer_interface_text ("interface=" ^ interface_hash));
+  let consumer_interface_obj = Json.parse (Workspace.package_interface_json consumer_manifest) in
+  let consumer_imports = json_array_field "imports" consumer_interface_obj in
+  let workspace_import =
+    match
+      consumer_imports
+      |> List.find_opt (fun item -> String.equal "workspace-a" (json_string_field "name" item))
+    with
+    | Some item -> item
+    | None -> fail "missing workspace-a interface import"
+  in
+  assert_equal "package interface json imported package" package_a.package_ref
+    (json_string_field "packageRef" workspace_import);
+  assert_equal "package interface json imported interface" interface_hash
+    (json_string_field "interfaceHash" workspace_import);
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
   let consumer_package_invariants = Invariants.check_package consumer_ws in
