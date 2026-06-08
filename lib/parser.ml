@@ -50,7 +50,9 @@ let rec parse_type = function
       in
       ensure_unique "variant constructor" (List.map fst cases);
       TVariant (sort_fields cases)
-  | Sexp.Atom s when s <> "" -> TNamed s
+  | Sexp.List (Sexp.Atom n :: args) when n <> "" ->
+      TNamed (n, List.map parse_type args)
+  | Sexp.Atom s when s <> "" -> TNamed (s, [])
   | x -> fail ("invalid type: " ^ Sexp.to_string x)
 
 let parse_binding = function
@@ -134,7 +136,10 @@ let parse_toplevel = function
       `Capabilities (List.map atom caps)
   | Sexp.List [ Sexp.Atom "type"; Sexp.Atom n; ty ]
   | Sexp.List [ Sexp.Atom "alias"; Sexp.Atom n; ty ] ->
-      `TypeAlias { type_name = n; type_body = parse_type ty }
+      `TypeAlias { type_name = n; type_params = []; type_body = parse_type ty }
+  | Sexp.List [ Sexp.Atom "type"; Sexp.Atom n; Sexp.List params; ty ]
+  | Sexp.List [ Sexp.Atom "alias"; Sexp.Atom n; Sexp.List params; ty ] ->
+      `TypeAlias { type_name = n; type_params = List.map atom params; type_body = parse_type ty }
   | Sexp.List [ Sexp.Atom "def"; Sexp.Atom n; ty; body ] ->
       `Def { name = n; typ = parse_type ty; body = parse_expr body }
   | Sexp.List (Sexp.Atom "defrec" :: _) ->

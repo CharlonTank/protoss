@@ -1,0 +1,20 @@
+(import "../stdlib/prelude.protoss")
+
+(def maybeAge (Maybe Nat)
+  (variant (Maybe Nat) Some 41))
+
+(def age Nat
+  (case maybeAge
+    (None _ 0)
+    (Some n n)))
+
+(def okName (Result String String)
+  (variant (Result String String) Ok "Ada"))
+
+(def nameOrFallback String
+  (case okName
+    (Err e e)
+    (Ok value value)))
+
+(def pair (Pair String Nat)
+  (record (first "count") (second age)))

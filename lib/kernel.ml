@@ -47,7 +47,7 @@ let rec type_to_canonical = function
   | TList t -> "(List " ^ type_to_canonical t ^ ")"
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
   | TProcess t -> "(Process " ^ type_to_canonical t ^ ")"
-  | TNamed n -> fail ("unresolved type alias in canonical type: " ^ n)
+  | TNamed (n, _) -> fail ("unresolved type alias in canonical type: " ^ n)
 
 let req_capability = function
   | AskHuman _ -> "Human.ask"
@@ -88,29 +88,60 @@ let check_duplicate_type_aliases aliases =
     (fun a ->
       if List.exists (String.equal a.type_name) builtin_type_names then
         fail ("type alias shadows builtin type: " ^ a.type_name);
+      let params_seen = Hashtbl.create 8 in
+      List.iter
+        (fun param ->
+          if List.exists (String.equal param) builtin_type_names then
+            fail ("type parameter shadows builtin type: " ^ param);
+          if Hashtbl.mem params_seen param then
+            fail ("duplicate type parameter " ^ param ^ " in alias " ^ a.type_name);
+          Hashtbl.add params_seen param ())
+        a.type_params;
       if Hashtbl.mem seen a.type_name then fail ("duplicate type alias: " ^ a.type_name);
       Hashtbl.add seen a.type_name ())
     aliases
 
-let rec expand_type aliases stack = function
+let alias_by_name aliases name =
+  List.find_opt (fun a -> String.equal a.type_name name) aliases
+
+let bind_type_params alias args =
+  let expected = List.length alias.type_params and actual = List.length args in
+  if expected <> actual then
+    fail
+      ("type alias " ^ alias.type_name ^ " expects " ^ string_of_int expected
+     ^ " argument(s), got " ^ string_of_int actual);
+  List.combine alias.type_params args
+
+let rec expand_type aliases vars stack = function
   | TUnit -> TUnit
   | TBool -> TBool
   | TNat -> TNat
   | TString -> TString
-  | TFun (a, b) -> TFun (expand_type aliases stack a, expand_type aliases stack b)
+  | TFun (a, b) -> TFun (expand_type aliases vars stack a, expand_type aliases vars stack b)
   | TRecord fields ->
-      TRecord (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases stack t)) fields))
+      TRecord (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases vars stack t)) fields))
   | TVariant cases ->
-      TVariant (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases stack t)) cases))
-  | TList t -> TList (expand_type aliases stack t)
-  | TView t -> TView (expand_type aliases stack t)
-  | TProcess t -> TProcess (expand_type aliases stack t)
-  | TNamed n -> (
+      TVariant (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases vars stack t)) cases))
+  | TList t -> TList (expand_type aliases vars stack t)
+  | TView t -> TView (expand_type aliases vars stack t)
+  | TProcess t -> TProcess (expand_type aliases vars stack t)
+  | TNamed (n, args) -> (
+      let args = List.map (expand_type aliases vars stack) args in
+      match assoc_opt n vars with
+      | Some t ->
+          if args <> [] then fail ("type parameter is not a type constructor: " ^ n);
+          t
+      | None ->
       if List.exists (String.equal n) stack then
         fail ("cyclic type alias: " ^ String.concat " -> " (List.rev (n :: stack)));
-      match assoc_opt n aliases with
-      | Some t -> expand_type aliases (n :: stack) t
-      | None -> fail ("unknown type alias: " ^ n))
+      match alias_by_name aliases n with
+      | Some alias ->
+          let vars = bind_type_params alias args in
+          expand_type aliases vars (n :: stack) alias.type_body
+      | None ->
+          if List.exists (String.equal n) builtin_type_names then
+            fail ("invalid builtin type application: " ^ Ast.string_of_typ (TNamed (n, args)))
+          else fail ("unknown type alias: " ^ n))
 
 let rec expand_expr_types aliases = function
   | EUnit -> EUnit
@@ -118,18 +149,18 @@ let rec expand_expr_types aliases = function
   | ENat n -> ENat n
   | EString s -> EString s
   | EName n -> EName n
-  | ELambda (x, t, body) -> ELambda (x, expand_type aliases [] t, expand_expr_types aliases body)
+  | ELambda (x, t, body) -> ELambda (x, expand_type aliases [] [] t, expand_expr_types aliases body)
   | EApp (f, x) -> EApp (expand_expr_types aliases f, expand_expr_types aliases x)
   | ELet (x, e, body) -> ELet (x, expand_expr_types aliases e, expand_expr_types aliases body)
   | ERecord fields -> ERecord (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types aliases e)) fields))
   | EField (e, field) -> EField (expand_expr_types aliases e, field)
-  | EVariant (t, con, e) -> EVariant (expand_type aliases [] t, con, expand_expr_types aliases e)
+  | EVariant (t, con, e) -> EVariant (expand_type aliases [] [] t, con, expand_expr_types aliases e)
   | ECase (e, branches) -> ECase (expand_expr_types aliases e, List.map (expand_branch_types aliases) branches)
   | EFoldNat (n, z, step) ->
       EFoldNat (expand_expr_types aliases n, expand_expr_types aliases z, expand_expr_types aliases step)
-  | ENil t -> ENil (expand_type aliases [] t)
+  | ENil t -> ENil (expand_type aliases [] [] t)
   | ECons (t, head, tail) ->
-      ECons (expand_type aliases [] t, expand_expr_types aliases head, expand_expr_types aliases tail)
+      ECons (expand_type aliases [] [] t, expand_expr_types aliases head, expand_expr_types aliases tail)
   | EFoldList (xs, z, step) ->
       EFoldList (expand_expr_types aliases xs, expand_expr_types aliases z, expand_expr_types aliases step)
   | EText e -> EText (expand_expr_types aliases e)
@@ -145,7 +176,7 @@ let rec expand_expr_types aliases = function
   | EDone e -> EDone (expand_expr_types aliases e)
   | ERequest req -> ERequest req
   | EBind (p, x, t, body) ->
-      EBind (expand_expr_types aliases p, x, expand_type aliases [] t, expand_expr_types aliases body)
+      EBind (expand_expr_types aliases p, x, expand_type aliases [] [] t, expand_expr_types aliases body)
 
 and expand_branch_types aliases = function
   | BBool (b, e) -> BBool (b, expand_expr_types aliases e)
@@ -153,10 +184,12 @@ and expand_branch_types aliases = function
 
 let resolve_program_types program =
   check_duplicate_type_aliases program.type_aliases;
-  let aliases = List.map (fun a -> (a.type_name, a.type_body)) program.type_aliases in
+  let aliases = program.type_aliases in
   let expanded_aliases =
     List.map
-      (fun a -> { a with type_body = expand_type aliases [ a.type_name ] a.type_body })
+      (fun a ->
+        let vars = List.map (fun param -> (param, TNamed (param, []))) a.type_params in
+        { a with type_body = expand_type aliases vars [ a.type_name ] a.type_body })
       program.type_aliases
   in
   let defs =
@@ -164,7 +197,7 @@ let resolve_program_types program =
       (fun d ->
         {
           d with
-          typ = expand_type aliases [] d.typ;
+          typ = expand_type aliases [] [] d.typ;
           body = expand_expr_types aliases d.body;
         })
       program.defs

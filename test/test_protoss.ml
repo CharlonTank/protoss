@@ -188,6 +188,36 @@ let () =
   expect_check_error "(type Loop Loop)\n(def bad Loop 0)";
   expect_check_error "(type A B)\n(type B A)\n(def bad A 0)";
 
+  let maybe_alias =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (def value (Maybe Nat) (variant (Maybe Nat) Some 4))\n\
+       (def out Nat (case value (None _ 0) (Some n n)))"
+  in
+  let maybe_expanded =
+    check
+      "(def value (Variant (None Unit) (Some Nat)) \
+       (variant (Variant (None Unit) (Some Nat)) Some 4))\n\
+       (def out Nat (case value (None _ 0) (Some n n)))"
+  in
+  assert_equal "parametric type alias transparent hash" (Kernel.hash_program maybe_expanded)
+    (Kernel.hash_program maybe_alias);
+  let maybe_out, _ = Runtime.normalize_def maybe_alias "out" in
+  assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
+  let result_pair =
+    check
+      "(type Result (E A) (Variant (Err E) (Ok A)))\n\
+       (type Pair (A B) (Record (first A) (second B)))\n\
+       (def r (Result String Nat) (variant (Result String Nat) Ok 7))\n\
+       (def p (Pair String Nat) (record (first \"n\") (second 7)))"
+  in
+  ignore result_pair;
+  expect_check_error
+    "(type Maybe (A) (Variant (None Unit) (Some A)))\n(def bad Maybe unit)";
+  expect_check_error
+    "(type Maybe (A) (Variant (None Unit) (Some A)))\n(def bad (Maybe Nat Bool) unit)";
+  expect_check_error "(type Bad (A A) A)\n(def bad (Bad Nat Nat) 0)";
+
   let variant_order_a =
     check
       "(def v (Variant (None Unit) (Some Nat)) \

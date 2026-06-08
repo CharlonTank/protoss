@@ -9,7 +9,7 @@ type typ =
   | TList of typ
   | TView of typ
   | TProcess of typ
-  | TNamed of string
+  | TNamed of string * typ list
 
 type req =
   | AskHuman of string
@@ -60,6 +60,7 @@ type def = {
 
 type type_alias = {
   type_name : string;
+  type_params : string list;
   type_body : typ;
 }
 
@@ -82,7 +83,10 @@ let rec equal_typ a b =
   | TView TUnit, TView _ | TView _, TView TUnit -> true
   | TView a, TView b -> equal_typ a b
   | TProcess a, TProcess b -> equal_typ a b
-  | TNamed a, TNamed b -> String.equal a b
+  | TNamed (a, args_a), TNamed (b, args_b) ->
+      String.equal a b
+      && List.length args_a = List.length args_b
+      && List.for_all2 equal_typ args_a args_b
   | TRecord fs1, TRecord fs2 | TVariant fs1, TVariant fs2 ->
       let fs1 = sort_fields fs1 and fs2 = sort_fields fs2 in
       List.length fs1 = List.length fs2
@@ -129,7 +133,9 @@ let rec string_of_typ = function
   | TList t -> "(List " ^ string_of_typ t ^ ")"
   | TView t -> "(View " ^ string_of_typ t ^ ")"
   | TProcess t -> "(Process " ^ string_of_typ t ^ ")"
-  | TNamed n -> n
+  | TNamed (n, []) -> n
+  | TNamed (n, args) ->
+      "(" ^ n ^ " " ^ String.concat " " (List.map string_of_typ args) ^ ")"
 
 let string_of_req = function
   | AskHuman prompt -> "(Human.ask " ^ quote prompt ^ ")"
@@ -203,7 +209,11 @@ let string_of_def d =
   "(def " ^ d.name ^ " " ^ string_of_typ d.typ ^ " " ^ string_of_expr d.body ^ ")"
 
 let string_of_type_alias a =
-  "(type " ^ a.type_name ^ " " ^ string_of_typ a.type_body ^ ")"
+  match a.type_params with
+  | [] -> "(type " ^ a.type_name ^ " " ^ string_of_typ a.type_body ^ ")"
+  | params ->
+      "(type " ^ a.type_name ^ " (" ^ String.concat " " params ^ ") "
+      ^ string_of_typ a.type_body ^ ")"
 
 let string_of_program p =
   let caps =

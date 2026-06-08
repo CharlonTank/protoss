@@ -1,5 +1,9 @@
 ; Protoss stdlib v0.3. This is ordinary Protoss source imported by programs.
 
+(type Maybe (A) (Variant (None Unit) (Some A)))
+(type Result (E A) (Variant (Err E) (Ok A)))
+(type Pair (A B) (Record (first A) (second B)))
+
 (def Stdlib.version String "v0.3")
 
 (def Nat.add (-> Nat (-> Nat Nat))
