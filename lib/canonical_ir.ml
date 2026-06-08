@@ -495,6 +495,66 @@ let checked_of_graph input =
   let caps, defs = parse_graph input in
   Kernel.checked_of_canonical caps defs
 
+type graph_stats = {
+  version : string;
+  canonical_version : string;
+  node_graph_version : string;
+  program_hash : string;
+  graph_hash : string;
+  defs : int;
+  capabilities : int;
+  capability_descriptors : int;
+  nodes : int;
+  type_nodes : int;
+  term_nodes : int;
+  edges : int;
+}
+
+let graph_stats input =
+  ignore (checked_of_graph input);
+  let graph = Json.parse input in
+  let node_graph = json_field "nodeGraph" graph in
+  let nodes = json_array_field "nodes" node_graph in
+  let type_nodes, term_nodes =
+    nodes
+    |> List.fold_left
+         (fun (types, terms) node ->
+           match json_string_field "kind" node with
+           | "Type" -> (types + 1, terms)
+           | "Term" -> (types, terms + 1)
+           | kind -> fail ("unknown canonical node kind: " ^ kind))
+         (0, 0)
+  in
+  {
+    version = json_string_field "version" graph;
+    canonical_version = json_string_field "canonicalVersion" graph;
+    node_graph_version = json_string_field "version" node_graph;
+    program_hash = json_string_field "programHash" graph;
+    graph_hash = json_string_field "graphHash" graph;
+    defs = List.length (json_array_field "defs" graph);
+    capabilities = List.length (json_array_field "capabilities" graph);
+    capability_descriptors = List.length (json_array_field "capabilityDescriptors" graph);
+    nodes = List.length nodes;
+    type_nodes;
+    term_nodes;
+    edges =
+      nodes
+      |> List.fold_left
+           (fun count node -> count + List.length (json_string_array_field "edgeRefs" node))
+           0;
+  }
+
+let describe_graph_stats stats =
+  "Graph stats\nversion=" ^ stats.version ^ "\ncanonical_version="
+  ^ stats.canonical_version ^ "\nnode_graph_version=" ^ stats.node_graph_version
+  ^ "\nprogram_hash=" ^ stats.program_hash ^ "\ngraph_hash=" ^ stats.graph_hash
+  ^ "\ndefs=" ^ string_of_int stats.defs ^ "\ncapabilities="
+  ^ string_of_int stats.capabilities ^ "\ncapability_descriptors="
+  ^ string_of_int stats.capability_descriptors ^ "\nnodes="
+  ^ string_of_int stats.nodes ^ "\ntype_nodes=" ^ string_of_int stats.type_nodes
+  ^ "\nterm_nodes=" ^ string_of_int stats.term_nodes ^ "\nedges="
+  ^ string_of_int stats.edges ^ "\n"
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program

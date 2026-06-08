@@ -1809,6 +1809,9 @@ let checked_graph_dot (checked : Kernel.checked) =
 let store_graph_dot store graph_hash =
   checked_graph_dot (checked_store_graph store graph_hash)
 
+let store_graph_stats store graph_hash =
+  Canonical_ir.graph_stats (graph_store store graph_hash)
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

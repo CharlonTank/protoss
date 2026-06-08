@@ -375,6 +375,14 @@ let () =
   assert_true "canonical program v2 stable" (String.length program_canonical > 20);
   let graph_json = Canonical_ir.serialize_graph formatted_a in
   let graph = Json.parse graph_json in
+  let graph_stats = Canonical_ir.graph_stats graph_json in
+  assert_equal "canonical graph stats defs" "1" (string_of_int graph_stats.Canonical_ir.defs);
+  assert_equal "canonical graph stats capabilities" "0"
+    (string_of_int graph_stats.Canonical_ir.capabilities);
+  assert_true "canonical graph stats nodes" (graph_stats.Canonical_ir.nodes >= 3);
+  assert_true "canonical graph stats edges" (graph_stats.Canonical_ir.edges > 0);
+  assert_true "canonical graph stats describe"
+    (contains_substring (Canonical_ir.describe_graph_stats graph_stats) "Graph stats");
   assert_equal "canonical graph version" Kernel.canonical_graph_version
     (json_string_field "version" graph);
   assert_equal "canonical graph hash algorithm" Kernel.hash_algorithm
@@ -2340,6 +2348,11 @@ let () =
     (contains_substring store_graph_dot "digraph protoss");
   assert_true "project store graph dot deps"
     (contains_substring store_graph_dot "\"base\" -> \"appMain\"");
+  let store_graph_stats = Workspace.store_graph_stats build_a.store store_graph_hash in
+  assert_equal "project store graph stats hash" store_graph_hash
+    store_graph_stats.Canonical_ir.graph_hash;
+  assert_true "project store graph stats defs" (store_graph_stats.Canonical_ir.defs > 1);
+  assert_true "project store graph stats edges" (store_graph_stats.Canonical_ir.edges > 0);
   let graph_hash_mismatch_store = temp_dir "workspace-graph-hash-mismatch-store" in
   copy_tree build_a.store graph_hash_mismatch_store;
   Store.write_file_atomic
