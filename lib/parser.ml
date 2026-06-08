@@ -316,9 +316,10 @@ and parse_branch = function
 let defrec_error name =
   fail
     ("defrec " ^ name
-   ^ " must be structural Nat or List recursion: \
+   ^ " must be structural Nat, List, or Variant recursion: \
       (defrec name (-> Nat R) (nat n) (zero z) (step acc body)) or \
-      (defrec name (-> (List A) R) (list xs) (nil z) (cons x acc body))")
+      (defrec name (-> (List A) R) (list xs) (nil z) (cons x acc body)) or \
+      (defrec name (-> VariantType R) (variant x) (Ctor payload body) ...)")
 
 let parse_structural_defrec name typ clauses =
   match (typ, clauses) with
@@ -358,6 +359,19 @@ let parse_structural_defrec name typ clauses =
                 ( EName param,
                   parse_expr nil,
                   ELambda (item, item_ty, ELambda (acc, result_ty, parse_expr step)) ) );
+      }
+  | TFun (target_ty, result_ty), Sexp.List [ Sexp.Atom "variant"; Sexp.Atom param ] :: branches
+    when branches <> [] ->
+      {
+        name;
+        type_params = [];
+        declared_capabilities = None;
+        typ;
+        body =
+          ELambda
+            ( param,
+              target_ty,
+              EFoldVariant (target_ty, result_ty, EName param, List.map parse_branch branches) );
       }
   | _ -> defrec_error name
 

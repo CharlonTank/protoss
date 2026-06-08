@@ -1,0 +1,28 @@
+(variant Tree (params A)
+  (Leaf A)
+  (Node (Record
+    (left (Tree A))
+    (right (Tree A)))))
+
+(def leaf (Tree Nat)
+  (variant Leaf 1))
+
+(def tree (Tree Nat)
+  (variant Node
+    (record
+      (left leaf)
+      (right (variant Leaf 2)))))
+
+(def add (-> Nat (-> Nat Nat))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      (foldNat a b (lambda (x Nat) (succ x))))))
+
+(defrec size (-> (Tree Nat) Nat)
+  (variant t)
+  (Leaf n 1)
+  (Node pair
+    ((add (recur (get pair left)))
+      (recur (get pair right)))))
+
+(def answer Nat (size tree))

@@ -797,6 +797,48 @@ let () =
     (Kernel.hash_program defrec_list);
   let bumped, _ = Runtime.normalize_def defrec_list "out" in
   assert_equal "defrec List normalization" "[2, 3]" (Runtime.value_to_string bumped);
+  let tree_rec_base =
+    "(variant Tree (params A) \
+     (Leaf A) \
+     (Node (Record (left (Tree A)) (right (Tree A)))))\n\
+     (def leaf (Tree Nat) (variant Leaf 1))\n\
+     (def tree (Tree Nat) \
+       (variant Node (record (left leaf) (right (variant Leaf 2)))))\n\
+     (def add (-> Nat (-> Nat Nat)) \
+       (lambda (a Nat) (lambda (b Nat) (foldNat a b (lambda (x Nat) (succ x))))))\n"
+  in
+  let defrec_variant =
+    check
+      (tree_rec_base
+     ^ "(defrec sizeRec (-> (Tree Nat) Nat) \
+          (variant t) \
+          (Leaf n 1) \
+          (Node pair ((add (recur (get pair left))) (recur (get pair right)))))\n\
+        (def out Nat (sizeRec tree))")
+  in
+  let defrec_variant_explicit =
+    check
+      (tree_rec_base
+     ^ "(def sizeRec (-> (Tree Nat) Nat) \
+          (lambda (t (Tree Nat)) \
+            (foldVariant (Tree Nat) Nat t \
+              (Leaf n 1) \
+              (Node pair ((add (recur (get pair left))) (recur (get pair right)))))))\n\
+        (def out Nat (sizeRec tree))")
+  in
+  assert_equal "defrec Variant desugars to foldVariant"
+    (Kernel.hash_program defrec_variant_explicit)
+    (Kernel.hash_program defrec_variant);
+  let tree_size, _ = Runtime.normalize_def defrec_variant "out" in
+  assert_equal "defrec Variant normalization" "2" (Runtime.value_to_string tree_size);
+  expect_parse_error
+    (tree_rec_base ^ "(defrec bad (-> (Tree Nat) Nat) (variant t))");
+  expect_check_error
+    (tree_rec_base
+   ^ "(defrec bad (-> (Tree Nat) Nat) \
+        (variant t) \
+        (Leaf n 1) \
+        (Node pair (recur tree)))");
   expect_parse_error "(defrec bad Nat (nat n) (zero 0) (step acc acc))";
   expect_parse_error "(defrec bad (-> Nat Nat) (zero 0) (step acc acc))";
   expect_check_error
