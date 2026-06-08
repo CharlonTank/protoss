@@ -33,8 +33,8 @@ let usage () =
      \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
-     \       protoss graph --stats <graph.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
-     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --node <nodeRef> | --def <nameOrDefId>\n\
+     \       protoss graph --stats <graph.json> | --roots <graph.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
+     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --node <nodeRef> | --def <nameOrDefId>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
@@ -594,6 +594,10 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_stats
            (Protoss.Canonical_ir.graph_stats (Protoss.Store.read_file file)))
+  | [ "--roots"; file ] ->
+      print_string
+        (Protoss.Canonical_ir.describe_graph_definitions
+           (Protoss.Canonical_ir.graph_definitions (Protoss.Store.read_file file)))
   | [ "--node"; file; node_ref ] ->
       print_string
         (Protoss.Canonical_ir.describe_graph_node
@@ -615,6 +619,11 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_stats
            (Protoss.Workspace.store_graph_stats store graph_hash))
+  | [ "--store-graph"; project_or_store; graph_hash; "--roots" ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      print_string
+        (Protoss.Canonical_ir.describe_graph_definitions
+           (Protoss.Workspace.store_graph_definitions store graph_hash))
   | [ "--store-graph"; project_or_store; graph_hash; "--node"; node_ref ] ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       print_string

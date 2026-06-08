@@ -75,11 +75,13 @@ dune exec protoss -- fmt --check examples/web/todo_app/src/app.protoss
 dune exec protoss -- graph examples/web/todo_app --out graph.json
 dune exec protoss -- graph examples/web/todo_app --dot graph.dot
 dune exec protoss -- graph --stats graph.json
+dune exec protoss -- graph --roots graph.json
 dune exec protoss -- graph --node graph.json <nodeRef>
 dune exec protoss -- graph --def graph.json <nameOrDefId>
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --out graph.json
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --dot graph.dot
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --stats
+dune exec protoss -- graph --store-graph examples/workspace <graphHash> --roots
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --node <nodeRef>
 dune exec protoss -- graph --store-graph examples/workspace <graphHash> --def <nameOrDefId>
 dune exec protoss -- canon --graph examples/basic.protoss > /tmp/basic.protoss.graph.json

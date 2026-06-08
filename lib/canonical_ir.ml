@@ -603,32 +603,36 @@ type graph_definition = {
   graph_def_capability_scope_refs : string list;
 }
 
-let graph_definition input id =
+let graph_definition_of_json def =
+  {
+    graph_def_name = json_string_field "name" def;
+    graph_def_id = json_string_field "defId" def;
+    graph_def_hash = json_string_field "hash" def;
+    graph_def_type_ref = json_string_field "typeRef" def;
+    graph_def_term_ref = json_string_field "termRef" def;
+    graph_def_type_canonical = json_string_field "typeCanonical" def;
+    graph_def_term_canonical = json_string_field "termCanonical" def;
+    graph_def_deps = json_string_array_field "deps" def;
+    graph_def_capability_scope = json_string_array_field "capabilityScope" def;
+    graph_def_capability_scope_refs = json_string_array_field "capabilityScopeRefs" def;
+  }
+
+let graph_definitions input =
   ignore (checked_of_graph input);
   let graph = Json.parse input in
-  let defs = json_array_field "defs" graph in
+  json_array_field "defs" graph |> List.map graph_definition_of_json
+
+let graph_definition input id =
   match
     List.find_opt
       (fun def ->
-        String.equal id (json_string_field "name" def)
-        || String.equal id (json_string_field "defId" def)
-        || String.equal id (json_string_field "hash" def))
-      defs
+        String.equal id def.graph_def_name
+        || String.equal id def.graph_def_id
+        || String.equal id def.graph_def_hash)
+      (graph_definitions input)
   with
   | None -> fail ("canonical graph definition not found: " ^ id)
-  | Some def ->
-      {
-        graph_def_name = json_string_field "name" def;
-        graph_def_id = json_string_field "defId" def;
-        graph_def_hash = json_string_field "hash" def;
-        graph_def_type_ref = json_string_field "typeRef" def;
-        graph_def_term_ref = json_string_field "termRef" def;
-        graph_def_type_canonical = json_string_field "typeCanonical" def;
-        graph_def_term_canonical = json_string_field "termCanonical" def;
-        graph_def_deps = json_string_array_field "deps" def;
-        graph_def_capability_scope = json_string_array_field "capabilityScope" def;
-        graph_def_capability_scope_refs = json_string_array_field "capabilityScopeRefs" def;
-      }
+  | Some def -> def
 
 let describe_graph_definition def =
   "Graph def\nname=" ^ def.graph_def_name ^ "\ndef_id=" ^ def.graph_def_id
@@ -643,6 +647,18 @@ let describe_graph_definition def =
   ^ (match def.graph_def_capability_scope_refs with [] -> "" | refs -> String.concat "," refs)
   ^ "\ntype=" ^ def.graph_def_type_canonical ^ "\nterm="
   ^ def.graph_def_term_canonical ^ "\n"
+
+let describe_graph_definitions defs =
+  let line def =
+    "name=" ^ def.graph_def_name ^ " def_id=" ^ def.graph_def_id ^ " hash="
+    ^ def.graph_def_hash ^ " type_ref=" ^ def.graph_def_type_ref ^ " term_ref="
+    ^ def.graph_def_term_ref ^ " deps="
+    ^ string_of_int (List.length def.graph_def_deps) ^ " capabilities="
+    ^ string_of_int (List.length def.graph_def_capability_scope)
+  in
+  "Graph roots\ncount=" ^ string_of_int (List.length defs) ^ "\n"
+  ^ String.concat "\n" (List.map line defs)
+  ^ (if defs = [] then "" else "\n")
 
 let parse_def = Kernel.parse_serialized_def
 

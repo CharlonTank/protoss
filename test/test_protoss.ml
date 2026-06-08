@@ -420,6 +420,10 @@ let () =
   let top_type_ref = json_string_field "typeRef" graph_main_def in
   let top_term_ref = json_string_field "termRef" graph_main_def in
   let main_graph_def = Canonical_ir.graph_definition graph_json "main" in
+  let graph_roots = Canonical_ir.graph_definitions graph_json in
+  assert_equal "canonical graph roots count" "1" (string_of_int (List.length graph_roots));
+  assert_true "canonical graph roots describe"
+    (contains_substring (Canonical_ir.describe_graph_definitions graph_roots) "name=main");
   assert_equal "canonical graph def name" "main" main_graph_def.Canonical_ir.graph_def_name;
   assert_equal "canonical graph def type ref" top_type_ref
     main_graph_def.Canonical_ir.graph_def_type_ref;
@@ -2391,6 +2395,9 @@ let () =
   assert_true "project store graph node describes"
     (contains_substring (Canonical_ir.describe_graph_node store_graph_node) "Graph node");
   let store_graph_def = Workspace.store_graph_definition build_a.store store_graph_hash "appMain" in
+  let store_graph_roots = Workspace.store_graph_definitions build_a.store store_graph_hash in
+  assert_true "project store graph roots include appMain"
+    (contains_substring (Canonical_ir.describe_graph_definitions store_graph_roots) "name=appMain");
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;
