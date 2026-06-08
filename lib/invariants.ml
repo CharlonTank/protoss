@@ -92,7 +92,7 @@ let validate_checked source checked =
     source;
     defs = List.length checked.Kernel.defs;
     program_hash;
-    graph_hash = Kernel.hash_string graph;
+    graph_hash = Kernel.checked_to_graph_content_hash checked;
     normalized = List.length normalized;
   }
 
@@ -123,7 +123,7 @@ let check_alpha left right =
     left;
     right;
     alpha_hash = left_hash;
-    alpha_graph_hash = Kernel.hash_string left_graph;
+    alpha_graph_hash = Kernel.checked_to_graph_content_hash left_checked;
   }
 
 let check_process_checked source checked entry response =

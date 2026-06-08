@@ -2290,6 +2290,9 @@ let () =
     (json_string_field "hashPrefix" store_graph);
   assert_equal "project store graph hash" (Kernel.hash_program build_a.Workspace.checked)
     (json_string_field "programHash" store_graph);
+  assert_equal "project store graph content hash"
+    (Kernel.checked_to_graph_content_hash build_a.Workspace.checked)
+    (json_string_field "graphHash" store_graph);
   assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
     (Store.read_file store_graph_path);
   let capability_scope_file name =
@@ -2308,6 +2311,8 @@ let () =
   assert_true "project lock records hash prefix"
     (contains_substring lock_before "(hash-prefix \"p2:\")");
   assert_true "project lock records program hash" (contains_substring lock_before build_a.build_id);
+  assert_equal "project lock records canonical graph hash" (json_string_field "graphHash" store_graph)
+    (sexp_atom_field "program-graph-hash" lock_before);
   assert_true "project lock records source units" (contains_substring lock_before "(source-hash p2:");
   assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
   let lock_path_again, lock_hash_again = Workspace.write_lock manifest_a in
@@ -2318,6 +2323,8 @@ let () =
   assert_true "project package writes file" (Sys.file_exists package_a.Workspace.package_path);
   assert_equal "project package records build" build_a.build_id package_a.build_id;
   assert_equal "project package records lock hash" lock_hash package_a.lock_hash;
+  assert_equal "project package records canonical graph hash" (json_string_field "graphHash" store_graph)
+    (sexp_atom_field "program-graph-hash" (Store.read_file package_a.package_path));
   assert_equal "project package current pointer" package_a.package_ref
     (String.trim (Store.read_file (Workspace.package_current_path manifest_a)));
   assert_true "project package writes interface artifact"
