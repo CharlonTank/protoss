@@ -754,6 +754,63 @@ let lock_pair_list name values =
   |> List.map (fun (k, v) -> k ^ "=" ^ v)
   |> lock_string_list name
 
+let package_type_item (alias : type_alias) =
+  lock_item "type"
+    [
+      lock_item "name" [ lock_string alias.type_name ];
+      lock_string_list "params" alias.type_params;
+      lock_item "hash" [ Kernel.hash_string (string_of_type_alias alias) ];
+    ]
+
+let package_def_item (d : Kernel.checked_def) =
+  lock_item "def"
+    [
+      lock_item "name" [ lock_string d.def.name ];
+      lock_item "def-id" [ d.def_id ];
+      lock_item "hash" [ Kernel.hash_string d.canonical ];
+      lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+      lock_string_list "capability-scope" d.capabilities;
+    ]
+
+let package_public_symbols manifest prepared =
+  let stdlib_path = Option.map (path_in_project manifest) manifest.stdlib in
+  prepared.units
+  |> List.filter (fun u ->
+         match stdlib_path with Some path -> not (String.equal u.path path) | None -> true)
+  |> List.concat_map (fun u -> u.public_symbols)
+  |> sort_uniq
+
+let package_interface_item checked symbol =
+  match checked_def_by_name checked symbol with
+  | Some d ->
+      lock_item "def"
+        [
+          lock_item "name" [ lock_string d.def.name ];
+          lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+          lock_string_list "capability-scope" d.capabilities;
+        ]
+  | None -> (
+      match
+        List.find_opt
+          (fun (a : type_alias) -> String.equal a.type_name symbol)
+          checked.Kernel.program.type_aliases
+      with
+      | Some alias ->
+          lock_item "type"
+            [
+              lock_item "name" [ lock_string alias.type_name ];
+              lock_string_list "params" alias.type_params;
+              lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical alias.type_body) ];
+            ]
+      | None -> fail ("package public symbol is not a definition or type: " ^ symbol))
+
+let package_interface_items manifest prepared =
+  package_public_symbols manifest prepared
+  |> List.map (package_interface_item prepared.checked)
+
+let package_interface_hash manifest prepared =
+  Kernel.hash_string (lock_item "interface" (package_interface_items manifest prepared))
+
 type package_import_info = {
   import_name : string;
   import_ref : string;
@@ -786,6 +843,12 @@ let read_package_import manifest import =
       ("imported package hash mismatch for " ^ imported.name ^ ": pointer " ^ package_ref
      ^ ", content " ^ actual_ref);
   let items = package_items content in
+  let imported_lock_path = lock_path imported in
+  if not (Sys.file_exists imported_lock_path) then
+    fail ("missing imported lockfile: " ^ imported_lock_path);
+  let current_lock_hash = Kernel.hash_string (read_file imported_lock_path) in
+  let prepared = prepare_build imported in
+  let current_interface_hash = package_interface_hash imported prepared in
   let expect_string field expected =
     let actual = package_string_field field items in
     if not (String.equal actual expected) then
@@ -793,14 +856,30 @@ let read_package_import manifest import =
         ("imported package " ^ imported.name ^ " " ^ field ^ " mismatch: expected "
        ^ expected ^ ", got " ^ actual)
   in
+  let expect_atom field expected =
+    let actual = package_atom_field field items in
+    if not (String.equal actual expected) then
+      fail
+        ("imported package " ^ imported.name ^ " " ^ field ^ " mismatch: expected "
+       ^ expected ^ ", got " ^ actual)
+  in
   expect_string "package" imported.name;
+  expect_string "version" imported.version;
+  expect_string "canonical-version" Kernel.canonical_version;
+  expect_string "canonical-graph-version" Kernel.canonical_graph_version;
+  expect_string "canonical-node-graph-version" Kernel.canonical_node_graph_version;
   expect_string "hash-algorithm" Kernel.hash_algorithm;
   expect_string "hash-prefix" Kernel.hash_prefix;
+  expect_atom "lock-hash" current_lock_hash;
+  expect_atom "program-hash" prepared.build_id;
+  expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
+  expect_atom "program-graph-hash" (Kernel.hash_string prepared.program_graph);
+  expect_atom "interface-hash" current_interface_hash;
   {
     import_name = imported.name;
     import_ref = package_ref;
-    import_lock_hash = package_atom_field "lock-hash" items;
-    import_interface_hash = package_atom_field "interface-hash" items;
+    import_lock_hash = current_lock_hash;
+    import_interface_hash = current_interface_hash;
   }
 
 let package_imports manifest =
@@ -900,63 +979,6 @@ let build_locked ?(write = true) manifest =
 
 let check_project manifest =
   ignore (build ~write:false manifest)
-
-let package_type_item (alias : type_alias) =
-  lock_item "type"
-    [
-      lock_item "name" [ lock_string alias.type_name ];
-      lock_string_list "params" alias.type_params;
-      lock_item "hash" [ Kernel.hash_string (string_of_type_alias alias) ];
-    ]
-
-let package_def_item (d : Kernel.checked_def) =
-  lock_item "def"
-    [
-      lock_item "name" [ lock_string d.def.name ];
-      lock_item "def-id" [ d.def_id ];
-      lock_item "hash" [ Kernel.hash_string d.canonical ];
-      lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
-      lock_string_list "capability-scope" d.capabilities;
-    ]
-
-let package_public_symbols manifest prepared =
-  let stdlib_path = Option.map (path_in_project manifest) manifest.stdlib in
-  prepared.units
-  |> List.filter (fun u ->
-         match stdlib_path with Some path -> not (String.equal u.path path) | None -> true)
-  |> List.concat_map (fun u -> u.public_symbols)
-  |> sort_uniq
-
-let package_interface_item checked symbol =
-  match checked_def_by_name checked symbol with
-  | Some d ->
-      lock_item "def"
-        [
-          lock_item "name" [ lock_string d.def.name ];
-          lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
-          lock_string_list "capability-scope" d.capabilities;
-        ]
-  | None -> (
-      match
-        List.find_opt
-          (fun (a : type_alias) -> String.equal a.type_name symbol)
-          checked.Kernel.program.type_aliases
-      with
-      | Some alias ->
-          lock_item "type"
-            [
-              lock_item "name" [ lock_string alias.type_name ];
-              lock_string_list "params" alias.type_params;
-              lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical alias.type_body) ];
-            ]
-      | None -> fail ("package public symbol is not a definition or type: " ^ symbol))
-
-let package_interface_items manifest prepared =
-  package_public_symbols manifest prepared
-  |> List.map (package_interface_item prepared.checked)
-
-let package_interface_hash manifest prepared =
-  Kernel.hash_string (lock_item "interface" (package_interface_items manifest prepared))
 
 let validate_package_interface_constraints manifest interface_hash =
   let available =

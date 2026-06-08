@@ -1722,6 +1722,21 @@ let () =
     (contains_substring consumer_package_content ("workspace-a=" ^ interface_hash));
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
+  let import_math_path = Filename.concat ws_a "src/math.protoss" in
+  let import_math_before = Store.read_file import_math_path in
+  let consumer_dot_before_import_drift = snapshot (Filename.concat consumer_ws ".protoss") in
+  write_file import_math_path (import_math_before ^ "(def importedDrift Nat 9)\n");
+  (try
+     ignore (Workspace.check_package consumer_manifest);
+     fail "package check should reject imported package source drift"
+   with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.write_package consumer_manifest);
+     fail "package write should reject imported package source drift"
+   with Workspace.Error _ -> ());
+  assert_true "imported package source drift leaves consumer package store untouched"
+    (consumer_dot_before_import_drift = snapshot (Filename.concat consumer_ws ".protoss"));
+  write_file import_math_path import_math_before;
   let consumer_dot_before_bad = snapshot (Filename.concat consumer_ws ".protoss") in
   write_file consumer_manifest_path
     (consumer_manifest_base ^ "package_imports = [\"workspace-a=" ^ ws_a
