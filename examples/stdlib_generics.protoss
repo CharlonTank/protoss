@@ -272,6 +272,24 @@
 (def sexpStringMiss (Result String String)
   (Sexp.expectString sexpAtom))
 
+(def sexpFlatAtom String
+  (Sexp.renderFlat sexpAtom))
+
+(def sexpFlatString String
+  (Sexp.renderFlat sexpString))
+
+(def sexpFlatForm String
+  (Sexp.renderFlat sexpForm))
+
+(def sexpNestedForm Sexp
+  (Sexp.list
+    (Cons Sexp sexpForm
+      (Cons Sexp sexpAtom
+        (Nil Sexp)))))
+
+(def sexpFlatNested String
+  (Sexp.renderFlat sexpNestedForm))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

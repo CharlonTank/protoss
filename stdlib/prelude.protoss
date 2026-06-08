@@ -1,4 +1,4 @@
-; Protoss stdlib v0.13. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.14. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -19,7 +19,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.13")
+(def Stdlib.version String "v0.14")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -584,6 +584,26 @@
     (case value
       (SList items (variant Ok items))
       (_ (variant Err "expected Sexp list")))))
+
+(def Sexp.renderFlatString (-> String String)
+  (lambda (value String)
+    ((String.concat "\"") ((String.concat value) "\""))))
+
+(def Sexp.renderFlat (-> Sexp String)
+  (lambda (value Sexp)
+    (case value
+      (SAtom atom atom)
+      (SString string (Sexp.renderFlatString string))
+      (SList items
+        (let (rendered
+          ((String.join " ")
+            (((inst List.map Sexp String) items)
+              (lambda (item Sexp)
+                (case item
+                  (SAtom atom atom)
+                  (SString string (Sexp.renderFlatString string))
+                  (SList nested "(...)"))))))
+          ((String.concat "(") ((String.concat rendered) ")")))))))
 
 (def Json.null Json
   (variant JNull unit))

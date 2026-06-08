@@ -1790,6 +1790,18 @@ let () =
   let sexp_string_miss, _ = Runtime.normalize_def stdlib_generics "sexpStringMiss" in
   assert_equal "stdlib Sexp.expectString miss" "Err \"expected Sexp string\""
     (Runtime.value_to_string sexp_string_miss);
+  let sexp_flat_atom, _ = Runtime.normalize_def stdlib_generics "sexpFlatAtom" in
+  assert_equal "stdlib Sexp.renderFlat atom" "\"def\""
+    (Runtime.value_to_string sexp_flat_atom);
+  let sexp_flat_string, _ = Runtime.normalize_def stdlib_generics "sexpFlatString" in
+  assert_equal "stdlib Sexp.renderFlat string" "\"\\\"main\\\"\""
+    (Runtime.value_to_string sexp_flat_string);
+  let sexp_flat_form, _ = Runtime.normalize_def stdlib_generics "sexpFlatForm" in
+  assert_equal "stdlib Sexp.renderFlat list" "\"(def \\\"main\\\")\""
+    (Runtime.value_to_string sexp_flat_form);
+  let sexp_flat_nested, _ = Runtime.normalize_def stdlib_generics "sexpFlatNested" in
+  assert_equal "stdlib Sexp.renderFlat nested placeholder" "\"((...) def)\""
+    (Runtime.value_to_string sexp_flat_nested);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
