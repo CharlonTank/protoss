@@ -1116,7 +1116,8 @@ let () =
   let before = count_objects store in
   let ledger = temp_dir "patch-ledger" in
   let _ =
-    Ledger.record_request ledger Ledger.initial_world (Ast.AskHuman "x") "suspended" "req" "cont" []
+    Ledger.record_request ledger Ledger.initial_world (Ast.AskHuman "x") "suspended" "req" "cont"
+      [ "Human.ask" ]
   in
   let ledger_before = count_files ledger in
   let patch_bad =
@@ -1636,11 +1637,45 @@ let () =
   in
   assert_true "ledger event inspectable" (String.length (Ledger.inspect_event ledger_root event) > 0);
   assert_true "ledger world inspectable" (String.length (Ledger.inspect_world ledger_root next_world) > 0);
+  let invalid_scope_ledger = temp_dir "ledger-invalid-cap-scope" in
+  (try
+     ignore
+       (Ledger.record_request invalid_scope_ledger Ledger.initial_world (Ast.AskHuman "x")
+          suspended "req" "cont" []);
+     fail "ledger request missing capability should be rejected"
+   with Failure _ -> ());
+  assert_true "invalid ledger request must not create files"
+    (count_files invalid_scope_ledger = 0);
+  let unknown_scope_ledger = temp_dir "ledger-unknown-cap-scope" in
+  (try
+     ignore
+       (Ledger.record_request unknown_scope_ledger Ledger.initial_world (Ast.AskHuman "x")
+          suspended "req" "cont" [ "Human.ask"; "Space.laser" ]);
+     fail "ledger request unknown capability should be rejected"
+   with Failure _ -> ());
+  assert_true "unknown capability ledger request must not create files"
+    (count_files unknown_scope_ledger = 0);
   let bad_event = "p1:bad-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_event) "world=x\nkind=request\n";
   (try
      ignore (Ledger.inspect_event ledger_root bad_event);
      fail "maltyped ledger event should be rejected"
+   with Failure _ -> ());
+  let bad_scope_event = "p1:bad-scope-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_scope_event)
+    "world=x\nkind=request\nrequest-id=req\nrequest=AskHuman:x\ncontinuation-id=cont\n\
+     cap-scope=Clock.read\nsuspended=s\n";
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_scope_event);
+     fail "ledger event with wrong cap-scope should be rejected"
+   with Failure _ -> ());
+  let unknown_scope_event = "p1:unknown-scope-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root unknown_scope_event)
+    "world=x\nkind=request\nrequest-id=req\nrequest=AskHuman:x\ncontinuation-id=cont\n\
+     cap-scope=Human.ask,Space.laser\nsuspended=s\n";
+  (try
+     ignore (Ledger.inspect_event ledger_root unknown_scope_event);
+     fail "ledger event with unknown cap should be rejected"
    with Failure _ -> ());
   (try
      ignore (Runtime.parse_suspended "(protoss-runtime-v2 (suspended (request ReadClock)))");

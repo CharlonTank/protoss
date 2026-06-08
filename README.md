@@ -25,7 +25,7 @@ What works now:
 - UI/message mismatches are rejected statically by the typechecker.
 - Web bundles are deterministic and include `index.html`, `protoss-runtime.js`, `protoss-app.json`, `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-capabilities.json`, and `protoss-world.json`. The browser runtime interprets the embedded canonical graph for `view` and `update`; external effects suspend as typed requests exposed through the runtime ledger/request API.
 - `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Capabilities are checked against the kernel catalog and exported with typed request/response signatures. Typed resume rejects wrong response tags.
-- Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs.
+- Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs. Request events validate that `cap-scope` uses known capabilities and contains the capability required by the recorded request before insertion and during inspection.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 
 Main commands:

@@ -31,6 +31,39 @@ let request_payload = function
   | LoadLocal key -> "LoadLocal:" ^ key
   | ServerRequest (route, payload) -> "ServerRequest:" ^ route ^ ":" ^ payload
 
+let has_prefix prefix s =
+  let lp = String.length prefix in
+  String.length s >= lp && String.sub s 0 lp = prefix
+
+let request_payload_capability = function
+  | "ReadClock" -> Some "Clock.read"
+  | payload when has_prefix "AskHuman:" payload -> Some "Human.ask"
+  | payload when has_prefix "HttpGet:" payload -> Some "Http.get"
+  | payload when has_prefix "SaveLocal:" payload -> Some "Local.storage"
+  | payload when has_prefix "LoadLocal:" payload -> Some "Local.storage"
+  | payload when has_prefix "ServerRequest:" payload -> Some "Server.request"
+  | _ -> None
+
+let split_cap_scope s =
+  if String.equal s "" then []
+  else
+    String.split_on_char ',' s
+    |> List.filter (fun cap -> not (String.equal cap ""))
+    |> List.sort_uniq String.compare
+
+let validate_cap_scope event request cap_scope =
+  let caps = split_cap_scope cap_scope in
+  (try Kernel.validate_capabilities caps
+   with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": " ^ msg));
+  let required =
+    match request_payload_capability request with
+    | Some cap -> cap
+    | None -> failwith ("maltyped event " ^ event ^ ": unknown request payload " ^ request)
+  in
+  if not (List.exists (String.equal required) caps) then
+    failwith
+      ("maltyped event " ^ event ^ ": cap-scope missing required capability " ^ required)
+
 let add_event root world payload =
   ensure_dir root;
   let events = Filename.concat root "events" in
@@ -55,6 +88,7 @@ let init root =
   initial_world
 
 let record_request root world req suspended request_id continuation_id cap_scope =
+  validate_cap_scope "<new>" (request_payload req) (String.concat "," cap_scope);
   ignore (init root);
   add_event root world
     ("kind=request\nrequest-id=" ^ request_id ^ "\nrequest=" ^ request_payload req
@@ -107,7 +141,10 @@ let validate_event event content =
   need "kind";
   (match field "kind" fields with
   | Some "request" ->
-      List.iter need [ "request-id"; "request"; "continuation-id"; "cap-scope"; "suspended" ]
+      List.iter need [ "request-id"; "request"; "continuation-id"; "cap-scope"; "suspended" ];
+      validate_cap_scope event
+        (Option.value (field "request" fields) ~default:"")
+        (Option.value (field "cap-scope" fields) ~default:"")
   | Some "resume" -> List.iter need [ "resume"; "response"; "result" ]
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
