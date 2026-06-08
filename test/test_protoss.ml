@@ -993,6 +993,16 @@ let () =
   let scoped_parsed = Runtime.parse_suspended scoped_serialized in
   assert_equal "parsed suspended keeps cap scope" "Human.ask"
     (String.concat "," scoped_parsed.Runtime.cap_scope);
+  let scoped_graph_checked =
+    Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph scoped_process)
+  in
+  let scoped_graph_suspended =
+    match fst (Runtime.eval_entry scoped_graph_checked "wrapped") with
+    | Runtime.VProcessRequest s -> s
+    | other -> fail ("expected graph process request, got " ^ Runtime.value_to_string other)
+  in
+  assert_equal "graph process request cap scope" "Human.ask"
+    (String.concat "," scoped_graph_suspended.Runtime.cap_scope);
 
   let bind_scoped_process =
     check
@@ -1042,6 +1052,19 @@ let () =
   let parsed = Runtime.parse_suspended serialized in
   let resumed = Runtime.resume process_resume parsed (Runtime.response_value parsed.req "Ada") in
   assert_equal "process resume" "Done \"Ada\"" (Runtime.value_to_string resumed);
+  let process_resume_graph =
+    Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph process_resume)
+  in
+  let graph_suspended =
+    match fst (Runtime.eval_entry process_resume_graph "askName") with
+    | Runtime.VProcessRequest s -> Runtime.parse_suspended (Runtime.serialize_suspended s)
+    | other -> fail ("expected graph suspended process, got " ^ Runtime.value_to_string other)
+  in
+  let graph_resumed =
+    Runtime.resume process_resume_graph graph_suspended
+      (Runtime.response_value graph_suspended.Runtime.req "Ada")
+  in
+  assert_equal "graph process resume" "Done \"Ada\"" (Runtime.value_to_string graph_resumed);
   let inferred_suspended =
     match fst (Runtime.eval_entry process_resume_inferred "askName") with
     | Runtime.VProcessRequest s -> Runtime.parse_suspended (Runtime.serialize_suspended s)

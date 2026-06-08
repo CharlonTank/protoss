@@ -7,7 +7,7 @@ What works now:
 - The pure core remains total: typed AST, canonical DefIds, stable hashes, deterministic normalization, explicit `Process` effects, typed capability descriptors, atomic patches, project stores, diff, and audit.
 - Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, `program.canon`, `program.graph.json`, types, deps, normal forms, roots, build refs, and web markers.
 - `project lock` writes `.protoss/lock`, a deterministic content-addressed lockfile over the package metadata, canonical format versions, program hash, graph hash, DefIds, source unit hashes, imports, exports, and capabilities. `project lock --check` and `project build --locked` reject drift without rewriting the lockfile or store.
-- Canonical graph JSON can be round-tripped back to `program.canon` with `canon --from-graph`. It includes a versioned `nodeGraph` table with content-addressed `Type`/`Term` nodes, `typeRef`/`termRef` roots, deterministic sharing, and audit-time validation. `check --graph`, `hash --graph`, `nf --graph`, and `eval --graph` load this graph directly without reparsing `.protoss` text.
+- Canonical graph JSON can be round-tripped back to `program.canon` with `canon --from-graph`. It includes a versioned `nodeGraph` table with content-addressed `Type`/`Term` nodes, `typeRef`/`termRef` roots, deterministic sharing, and audit-time validation. `check --graph`, `hash --graph`, `nf --graph`, `eval --graph`, `run --graph`, and `resume --graph` load this graph directly without reparsing `.protoss` text.
 - `defrec` supports only structural Nat/List recursion and desugars to `foldNat` or `foldList`; malformed or self-recursive definitions are rejected.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Named records and variants also work as alias syntax: `(record Model (name String))`, `(record Pair (params A B) (first A) (second B))`, and `(variant Maybe (params A) (None Unit) (Some A))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
@@ -66,6 +66,9 @@ dune exec protoss -- canon --from-graph /tmp/basic.protoss.graph.json
 dune exec protoss -- check --graph /tmp/basic.protoss.graph.json
 dune exec protoss -- hash --graph /tmp/basic.protoss.graph.json
 dune exec protoss -- eval --graph /tmp/basic.protoss.graph.json --entry main
+dune exec protoss -- canon --graph examples/ask_human.protoss > /tmp/ask_human.protoss.graph.json
+dune exec protoss -- run --graph /tmp/ask_human.protoss.graph.json --entry askName --ledger /tmp/protoss-ledger
+dune exec protoss -- resume --graph /tmp/ask_human.protoss.graph.json --entry askName --event <EventRef> --response String:Ada --ledger /tmp/protoss-ledger
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app
 ```

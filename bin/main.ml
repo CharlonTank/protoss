@@ -4,8 +4,10 @@ let usage () =
      \       protoss canon <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
-     \       protoss run <file> --entry <name>\n\
+     \       protoss run <file> --entry <name> [--ledger <root>]\n\
+     \       protoss run --graph <graph.json> --entry <name> [--ledger <root>]\n\
      \       protoss resume <file> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
+     \       protoss resume --graph <graph.json> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss world init [<ledger-root>]\n\
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
@@ -159,15 +161,14 @@ let command_eval_graph file args =
   List.iter print_endline trace;
   Printf.printf "%s = %s\n" entry (Protoss.Runtime.value_to_string value)
 
-let command_run file args =
+let run_checked checked args =
   let entry, _ = find_entry args in
-  let checked = parse_and_check file in
   let value, _ = Protoss.Runtime.eval_entry checked entry in
   match value with
   | Protoss.Runtime.VProcessDone v ->
       Printf.printf "Done %s\n" (Protoss.Runtime.value_to_string v)
   | Protoss.Runtime.VProcessRequest s ->
-      let root = Filename.concat "target" "ledger" in
+      let root = Option.value (find_arg "--ledger" args) ~default:(Filename.concat "target" "ledger") in
       let event, next_world =
         Protoss.Ledger.record_request root Protoss.Ledger.initial_world s.req
           (Protoss.Runtime.serialize_suspended s)
@@ -183,12 +184,17 @@ let command_run file args =
   | other ->
       Protoss.Kernel.fail ("run entry is not a Process: " ^ Protoss.Runtime.value_to_string other)
 
-let command_resume file args =
+let command_run file args =
+  run_checked (parse_and_check file) args
+
+let command_run_graph file args =
+  run_checked (checked_graph file) args
+
+let resume_checked checked args =
   let _entry, _ = find_entry args in
   let event = required_arg "--event" args in
   let response = required_arg "--response" args in
   let root = Option.value (find_arg "--ledger" args) ~default:(Filename.concat "target" "ledger") in
-  let checked = parse_and_check file in
   let fields = Protoss.Ledger.event_fields root event in
   let previous_world =
     match Protoss.Ledger.field "world" fields with
@@ -214,6 +220,12 @@ let command_resume file args =
       Printf.printf "Suspended %s\n" (Protoss.Runtime.serialize_suspended s)
   | other ->
       Printf.printf "Value %s\n" (Protoss.Runtime.value_to_string other)
+
+let command_resume file args =
+  resume_checked (parse_and_check file) args
+
+let command_resume_graph file args =
+  resume_checked (checked_graph file) args
 
 let default_ledger = Filename.concat "target" "ledger"
 
@@ -472,7 +484,9 @@ let () =
       | [ "canon"; file ] -> command_canon file
       | "eval" :: "--graph" :: file :: args -> command_eval_graph file args
       | "eval" :: file :: args -> command_eval file args
+      | "run" :: "--graph" :: file :: args -> command_run_graph file args
       | "run" :: file :: args -> command_run file args
+      | "resume" :: "--graph" :: file :: args -> command_resume_graph file args
       | "resume" :: file :: args -> command_resume file args
       | "world" :: args -> command_world args
       | "ledger" :: args -> command_ledger args
