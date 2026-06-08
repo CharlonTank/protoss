@@ -422,6 +422,15 @@
 (def protossParsedTypeApply (Result String (List ProtossDecl))
   (Protoss.parseText "(def xs (List Nat) value)"))
 
+(def protossParsedUnitDef (Result String (List ProtossDecl))
+  (Protoss.parseText "(def main Unit unit)"))
+
+(def protossParsedBoolDef (Result String (List ProtossDecl))
+  (Protoss.parseText "(def ok Bool true)"))
+
+(def protossParsedBadExpression (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Unit ())"))
+
 (def protossParsedBadTag (Result String (List ProtossDecl))
   (Protoss.parseText "(let x String \"Ada\")"))
 

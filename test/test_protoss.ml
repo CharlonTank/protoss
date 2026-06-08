@@ -1972,20 +1972,37 @@ let () =
     (Runtime.value_to_string sexp_parsed_unterminated_list);
   let protoss_parsed_def, _ = Runtime.normalize_def stdlib_generics "protossParsedDef" in
   assert_equal "stdlib Protoss.parseText def"
-    "Ok [PDDef {expr = SString \"Ada\", name = \"greeting\", typ = PTName \"String\"}]"
+    "Ok [PDDef {expr = PEString \"Ada\", name = \"greeting\", typ = PTName \"String\"}]"
     (Runtime.value_to_string protoss_parsed_def);
   let protoss_parsed_function_def, _ =
     Runtime.normalize_def stdlib_generics "protossParsedFunctionDef"
   in
   assert_equal "stdlib Protoss.parseText function def"
-    "Ok [PDDef {expr = SList [SAtom \"lambda\", SList [SAtom \"x\", SAtom \"Nat\"], SList [SAtom \"succ\", SAtom \"x\"]], name = \"inc\", typ = PTFun {first = PTName \"Nat\", second = PTName \"Nat\"}}]"
+    "Ok [PDDef {expr = PEApply {args = [PEApply {args = [PEVar \"Nat\"], fn = PEVar \"x\"}, PEApply {args = [PEVar \"x\"], fn = PEVar \"succ\"}], fn = PEVar \"lambda\"}, name = \"inc\", typ = PTFun {first = PTName \"Nat\", second = PTName \"Nat\"}}]"
     (Runtime.value_to_string protoss_parsed_function_def);
   let protoss_parsed_type_apply, _ =
     Runtime.normalize_def stdlib_generics "protossParsedTypeApply"
   in
   assert_equal "stdlib Protoss.parseText type application"
-    "Ok [PDDef {expr = SAtom \"value\", name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
+    "Ok [PDDef {expr = PEVar \"value\", name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
     (Runtime.value_to_string protoss_parsed_type_apply);
+  let protoss_parsed_unit_def, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedUnitDef"
+  in
+  assert_equal "stdlib Protoss.parseText unit def"
+    "Ok [PDDef {expr = PEUnit unit, name = \"main\", typ = PTName \"Unit\"}]"
+    (Runtime.value_to_string protoss_parsed_unit_def);
+  let protoss_parsed_bool_def, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBoolDef"
+  in
+  assert_equal "stdlib Protoss.parseText bool def"
+    "Ok [PDDef {expr = PEBool true, name = \"ok\", typ = PTName \"Bool\"}]"
+    (Runtime.value_to_string protoss_parsed_bool_def);
+  let protoss_parsed_bad_expression, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadExpression"
+  in
+  assert_equal "stdlib Protoss.parseText bad expression" "Err \"expected expression\""
+    (Runtime.value_to_string protoss_parsed_bad_expression);
   let protoss_parsed_bad_tag, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadTag"
   in

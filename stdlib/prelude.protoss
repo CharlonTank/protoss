@@ -1,4 +1,4 @@
-; Protoss stdlib v0.23. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.24. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -37,10 +37,16 @@
   (PTName String)
   (PTFun (Pair ProtossType ProtossType))
   (PTApply (Record (name String) (args (List ProtossType)))))
+(variant ProtossExpr
+  (PEApply (Record (fn ProtossExpr) (args (List ProtossExpr))))
+  (PEBool Bool)
+  (PEString String)
+  (PEUnit Unit)
+  (PEVar String))
 (record ProtossDef
   (name String)
   (typ ProtossType)
-  (expr Sexp))
+  (expr ProtossExpr))
 (record ProtossTypeAlias
   (name String)
   (typeParams (List String))
@@ -75,7 +81,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.23")
+(def Stdlib.version String "v0.24")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -1048,6 +1054,60 @@
                             (record (name name) (args parsedArgs)))))))))))
           (_ (Protoss.typeErr "expected type constructor")))))))
 
+(def Protoss.exprOk (-> ProtossExpr (Result String ProtossExpr))
+  (lambda (expr ProtossExpr)
+    (variant Ok expr)))
+
+(def Protoss.exprErr (-> String (Result String ProtossExpr))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.exprListOk (-> (List ProtossExpr) (Result String (List ProtossExpr)))
+  (lambda (exprs (List ProtossExpr))
+    (variant Ok exprs)))
+
+(def Protoss.exprListErr (-> String (Result String (List ProtossExpr)))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.atomExpr (-> String ProtossExpr)
+  (lambda (name String)
+    (case ((String.eqString name) "unit")
+      (true (variant PEUnit unit))
+      (false
+        (case ((String.eqString name) "true")
+          (true (variant PEBool true))
+          (false
+            (case ((String.eqString name) "false")
+              (true (variant PEBool false))
+              (false (variant PEVar name)))))))))
+
+(defrec Protoss.parseExpr (-> Sexp (Result String ProtossExpr))
+  (variant value)
+  (SAtom name (Protoss.exprOk (Protoss.atomExpr name)))
+  (SString text (Protoss.exprOk (variant PEString text)))
+  (SList items
+    (case
+      (foldList items (Protoss.exprListOk (Nil ProtossExpr))
+        (lambda (item Sexp)
+          (lambda (acc (Result String (List ProtossExpr)))
+            (case (recur item)
+              (Err err (Protoss.exprListErr err))
+              (Ok parsedItem
+                (case acc
+                  (Err err (Protoss.exprListErr err))
+                  (Ok parsedItems
+                    (Protoss.exprListOk
+                      (Cons ProtossExpr parsedItem parsedItems)))))))))
+      (Err err (Protoss.exprErr err))
+      (Ok parsedItems
+        (caseList parsedItems
+          (Nil (Protoss.exprErr "expected expression"))
+          (Cons fn args
+            (Protoss.exprOk
+              (variant PEApply
+                (record (fn fn) (args args))))))))))
+
 (def Protoss.stringListOk (-> (List String) (Result String (List String)))
   (lambda (items (List String))
     (variant Ok items)))
@@ -1125,9 +1185,12 @@
                   (case (Protoss.parseType typeNode)
                     (Err err (variant Err err))
                     (Ok typ
-                      (Protoss.declOk
-                        (variant PDDef
-                          (record (name name) (typ typ) (expr expr)))))))
+                      (case (Protoss.parseExpr expr)
+                        (Err err (variant Err err))
+                        (Ok parsedExpr
+                          (Protoss.declOk
+                            (variant PDDef
+                              (record (name name) (typ typ) (expr parsedExpr)))))))))
                 (Cons extraHead extraTail
                   (variant Err "too many def fields"))))))))))
 
