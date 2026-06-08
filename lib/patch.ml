@@ -590,8 +590,32 @@ let verify_audit ?(ref = "latest") store_root =
     ops;
   }
 
+let current_store_program_hash store_root =
+  let program =
+    try Store.load_program store_root with
+    | Store.Error msg -> fail msg
+    | Parser.Error msg -> fail ("store contains invalid definition: " ^ msg)
+  in
+  let checked =
+    try Kernel.check_program program with
+    | Kernel.Error msg -> fail ("store program invalid: " ^ msg)
+  in
+  Kernel.hash_program checked
+
+let verify_latest_matches_store store_root =
+  let audit = verify_audit store_root in
+  let current_hash = current_store_program_hash store_root in
+  if not (String.equal audit.program_hash current_hash) then
+    fail
+      ("patch audit program hash mismatch: expected " ^ audit.program_hash ^ ", got "
+      ^ current_hash);
+  audit
+
 let inspect_audit ?(ref = "latest") store_root =
-  let audit = verify_audit ~ref store_root in
+  let audit =
+    if String.equal ref "latest" then verify_latest_matches_store store_root
+    else verify_audit ~ref store_root
+  in
   "Patch audit OK " ^ audit.audit_ref ^ "\n" ^ audit.content ^ "\n"
 
 let write_program_metadata store_root checked =

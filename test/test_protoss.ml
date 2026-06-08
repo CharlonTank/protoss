@@ -1407,6 +1407,9 @@ let () =
   assert_equal "patch audit verify ops" "1" (string_of_int verified_patch_ok.Patch.ops);
   assert_true "patch audit verify source hash"
     (contains_substring verified_patch_ok.Patch.source_hash "p2:");
+  let verified_latest_patch_ok = Patch.verify_latest_matches_store store in
+  assert_equal "patch audit latest matches store" patch_ok_ref
+    verified_latest_patch_ok.Patch.audit_ref;
   let inspected_patch_ok = Patch.inspect_audit ~ref:patch_ok_ref store in
   assert_true "patch audit inspect returns content"
     (contains_substring inspected_patch_ok ("Patch audit OK " ^ patch_ok_ref)
@@ -1421,6 +1424,20 @@ let () =
    with Patch.Error msg ->
      assert_true "corrupt patch audit detects hash mismatch"
        (contains_substring msg "patch audit hash mismatch"));
+  let drift_audit_store = temp_dir "patch-audit-drift" in
+  let drift_ref = Patch.apply drift_audit_store patch_ok in
+  Store.write_file_atomic
+    (Filename.concat (Filename.concat drift_audit_store "defs") "two.protoss")
+    "(def two Nat 0)\n";
+  (try
+     ignore (Patch.inspect_audit drift_audit_store);
+     fail "latest patch audit should reject store drift"
+   with Patch.Error msg ->
+     assert_true "latest patch audit detects store drift"
+       (contains_substring msg "patch audit program hash mismatch"));
+  assert_true "historical patch audit remains inspectable by ref"
+    (contains_substring (Patch.inspect_audit ~ref:drift_ref drift_audit_store)
+       ("Patch audit OK " ^ drift_ref));
   let inferred_lambda_patch_store = temp_dir "patch-inferred-lambda" in
   let inferred_lambda_patch =
     patch_file "protoss-inferred-lambda-patch.json"
