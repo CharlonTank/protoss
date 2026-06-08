@@ -2020,6 +2020,36 @@ let () =
   assert_equal "stdlib Protoss.parseText variant expr"
     "Ok [PDDef {expr = PEVariant {constructor = \"Some\", payload = PEVar \"4\", typeHint = Some PTApply {args = [PTName \"Nat\"], name = \"Maybe\"}}, name = \"value\", typ = PTApply {args = [PTName \"Nat\"], name = \"Maybe\"}}]"
     (Runtime.value_to_string protoss_parsed_variant_expr);
+  let protoss_parsed_let_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedLetExpr"
+  in
+  assert_equal "stdlib Protoss.parseText let expr"
+    "Ok [PDDef {expr = PELet {body = PEApply {args = [PEVar \"x\"], fn = PEVar \"succ\"}, name = \"x\", typ = Some PTName \"Nat\", value = PEVar \"1\"}, name = \"local\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_let_expr);
+  let protoss_parsed_let_inferred_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedLetInferredExpr"
+  in
+  assert_equal "stdlib Protoss.parseText inferred let expr"
+    "Ok [PDDef {expr = PELet {body = PEVar \"x\", name = \"x\", typ = None unit, value = PEVar \"1\"}, name = \"local\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_let_inferred_expr);
+  let protoss_parsed_case_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedCaseExpr"
+  in
+  assert_equal "stdlib Protoss.parseText case expr"
+    "Ok [PDDef {expr = PECase {branches = [{binder = None unit, body = PEVar \"1\", constructor = \"true\"}, {binder = None unit, body = PEVar \"0\", constructor = \"false\"}], scrutinee = PEVar \"flag\"}, name = \"out\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_case_expr);
+  let protoss_parsed_case_variant_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedCaseVariantExpr"
+  in
+  assert_equal "stdlib Protoss.parseText variant case expr"
+    "Ok [PDDef {expr = PECase {branches = [{binder = None unit, body = PEVar \"0\", constructor = \"None\"}, {binder = Some \"x\", body = PEVar \"x\", constructor = \"Some\"}], scrutinee = PEVar \"maybe\"}, name = \"out\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_case_variant_expr);
+  let protoss_parsed_fold_nat_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedFoldNatExpr"
+  in
+  assert_equal "stdlib Protoss.parseText foldNat expr"
+    "Ok [PDDef {expr = PEFoldNat {step = PELambda {body = PEApply {args = [PEVar \"acc\"], fn = PEVar \"succ\"}, param = {name = \"acc\", typ = PTName \"Nat\"}}, target = PEVar \"n\", zero = PEVar \"0\"}, name = \"two\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_fold_nat_expr);
   let protoss_parsed_bad_expression, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadExpression"
   in
@@ -2031,6 +2061,23 @@ let () =
   assert_equal "stdlib Protoss.parseText bad record expr"
     "Err \"expected record field form\""
     (Runtime.value_to_string protoss_parsed_bad_record_expr);
+  let protoss_parsed_bad_let_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadLetExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad let expr" "Err \"expected let binding\""
+    (Runtime.value_to_string protoss_parsed_bad_let_expr);
+  let protoss_parsed_bad_case_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadCaseExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad case expr"
+    "Err \"expected case branch form\""
+    (Runtime.value_to_string protoss_parsed_bad_case_expr);
+  let protoss_parsed_bad_fold_nat_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadFoldNatExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad foldNat expr"
+    "Err \"expected foldNat step\""
+    (Runtime.value_to_string protoss_parsed_bad_fold_nat_expr);
   let protoss_parsed_bad_tag, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadTag"
   in

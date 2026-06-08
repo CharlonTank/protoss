@@ -434,11 +434,35 @@
 (def protossParsedVariantExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def value (Maybe Nat) (variant (Maybe Nat) Some 4))"))
 
+(def protossParsedLetExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def local Nat (let (x Nat 1) (succ x)))"))
+
+(def protossParsedLetInferredExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def local Nat (let (x 1) x))"))
+
+(def protossParsedCaseExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def out Nat (case flag (true 1) (false 0)))"))
+
+(def protossParsedCaseVariantExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def out Nat (case maybe (None 0) (Some x x)))"))
+
+(def protossParsedFoldNatExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def two Nat (foldNat n 0 (lambda (acc Nat) (succ acc))))"))
+
 (def protossParsedBadExpression (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Unit ())"))
 
 (def protossParsedBadRecordExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Person (record name))"))
+
+(def protossParsedBadLetExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Nat (let x 1))"))
+
+(def protossParsedBadCaseExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Nat (case flag true))"))
+
+(def protossParsedBadFoldNatExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Nat (foldNat n 0))"))
 
 (def protossParsedBadTag (Result String (List ProtossDecl))
   (Protoss.parseText "(let x String \"Ada\")"))
