@@ -69,6 +69,7 @@ and branch =
 type def = {
   name : string;
   type_params : string list;
+  declared_capabilities : string list option;
   typ : typ;
   body : expr;
 }
@@ -289,13 +290,26 @@ let string_of_expr e = string_of_expr_with_params [] e
 let string_of_branch branch = string_of_branch_with_params [] branch
 
 let string_of_def (d : def) =
-  match d.type_params with
-  | [] -> "(def " ^ d.name ^ " " ^ string_of_typ d.typ ^ " " ^ string_of_expr d.body ^ ")"
-  | params ->
+  let capability_clause =
+    match d.declared_capabilities with
+    | None -> None
+    | Some caps -> Some ("(capabilities " ^ String.concat " " caps ^ ")")
+  in
+  match (d.type_params, capability_clause) with
+  | [], None -> "(def " ^ d.name ^ " " ^ string_of_typ d.typ ^ " " ^ string_of_expr d.body ^ ")"
+  | [], Some caps ->
+      "(defcap " ^ d.name ^ " " ^ caps ^ " " ^ string_of_typ d.typ ^ " "
+      ^ string_of_expr d.body ^ ")"
+  | params, None ->
       let body_ty = match d.typ with TForall (_, body) -> body | t -> t in
       "(defpoly " ^ d.name ^ " (params " ^ String.concat " " params ^ ") "
       ^ string_of_typ_with_params params body_ty ^ " " ^ string_of_expr_with_params params d.body
       ^ ")"
+  | params, Some caps ->
+      let body_ty = match d.typ with TForall (_, body) -> body | t -> t in
+      "(defpolycap " ^ d.name ^ " (params " ^ String.concat " " params ^ ") " ^ caps
+      ^ " " ^ string_of_typ_with_params params body_ty ^ " "
+      ^ string_of_expr_with_params params d.body ^ ")"
 
 let string_of_type_alias a =
   match a.type_params with

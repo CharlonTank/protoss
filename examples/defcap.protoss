@@ -1,0 +1,9 @@
+(capabilities Human.ask Clock.read)
+
+(def askName (Process String) (Human.ask "Name?"))
+
+(defcap askAgain (capabilities Human.ask) (Process String) askName)
+
+(defcap pureCount (capabilities) Nat 2)
+
+(defcap readTime (capabilities Clock.read) (Process String) (Clock.read))

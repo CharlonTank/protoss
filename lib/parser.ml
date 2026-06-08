@@ -126,6 +126,13 @@ let parse_named_type_fields what fields =
   ensure_unique what (List.map fst fields);
   sort_fields fields
 
+let parse_capability_clause = function
+  | Sexp.List (Sexp.Atom "capabilities" :: caps) ->
+      let caps = List.map atom caps in
+      ensure_unique "definition capability" caps;
+      List.sort String.compare caps
+  | x -> fail ("invalid definition capabilities: " ^ Sexp.to_string x)
+
 let rec parse_expr = function
   | Sexp.Atom "unit" -> EUnit
   | Sexp.Atom "true" -> EBool true
@@ -324,6 +331,7 @@ let parse_structural_defrec name typ clauses =
       {
         name;
         type_params = [];
+        declared_capabilities = None;
         typ;
         body =
           ELambda
@@ -340,6 +348,7 @@ let parse_structural_defrec name typ clauses =
       {
         name;
         type_params = [];
+        declared_capabilities = None;
         typ;
         body =
           ELambda
@@ -544,6 +553,7 @@ let qualify_program module_name exports aliases defs =
         {
           name = qualify module_name d.name;
           type_params = d.type_params;
+          declared_capabilities = d.declared_capabilities;
           typ = qualify_type local_types d.type_params d.typ;
           body = qualify_expr local_defs local_types d.type_params [] d.body;
         })
@@ -590,12 +600,55 @@ let parse_toplevel = function
           type_body = TVariant (parse_named_type_fields "variant constructor" cases);
         }
   | Sexp.List [ Sexp.Atom "def"; Sexp.Atom n; ty; body ] ->
-      `Def { name = n; type_params = []; typ = parse_type ty; body = parse_expr body }
+      `Def
+        {
+          name = n;
+          type_params = [];
+          declared_capabilities = None;
+          typ = parse_type ty;
+          body = parse_expr body;
+        }
+  | Sexp.List [ Sexp.Atom "defcap"; Sexp.Atom n; caps; ty; body ] ->
+      `Def
+        {
+          name = n;
+          type_params = [];
+          declared_capabilities = Some (parse_capability_clause caps);
+          typ = parse_type ty;
+          body = parse_expr body;
+        }
   | Sexp.List [ Sexp.Atom "defpoly"; Sexp.Atom n; Sexp.List (Sexp.Atom "params" :: params); ty; body ] ->
       let type_params = List.map atom params in
       ensure_unique "type parameter" type_params;
       if type_params = [] then fail ("defpoly requires at least one type parameter: " ^ n);
-      `Def { name = n; type_params; typ = parse_type ty; body = parse_expr body }
+      `Def
+        {
+          name = n;
+          type_params;
+          declared_capabilities = None;
+          typ = parse_type ty;
+          body = parse_expr body;
+        }
+  | Sexp.List
+      [
+        Sexp.Atom "defpolycap";
+        Sexp.Atom n;
+        Sexp.List (Sexp.Atom "params" :: params);
+        caps;
+        ty;
+        body;
+      ] ->
+      let type_params = List.map atom params in
+      ensure_unique "type parameter" type_params;
+      if type_params = [] then fail ("defpolycap requires at least one type parameter: " ^ n);
+      `Def
+        {
+          name = n;
+          type_params;
+          declared_capabilities = Some (parse_capability_clause caps);
+          typ = parse_type ty;
+          body = parse_expr body;
+        }
   | Sexp.List (Sexp.Atom "defrec" :: Sexp.Atom n :: ty :: clauses) ->
       `Def (parse_structural_defrec n (parse_type ty) clauses)
   | Sexp.List (Sexp.Atom "defrec" :: _) -> fail "invalid defrec form"

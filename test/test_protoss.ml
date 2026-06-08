@@ -1476,6 +1476,43 @@ let () =
   let pv, _ = Runtime.eval_entry process "askName" in
   assert_true "process should suspend"
     (match pv with Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true | _ -> false);
+  let defcap_process =
+    check
+      "(capabilities Human.ask)\n\
+       (def askName (Process String) (Human.ask \"Name?\"))\n\
+       (defcap askAgain (capabilities Human.ask) (Process String) askName)\n\
+       (defcap pure (capabilities) Nat 0)"
+  in
+  let plain_defcap_process =
+    check
+      "(capabilities Human.ask)\n\
+       (def askName (Process String) (Human.ask \"Name?\"))\n\
+       (def askAgain (Process String) askName)\n\
+       (def pure Nat 0)"
+  in
+  assert_equal "defcap does not affect canonical hash"
+    (Kernel.hash_program plain_defcap_process)
+    (Kernel.hash_program defcap_process);
+  assert_equal "defcap inherited scope" "Human.ask"
+    (String.concat "," (checked_def defcap_process "askAgain").Kernel.capabilities);
+  assert_equal "defcap empty pure scope" ""
+    (String.concat "," (checked_def defcap_process "pure").Kernel.capabilities);
+  let defpolycap_pure =
+    check
+      "(defpolycap id (params A) (capabilities) (-> A A) (lambda (x A) x))\n\
+       (def out Nat (id 4))"
+  in
+  let defpolycap_out, _ = Runtime.normalize_def defpolycap_pure "out" in
+  assert_equal "defpolycap pure normalizes" "4"
+    (Runtime.value_to_string defpolycap_out);
+  expect_check_error
+    "(capabilities Human.ask)\n\
+     (defcap askName (capabilities) (Process String) (Human.ask \"Name?\"))";
+  expect_check_error
+    "(capabilities Human.ask)\n\
+     (defcap pure (capabilities Human.ask) Nat 0)";
+  expect_check_error
+    "(defcap pure (capabilities Human.ask) Nat 0)";
   let process_graph_json = Canonical_ir.serialize_graph process in
   let process_graph = Json.parse process_graph_json in
   let process_capabilities = json_string_array_field "capabilities" process_graph in

@@ -214,7 +214,7 @@ let parse_one_json ?(index = 1) obj =
               try Parser.parse_expr (expr_sexp_of_json (json_field "expr" obj)) with
               | Parser.Error msg -> fail ("invalid patch expr: " ^ msg))
         in
-        Some { name; type_params = []; typ; body }
+        Some { name; type_params = []; declared_capabilities = None; typ; body }
     | DeleteDef | RenameDef -> None
   in
   let capabilities =

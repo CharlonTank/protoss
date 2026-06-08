@@ -2912,6 +2912,7 @@ let checked_of_canonical caps defs =
                {
                  name = d.cname;
                  type_params = canonical_type_params d.ctyp;
+                 declared_capabilities = None;
                  typ = d.ctyp;
                  body = canonical_surface_expr defs d.cbody;
                };
@@ -2938,6 +2939,19 @@ let checked_of_canonical caps defs =
 let check_program (program : program) =
   let program = resolve_program_types program in
   validate_capabilities program.capabilities;
+  List.iter
+    (fun (d : def) ->
+      match d.declared_capabilities with
+      | None -> ()
+      | Some caps ->
+          validate_capabilities caps;
+          List.iter
+            (fun cap ->
+              if not (List.exists (String.equal cap) program.capabilities) then
+                fail
+                  ("definition " ^ d.name ^ " declares undeclared capability: " ^ cap))
+            caps)
+    program.defs;
   check_duplicate_names program.defs;
   reject_cycles program.defs;
   let globals =
@@ -3012,13 +3026,23 @@ let check_program (program : program) =
         let def_id = def_id_of d.name in
         let c = serialize_def d.name def_id d.typ cterm def_id_of in
         let _ = Hashcons.intern c in
+        let capabilities = capabilities_of_name d.name in
+        (match d.declared_capabilities with
+        | None -> ()
+        | Some declared ->
+            let declared = List.sort_uniq String.compare declared in
+            if declared <> capabilities then
+              fail
+                ("definition " ^ d.name ^ " capability scope mismatch: declared ["
+               ^ String.concat ", " declared ^ "], actual ["
+               ^ String.concat ", " capabilities ^ "]"));
         {
           def = d;
           def_id;
           cterm;
           canonical = c;
           hash = hash_string c;
-          capabilities = capabilities_of_name d.name;
+          capabilities;
         })
       program.defs
   in
