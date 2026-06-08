@@ -3011,7 +3011,7 @@ let serialize_checked_program checked =
 let hash_program checked =
   hash_string (serialize_checked_program checked)
 
-let checked_to_graph_json checked =
+let checked_to_graph_json_fields checked =
   let defs = checked.defs |> List.sort (fun a b -> String.compare a.def.name b.def.name) in
   let def_id_of name =
     if is_builtin name then "builtin:" ^ name
@@ -3055,21 +3055,40 @@ let checked_to_graph_json checked =
            | Some ref -> ref
            | None -> fail ("unknown capability in canonical graph: " ^ cap))
   in
-  json_obj
-    [
-      json_field "version" (json_string canonical_graph_version);
-      json_field "canonicalVersion" (json_string canonical_version);
-      json_field "hashAlgorithm" (json_string hash_algorithm);
-      json_field "hashPrefix" (json_string hash_prefix);
-      json_field "programHash" (json_string (hash_program checked));
-      json_field "capabilities" (json_array json_string declared_capabilities);
-      json_field "capabilityRefs" (json_array json_string declared_capability_refs);
-      json_field "capabilityDescriptors" (capabilities_to_graph_json checked.program.capabilities);
-      json_field "defs" (json_array def_json defs);
-      json_field "nodeGraph"
-        (canonical_node_graph_json (hash_program checked) def_id_of (canonical_defs_of_checked checked));
-    ]
-  ^ "\n"
+  [
+    json_field "version" (json_string canonical_graph_version);
+    json_field "canonicalVersion" (json_string canonical_version);
+    json_field "hashAlgorithm" (json_string hash_algorithm);
+    json_field "hashPrefix" (json_string hash_prefix);
+    json_field "programHash" (json_string (hash_program checked));
+    json_field "capabilities" (json_array json_string declared_capabilities);
+    json_field "capabilityRefs" (json_array json_string declared_capability_refs);
+    json_field "capabilityDescriptors" (capabilities_to_graph_json checked.program.capabilities);
+    json_field "defs" (json_array def_json defs);
+    json_field "nodeGraph"
+      (canonical_node_graph_json (hash_program checked) def_id_of (canonical_defs_of_checked checked));
+  ]
+
+let checked_to_graph_payload_json checked =
+  json_obj (checked_to_graph_json_fields checked) ^ "\n"
+
+let checked_to_graph_content_hash checked =
+  hash_string (checked_to_graph_payload_json checked)
+
+let checked_to_graph_json checked =
+  let fields = checked_to_graph_json_fields checked in
+  let graph_hash = hash_string (json_obj fields ^ "\n") in
+  let program_hash_prefix = "\"programHash\"" in
+  let program_hash_prefix_len = String.length program_hash_prefix in
+  let rec insert_graph_hash = function
+    | [] -> [ json_field "graphHash" (json_string graph_hash) ]
+    | field :: rest
+      when String.length field >= program_hash_prefix_len
+           && String.sub field 0 program_hash_prefix_len = program_hash_prefix ->
+        field :: json_field "graphHash" (json_string graph_hash) :: rest
+    | field :: rest -> field :: insert_graph_hash rest
+  in
+  json_obj (insert_graph_hash fields) ^ "\n"
 
 let checked_def_by_name checked name =
   checked.defs |> List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name)

@@ -383,6 +383,9 @@ let () =
     (json_string_field "hashPrefix" graph);
   assert_equal "canonical graph program hash" (Kernel.hash_program formatted_a)
     (json_string_field "programHash" graph);
+  let graph_content_hash = Kernel.checked_to_graph_content_hash formatted_a in
+  assert_equal "canonical graph content hash" graph_content_hash
+    (json_string_field "graphHash" graph);
   assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
   assert_true "canonical graph empty capability refs" (json_array_field "capabilityRefs" graph = []);
   assert_true "canonical graph empty capability descriptors"
@@ -416,6 +419,24 @@ let () =
    with Kernel.Error msg ->
      assert_true "canonical graph rejects missing nodeGraph"
        (contains_substring msg "canonical graph missing field: nodeGraph"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json "\"graphHash\": " "\"graphHashMissing\": "));
+     fail "canonical graph missing graphHash should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing graphHash"
+       (contains_substring msg "canonical graph missing field: graphHash"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json
+             ("\"graphHash\": " ^ Ast.quote graph_content_hash)
+             "\"graphHash\": \"p2:bad\""));
+     fail "canonical graph corrupt graphHash should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt graphHash"
+       (contains_substring msg "canonical graph graphHash mismatch: p2:bad"));
   (try
      ignore
        (Canonical_ir.parse_graph

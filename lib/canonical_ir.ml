@@ -435,8 +435,12 @@ let validate_node_graph graph program_hash defs =
         fail ("canonical node graph unreachable node: " ^ id))
     nodes
 
-let validate_exact_serialization input caps defs =
+let validate_exact_serialization graph input caps defs =
   let checked = Kernel.checked_of_canonical caps defs in
+  let graph_hash = json_string_field "graphHash" graph in
+  let expected_graph_hash = Kernel.checked_to_graph_content_hash checked in
+  if not (String.equal graph_hash expected_graph_hash) then
+    fail ("canonical graph graphHash mismatch: " ^ graph_hash);
   let expected = String.trim (Kernel.checked_to_graph_json checked) in
   if not (String.equal (String.trim input) expected) then
     fail "canonical graph serialization mismatch"
@@ -480,7 +484,7 @@ let parse_graph input =
   if not (String.equal program_hash (Kernel.hash_string canonical)) then
     fail ("canonical graph programHash mismatch: " ^ program_hash);
   validate_node_graph graph program_hash defs;
-  validate_exact_serialization input caps defs;
+  validate_exact_serialization graph input caps defs;
   (caps, defs)
 
 let graph_to_program input =
