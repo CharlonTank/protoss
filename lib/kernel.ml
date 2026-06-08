@@ -4,6 +4,10 @@ exception Error = Kernel_error.Error
 
 let fail = Kernel_error.fail
 
+let hash_algorithm = Hashcons.hash_algorithm
+
+let hash_prefix = Hashcons.hash_prefix
+
 let hash_string = Hashcons.hash
 
 let builtin_types =
@@ -2458,6 +2462,8 @@ let canonical_node_graph_json program_hash def_id_of defs =
   json_obj
     [
       json_field "version" (json_string canonical_node_graph_version);
+      json_field "hashAlgorithm" (json_string hash_algorithm);
+      json_field "hashPrefix" (json_string hash_prefix);
       json_field "rootProgramHash" (json_string program_hash);
       json_field "defs" ("[" ^ String.concat ", " def_refs ^ "]");
       json_field "nodes" ("[" ^ String.concat ", " node_json ^ "]");
@@ -2990,6 +2996,8 @@ let checked_to_graph_json checked =
     [
       json_field "version" (json_string canonical_graph_version);
       json_field "canonicalVersion" (json_string canonical_version);
+      json_field "hashAlgorithm" (json_string hash_algorithm);
+      json_field "hashPrefix" (json_string hash_prefix);
       json_field "programHash" (json_string (hash_program checked));
       json_field "capabilities"
         (json_array json_string (List.sort_uniq String.compare checked.program.capabilities));

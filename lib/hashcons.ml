@@ -8,6 +8,8 @@ let create () = { table = Hashtbl.create 1024; hits = 0; misses = 0 }
 
 let default = create ()
 
+let hash_algorithm = "sha256"
+
 let hash_prefix = "p2:"
 
 let k =

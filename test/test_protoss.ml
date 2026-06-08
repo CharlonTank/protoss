@@ -60,7 +60,9 @@ let () =
     (Hashcons.digest "");
   assert_equal "content address hash prefix"
     "p2:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    (Hashcons.hash "abc")
+    (Hashcons.hash "abc");
+  assert_equal "kernel hash algorithm" "sha256" Kernel.hash_algorithm;
+  assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
 let expect_parse_error input =
   try
@@ -320,6 +322,10 @@ let () =
   let graph = Json.parse graph_json in
   assert_equal "canonical graph version" Kernel.canonical_graph_version
     (json_string_field "version" graph);
+  assert_equal "canonical graph hash algorithm" Kernel.hash_algorithm
+    (json_string_field "hashAlgorithm" graph);
+  assert_equal "canonical graph hash prefix" Kernel.hash_prefix
+    (json_string_field "hashPrefix" graph);
   assert_equal "canonical graph program hash" (Kernel.hash_program formatted_a)
     (json_string_field "programHash" graph);
   assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
@@ -328,6 +334,10 @@ let () =
   let node_graph = json_field "nodeGraph" graph in
   assert_equal "canonical node graph version" Kernel.canonical_node_graph_version
     (json_string_field "version" node_graph);
+  assert_equal "canonical node graph hash algorithm" Kernel.hash_algorithm
+    (json_string_field "hashAlgorithm" node_graph);
+  assert_equal "canonical node graph hash prefix" Kernel.hash_prefix
+    (json_string_field "hashPrefix" node_graph);
   assert_equal "canonical node graph root hash" (Kernel.hash_program formatted_a)
     (json_string_field "rootProgramHash" node_graph);
   assert_true "canonical node graph has typed nodes"
@@ -379,6 +389,16 @@ let () =
           (replace_once graph_json (Kernel.hash_program formatted_a)
              "p2:0000000000000000000000000000000000000000000000000000000000000000"));
      fail "canonical graph program hash mismatch should be rejected"
+   with Kernel.Error _ -> ());
+  (try
+     ignore (Canonical_ir.parse_graph (replace_once graph_json "\"hashAlgorithm\": \"sha256\""
+                                        "\"hashAlgorithm\": \"md5\""));
+     fail "canonical graph hash algorithm mismatch should be rejected"
+   with Kernel.Error _ -> ());
+  (try
+     ignore (Canonical_ir.parse_graph (replace_once graph_json "\"hashPrefix\": \"p2:\""
+                                        "\"hashPrefix\": \"p1:\""));
+     fail "canonical graph hash prefix mismatch should be rejected"
    with Kernel.Error _ -> ());
   (try
      ignore (Canonical_ir.parse_graph (replace_once graph_json "\"kind\": \"Type\"" "\"kind\": \"Term\""));
@@ -1596,6 +1616,10 @@ let () =
   let store_graph = Json.parse (Store.read_file store_graph_path) in
   assert_equal "project store graph version" Kernel.canonical_graph_version
     (json_string_field "version" store_graph);
+  assert_equal "project store graph hash algorithm" Kernel.hash_algorithm
+    (json_string_field "hashAlgorithm" store_graph);
+  assert_equal "project store graph hash prefix" Kernel.hash_prefix
+    (json_string_field "hashPrefix" store_graph);
   assert_equal "project store graph hash" (Kernel.hash_program build_a.Workspace.checked)
     (json_string_field "programHash" store_graph);
   assert_equal "project store graph exact" (Kernel.checked_to_graph_json build_a.Workspace.checked)
@@ -1611,6 +1635,10 @@ let () =
   assert_true "project lock writes file" (Sys.file_exists lock_path);
   let lock_before = Store.read_file lock_path in
   assert_true "project lock records version" (contains_substring lock_before "protoss-lock-v1");
+  assert_true "project lock records hash algorithm"
+    (contains_substring lock_before "(hash-algorithm \"sha256\")");
+  assert_true "project lock records hash prefix"
+    (contains_substring lock_before "(hash-prefix \"p2:\")");
   assert_true "project lock records program hash" (contains_substring lock_before build_a.build_id);
   assert_true "project lock records source units" (contains_substring lock_before "(source-hash p2:");
   assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
@@ -1627,6 +1655,10 @@ let () =
   let package_content = Store.read_file package_a.package_path in
   assert_true "project package records version"
     (contains_substring package_content "protoss-package-v1");
+  assert_true "project package records hash algorithm"
+    (contains_substring package_content "(hash-algorithm \"sha256\")");
+  assert_true "project package records hash prefix"
+    (contains_substring package_content "(hash-prefix \"p2:\")");
   assert_true "project package records program hash"
     (contains_substring package_content build_a.build_id);
   assert_true "project package records lock hash in content"

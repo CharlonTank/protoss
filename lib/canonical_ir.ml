@@ -59,6 +59,14 @@ let json_optional_string_array_field name obj =
            xs)
   | Some _ -> fail ("canonical graph field must be string array: " ^ name)
 
+let validate_hash_metadata context obj =
+  let algorithm = json_string_field "hashAlgorithm" obj in
+  if not (String.equal algorithm Kernel.hash_algorithm) then
+    fail (context ^ " hashAlgorithm mismatch: " ^ algorithm);
+  let prefix = json_string_field "hashPrefix" obj in
+  if not (String.equal prefix Kernel.hash_prefix) then
+    fail (context ^ " hashPrefix mismatch: " ^ prefix)
+
 let ensure_unique what names =
   let seen = Hashtbl.create 16 in
   List.iter
@@ -307,6 +315,7 @@ let validate_node_graph graph program_hash defs =
       let version = json_string_field "version" node_graph in
       if not (String.equal version Kernel.canonical_node_graph_version) then
         fail ("canonical node graph version mismatch: " ^ version);
+      validate_hash_metadata "canonical node graph" node_graph;
       let root_hash = json_string_field "rootProgramHash" node_graph in
       if not (String.equal root_hash program_hash) then
         fail ("canonical node graph rootProgramHash mismatch: " ^ root_hash);
@@ -363,6 +372,7 @@ let parse_graph input =
   let canonical_version = json_string_field "canonicalVersion" graph in
   if not (String.equal canonical_version Kernel.canonical_version) then
     fail ("canonical graph canonicalVersion mismatch: " ^ canonical_version);
+  validate_hash_metadata "canonical graph" graph;
   let caps =
     json_array_field "capabilities" graph
     |> List.map (function Json.String s -> s | _ -> fail "canonical graph capability must be string")

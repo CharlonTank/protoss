@@ -743,6 +743,8 @@ let lock_content manifest prepared =
       "  " ^ lock_item "version" [ lock_string manifest.version ];
       "  " ^ lock_item "canonical-version" [ lock_string Kernel.canonical_version ];
       "  " ^ lock_item "canonical-graph-version" [ lock_string Kernel.canonical_graph_version ];
+      "  " ^ lock_item "hash-algorithm" [ lock_string Kernel.hash_algorithm ];
+      "  " ^ lock_item "hash-prefix" [ lock_string Kernel.hash_prefix ];
       "  " ^ lock_item "program-hash" [ prepared.build_id ];
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
       "  " ^ lock_item "program-graph-hash" [ Kernel.hash_string prepared.program_graph ];
@@ -883,6 +885,8 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_item "canonical-version" [ lock_string Kernel.canonical_version ];
       "  " ^ lock_item "canonical-graph-version" [ lock_string Kernel.canonical_graph_version ];
       "  " ^ lock_item "canonical-node-graph-version" [ lock_string Kernel.canonical_node_graph_version ];
+      "  " ^ lock_item "hash-algorithm" [ lock_string Kernel.hash_algorithm ];
+      "  " ^ lock_item "hash-prefix" [ lock_string Kernel.hash_prefix ];
       "  " ^ lock_item "lock-hash" [ lock_hash ];
       "  " ^ lock_item "program-hash" [ prepared.build_id ];
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
@@ -987,6 +991,8 @@ let check_package manifest =
   expect_string "canonical-version" Kernel.canonical_version;
   expect_string "canonical-graph-version" Kernel.canonical_graph_version;
   expect_string "canonical-node-graph-version" Kernel.canonical_node_graph_version;
+  expect_string "hash-algorithm" Kernel.hash_algorithm;
+  expect_string "hash-prefix" Kernel.hash_prefix;
   expect_atom "lock-hash" lock_hash;
   expect_atom "program-hash" prepared.build_id;
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
