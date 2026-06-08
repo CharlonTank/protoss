@@ -547,6 +547,8 @@ let instantiate_type name params typ args =
   let body = match typ with TForall (_, body) -> body | t -> t in
   subst_type args body
 
+let type_body = function TForall (_, body) -> body | t -> t
+
 let lookup_global ctx n =
   assoc_opt n ctx.globals
 
@@ -945,6 +947,13 @@ and infer_variant_case ctx cases branches =
     branches;
   option_or_fail "empty Variant case" !result
 
+let app_spine expr =
+  let rec loop args = function
+    | EApp (f, arg) -> loop (arg :: args) f
+    | e -> (e, args)
+  in
+  loop [] expr
+
 let rec infer_elab ctx expr =
   match expr with
   | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ | ENil _ ->
@@ -955,12 +964,15 @@ let rec infer_elab ctx expr =
       (TFun (t, body_ty), ELambda (x, t, body))
   | ELambdaInfer _ -> fail "unannotated lambda requires an expected function type"
   | EApp (f, arg) -> (
-      let fn_ty, f = infer_elab ctx f in
-      match fn_ty with
-      | TFun (a, b) ->
-          let _, arg = check_elab ctx a arg in
-          (b, EApp (f, arg))
-      | t -> fail ("application of non-function: " ^ string_of_typ t))
+      match poly_app_elab ctx None expr with
+      | Some r -> r
+      | None ->
+          let fn_ty, f = infer_elab ctx f in
+          (match fn_ty with
+          | TFun (a, b) ->
+              let _, arg = check_elab ctx a arg in
+              (b, EApp (f, arg))
+          | t -> fail ("application of non-function: " ^ string_of_typ t)))
   | ELet (x, e, body) ->
       let t, e = infer_elab ctx e in
       let body_ty, body = infer_elab (bind_local ctx x t) body in
@@ -1234,6 +1246,13 @@ and check_elab ctx expected expr =
           let _, body = check_elab (bind_local ctx x a) expected body in
           (expected, EBind (p, x, a, body))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
+  | _, EName _ | _, EApp _ -> (
+      match poly_app_elab ctx (Some expected) expr with
+      | Some (_, expr) -> (expected, expr)
+      | None ->
+          let actual, expr = infer_elab ctx expr in
+          require_type expected actual "expected context";
+          (expected, expr))
   | _, ECase (scrut, branches) ->
       let scrut_ty, scrut = infer_elab ctx scrut in
       let branches =
@@ -1247,6 +1266,126 @@ and check_elab ctx expected expr =
       let actual, expr = infer_elab ctx expr in
       require_type expected actual "expected context";
       (expected, expr)
+
+and poly_app_elab ctx expected expr =
+  let root, args = app_spine expr in
+  match root with
+  | EName name -> (
+      match (assoc_opt name ctx.locals, lookup_global ctx name) with
+      | Some _, _ -> None
+      | None, Some g when g.global_type_params <> [] ->
+          let arity = List.length g.global_type_params in
+          let solutions = Array.make arity None in
+          let bind_solution index typ =
+            if index < 0 || index >= arity then ()
+            else
+              match solutions.(index) with
+              | None -> solutions.(index) <- Some typ
+              | Some existing ->
+                  if not (equal_typ existing typ) then
+                    fail
+                      ("conflicting inferred type argument "
+                      ^ List.nth g.global_type_params index ^ " for " ^ name ^ ": "
+                      ^ string_of_typ existing ^ " vs " ^ string_of_typ typ)
+          in
+          let rec unify pattern actual =
+            match pattern with
+            | TVar i when i < arity -> bind_solution i actual
+            | TFun (pa, pb) -> (
+                match actual with
+                | TFun (aa, ab) ->
+                    unify pa aa;
+                    unify pb ab
+                | _ -> fail ("cannot infer " ^ name ^ ": expected function type"))
+            | TRecord p_fields -> (
+                match actual with
+                | TRecord a_fields ->
+                    let p_fields = sort_fields p_fields and a_fields = sort_fields a_fields in
+                    if List.map fst p_fields <> List.map fst a_fields then
+                      fail ("cannot infer " ^ name ^ ": record fields differ");
+                    List.iter2 (fun (_, p) (_, a) -> unify p a) p_fields a_fields
+                | _ -> fail ("cannot infer " ^ name ^ ": expected record type"))
+            | TVariant p_cases -> (
+                match actual with
+                | TVariant a_cases ->
+                    let p_cases = sort_fields p_cases and a_cases = sort_fields a_cases in
+                    if List.map fst p_cases <> List.map fst a_cases then
+                      fail ("cannot infer " ^ name ^ ": variant constructors differ");
+                    List.iter2 (fun (_, p) (_, a) -> unify p a) p_cases a_cases
+                | _ -> fail ("cannot infer " ^ name ^ ": expected variant type"))
+            | TList p -> (
+                match actual with TList a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected List"))
+            | TView p -> (
+                match actual with TView a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected View"))
+            | TProcess p -> (
+                match actual with
+                | TProcess a -> unify p a
+                | _ -> fail ("cannot infer " ^ name ^ ": expected Process"))
+            | TNamed (pn, ps) -> (
+                match actual with
+                | TNamed (an, args) when String.equal pn an && List.length ps = List.length args ->
+                    List.iter2 unify ps args
+                | _ -> if not (equal_typ pattern actual) then fail ("cannot infer " ^ name))
+            | TForall (pa, pb) -> (
+                match actual with
+                | TForall (aa, ab) when pa = aa -> unify pb ab
+                | _ -> if not (equal_typ pattern actual) then fail ("cannot infer " ^ name))
+            | _ ->
+                if not (equal_typ pattern actual) then
+                  fail
+                    ("cannot infer " ^ name ^ ": expected " ^ string_of_typ pattern ^ ", got "
+                   ^ string_of_typ actual)
+          in
+          let rec take_params typ remaining acc =
+            match remaining with
+            | [] -> (List.rev acc, typ)
+            | _ :: rest -> (
+                match typ with
+                | TFun (arg, result) -> take_params result rest (arg :: acc)
+                | _ -> fail ("too many arguments for polymorphic definition: " ^ name))
+          in
+          let params, result = take_params (type_body g.global_typ) args [] in
+          (match expected with Some expected -> unify result expected | None -> ());
+          List.iter2
+            (fun param arg ->
+              try
+                let actual, _ = infer_elab ctx arg in
+                unify param actual
+              with Error _ -> ())
+            params args;
+          let missing =
+            g.global_type_params
+            |> List.mapi (fun i param -> (i, param))
+            |> List.filter (fun (i, _) -> solutions.(i) = None)
+          in
+          (match missing with
+          | [] ->
+              let type_args =
+                Array.to_list solutions
+                |> List.map (option_or_fail ("internal missing inferred type argument for " ^ name))
+              in
+              let params = List.map (subst_type type_args) params in
+              let result = subst_type type_args result in
+              (match expected with Some expected -> require_type expected result "polymorphic result" | None -> ());
+              let args =
+                List.map2
+                  (fun param arg ->
+                    let _, arg = check_elab ctx param arg in
+                    arg)
+                  params args
+              in
+              let expr = List.fold_left (fun f arg -> EApp (f, arg)) (EInst (name, type_args)) args in
+              Some (result, expr)
+          | _ -> (
+              match expected with
+              | None -> None
+              | Some _ ->
+                  fail
+                    ("cannot infer type argument(s) "
+                    ^ String.concat ", " (List.map snd missing)
+                    ^ " for " ^ name)))
+      | _, _ -> None)
+  | _ -> None
 
 and elaborate_variant_payload ctx ty con e =
   match unfold_type ctx ty with

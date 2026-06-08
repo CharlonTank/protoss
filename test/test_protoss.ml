@@ -532,17 +532,86 @@ let () =
        (def m (Maybe Nat) ((inst some Nat) 9))\n\
        (def out Nat (case m (None _ 0) (Some value value)))"
   in
+  let poly_implicit =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+       (defpoly some (params A) (-> A (Maybe A)) (lambda (x A) (variant Some x)))\n\
+       (def n Nat (id 4))\n\
+       (def s String (id \"ok\"))\n\
+       (def m (Maybe Nat) (some 9))\n\
+       (def out Nat (case m (None 0) (Some value value)))"
+  in
   assert_equal "defpoly type parameter alpha-stable hash" (Kernel.hash_program poly_a)
     (Kernel.hash_program poly_b);
+  assert_equal "defpoly implicit instantiation hash" (Kernel.hash_program poly_a)
+    (Kernel.hash_program poly_implicit);
   let poly_n, _ = Runtime.normalize_def poly_a "n" in
   assert_equal "defpoly Nat instantiation" "4" (Runtime.value_to_string poly_n);
   let poly_s, _ = Runtime.normalize_def poly_a "s" in
   assert_equal "defpoly String instantiation" "\"ok\"" (Runtime.value_to_string poly_s);
   let poly_out, _ = Runtime.normalize_def poly_a "out" in
   assert_equal "defpoly variant instantiation" "9" (Runtime.value_to_string poly_out);
+  let poly_contextual_function =
+    check
+      "(defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+       (def f (-> Nat Nat) id)\n\
+       (def out Nat (f 4))"
+  in
+  let poly_contextual_function_explicit =
+    check
+      "(defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+       (def f (-> Nat Nat) (inst id Nat))\n\
+       (def out Nat (f 4))"
+  in
+  assert_equal "defpoly expected function hash"
+    (Kernel.hash_program poly_contextual_function_explicit)
+    (Kernel.hash_program poly_contextual_function);
+  let poly_contextual_out, _ = Runtime.normalize_def poly_contextual_function "out" in
+  assert_equal "defpoly expected function normalization" "4"
+    (Runtime.value_to_string poly_contextual_out);
+  let poly_shadowing =
+    check
+      "(defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+       (def out Nat (let (id (lambda (x Nat) (succ x))) (id 1)))"
+  in
+  let poly_shadowing_out, _ = Runtime.normalize_def poly_shadowing "out" in
+  assert_equal "defpoly inference respects local shadowing" "2"
+    (Runtime.value_to_string poly_shadowing_out);
+  let poly_map_explicit =
+    check
+      "(defpoly List.map (params A B) \
+       (-> (List A) (-> (-> A B) (List B))) \
+       (lambda (xs (List A)) \
+       (lambda (f (-> A B)) \
+       (foldList xs (Nil B) \
+       (lambda (x A) (lambda (acc (List B)) (Cons B (f x) acc)))))))\n\
+       (def xs (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
+       (def bumped (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ x))))"
+  in
+  let poly_map_implicit =
+    check
+      "(defpoly List.map (params A B) \
+       (-> (List A) (-> (-> A B) (List B))) \
+       (lambda (xs (List A)) \
+       (lambda (f (-> A B)) \
+       (foldList xs (Nil B) \
+       (lambda (x A) (lambda (acc (List B)) (Cons B (f x) acc)))))))\n\
+       (def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def bumped (List Nat) ((List.map xs) (lambda x (succ x))))"
+  in
+  assert_equal "defpoly List.map implicit hash" (Kernel.hash_program poly_map_explicit)
+    (Kernel.hash_program poly_map_implicit);
+  let bumped, _ = Runtime.normalize_def poly_map_implicit "bumped" in
+  assert_equal "defpoly List.map implicit normalization" "[2, 3]"
+    (Runtime.value_to_string bumped);
   expect_check_error
-    "(defpoly id (params A) (-> A A) (lambda (x A) x))\n\
-     (def bad (-> Nat Nat) id)";
+    "(defpoly empty (params A) (List A) (Nil A))\n\
+     (def bad Nat (let (x empty) 0))";
+  expect_check_error
+    "(defpoly same (params A) (-> A (-> A A)) \
+       (lambda (x A) (lambda (y A) x)))\n\
+     (def bad Nat ((same 1) true))";
   expect_check_error
     "(defpoly id (params A) (-> A A) (lambda (x A) x))\n(def bad Nat ((inst id) 1))";
   expect_check_error

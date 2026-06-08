@@ -1,0 +1,40 @@
+(type Maybe (A) (Variant (None Unit) (Some A)))
+
+(defpoly id (params A)
+  (-> A A)
+  (lambda (x A) x))
+
+(defpoly some (params A)
+  (-> A (Maybe A))
+  (lambda (x A)
+    (variant Some x)))
+
+(def n Nat
+  (id 4))
+
+(def s String
+  (id "ok"))
+
+(def m (Maybe Nat)
+  (some 9))
+
+(def out Nat
+  (case m
+    (None 0)
+    (Some value value)))
+
+(defpoly List.map (params A B)
+  (-> (List A) (-> (-> A B) (List B)))
+  (lambda (xs (List A))
+    (lambda (f (-> A B))
+      (foldList xs (Nil B)
+        (lambda (x A)
+          (lambda (acc (List B))
+            (Cons B (f x) acc)))))))
+
+(def xs (List Nat)
+  (Cons 1 (Cons 2 Nil)))
+
+(def bumped (List Nat)
+  ((List.map xs)
+    (lambda x (succ x))))
