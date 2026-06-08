@@ -1,5 +1,5 @@
-(type Counter (Record (label String) (value Nat)))
-(type CounterMsg (Variant (Reset Unit) (Set Nat)))
+(record Counter (label String) (value Nat))
+(variant CounterMsg (Reset Unit) (Set Nat))
 
 (def initial Counter
   (record (label "visits") (value 3)))

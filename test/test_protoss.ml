@@ -218,11 +218,18 @@ let () =
       "(type Model (Record (name String) (count Nat)))\n\
        (def init Model (record (name \"Ada\") (count 1)))"
   in
+  let named_record_model =
+    check
+      "(record Model (name String) (count Nat))\n\
+       (def init Model (record (name \"Ada\") (count 1)))"
+  in
   let expanded_model =
     check "(def init (Record (name String) (count Nat)) (record (name \"Ada\") (count 1)))"
   in
   assert_equal "type alias transparent hash" (Kernel.hash_program expanded_model)
     (Kernel.hash_program named_model);
+  assert_equal "named record transparent hash" (Kernel.hash_program expanded_model)
+    (Kernel.hash_program named_record_model);
   let named_init, _ = Runtime.normalize_def named_model "init" in
   assert_equal "type alias runtime"
     "{count = 1, name = \"Ada\"}" (Runtime.value_to_string named_init);
@@ -236,6 +243,12 @@ let () =
        (def value (Maybe Nat) (variant (Maybe Nat) Some 4))\n\
        (def out Nat (case value (None _ 0) (Some n n)))"
   in
+  let maybe_variant_decl =
+    check
+      "(variant Maybe (params A) (None Unit) (Some A))\n\
+       (def value (Maybe Nat) (variant (Maybe Nat) Some 4))\n\
+       (def out Nat (case value (None _ 0) (Some n n)))"
+  in
   let maybe_expanded =
     check
       "(def value (Variant (None Unit) (Some Nat)) \
@@ -244,16 +257,20 @@ let () =
   in
   assert_equal "parametric type alias transparent hash" (Kernel.hash_program maybe_expanded)
     (Kernel.hash_program maybe_alias);
+  assert_equal "named variant transparent hash" (Kernel.hash_program maybe_expanded)
+    (Kernel.hash_program maybe_variant_decl);
   let maybe_out, _ = Runtime.normalize_def maybe_alias "out" in
   assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
   let result_pair =
     check
-      "(type Result (E A) (Variant (Err E) (Ok A)))\n\
-       (type Pair (A B) (Record (first A) (second B)))\n\
+      "(variant Result (params E A) (Err E) (Ok A))\n\
+       (record Pair (params A B) (first A) (second B))\n\
        (def r (Result String Nat) (variant (Result String Nat) Ok 7))\n\
        (def p (Pair String Nat) (record (first \"n\") (second 7)))"
   in
   ignore result_pair;
+  expect_parse_error "(record Bad (x Nat) (x Bool))";
+  expect_parse_error "(variant Bad (Same Unit) (Same Nat))";
   expect_check_error
     "(type Maybe (A) (Variant (None Unit) (Some A)))\n(def bad Maybe unit)";
   expect_check_error

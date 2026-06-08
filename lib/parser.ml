@@ -59,6 +59,21 @@ let parse_binding = function
   | Sexp.List [ Sexp.Atom x; ty ] -> (x, parse_type ty)
   | x -> fail ("invalid binding: " ^ Sexp.to_string x)
 
+let parse_named_type_params = function
+  | Sexp.List (Sexp.Atom "params" :: params) :: rest -> (List.map atom params, rest)
+  | rest -> ([], rest)
+
+let parse_named_type_fields what fields =
+  let fields =
+    List.map
+      (function
+        | Sexp.List [ Sexp.Atom n; t ] -> (n, parse_type t)
+        | x -> fail ("invalid " ^ what ^ " field type: " ^ Sexp.to_string x))
+      fields
+  in
+  ensure_unique what (List.map fst fields);
+  sort_fields fields
+
 let rec parse_expr = function
   | Sexp.Atom "unit" -> EUnit
   | Sexp.Atom "true" -> EBool true
@@ -289,6 +304,18 @@ let parse_toplevel = function
   | Sexp.List [ Sexp.Atom "type"; Sexp.Atom n; Sexp.List params; ty ]
   | Sexp.List [ Sexp.Atom "alias"; Sexp.Atom n; Sexp.List params; ty ] ->
       `TypeAlias { type_name = n; type_params = List.map atom params; type_body = parse_type ty }
+  | Sexp.List (Sexp.Atom "record" :: Sexp.Atom n :: fields) ->
+      let params, fields = parse_named_type_params fields in
+      `TypeAlias
+        { type_name = n; type_params = params; type_body = TRecord (parse_named_type_fields "record field" fields) }
+  | Sexp.List (Sexp.Atom "variant" :: Sexp.Atom n :: cases) ->
+      let params, cases = parse_named_type_params cases in
+      `TypeAlias
+        {
+          type_name = n;
+          type_params = params;
+          type_body = TVariant (parse_named_type_fields "variant constructor" cases);
+        }
   | Sexp.List [ Sexp.Atom "def"; Sexp.Atom n; ty; body ] ->
       `Def { name = n; typ = parse_type ty; body = parse_expr body }
   | Sexp.List (Sexp.Atom "defrec" :: _) ->
