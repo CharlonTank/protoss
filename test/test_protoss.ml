@@ -25,6 +25,20 @@ let replace_once haystack needle replacement =
   in
   loop 0
 
+let replace_nth_once n haystack needle replacement =
+  let lh = String.length haystack and ln = String.length needle in
+  let rec loop seen i =
+    if i + ln > lh then fail ("substring occurrence not found: " ^ needle)
+    else if String.sub haystack i ln = needle then
+      let seen = seen + 1 in
+      if seen = n then
+        String.sub haystack 0 i ^ replacement
+        ^ String.sub haystack (i + ln) (lh - i - ln)
+      else loop seen (i + 1)
+    else loop seen (i + 1)
+  in
+  loop 0 0
+
 let sexp_atom_field name content =
   let rec field = function
     | Sexp.List (Sexp.Atom n :: Sexp.Atom value :: _) when String.equal n name -> Some value
@@ -442,6 +456,38 @@ let () =
      ignore (Canonical_ir.parse_graph (replace_once graph_json "\"kind\": \"Type\"" "\"kind\": \"Term\""));
      fail "canonical node graph mismatch should be rejected"
    with Kernel.Error _ -> ());
+  let first_node_def =
+    match node_defs with
+    | def :: _ -> def
+    | [] -> fail "missing canonical node def"
+  in
+  let extra_node_def_json =
+    "{ \"name\": \"extra\", \"defId\": \"extra\", \"typeRef\": "
+    ^ Ast.quote (json_string_field "typeRef" first_node_def)
+    ^ ", \"termRef\": " ^ Ast.quote (json_string_field "termRef" first_node_def) ^ " }"
+  in
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_nth_once 2 graph_json "\"defs\": ["
+             ("\"defs\": [" ^ extra_node_def_json ^ ", ")));
+     fail "canonical node graph extra def should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical node graph rejects extra defs"
+       (contains_substring msg "canonical node graph def count mismatch"));
+  let extra_string_type_node =
+    "{ \"id\": " ^ Ast.quote (Kernel.type_node_id Ast.TString)
+    ^ ", \"kind\": \"Type\", \"canonical\": " ^ Ast.quote (Kernel.type_to_canonical Ast.TString)
+    ^ ", \"payload\": " ^ Kernel.type_to_graph_json Ast.TString ^ ", \"edgeRefs\": [] }"
+  in
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json "\"nodes\": [" ("\"nodes\": [" ^ extra_string_type_node ^ ", ")));
+     fail "canonical node graph extra unreachable node should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical node graph rejects unreachable nodes"
+       (contains_substring msg "canonical node graph unreachable node"));
   let duplicate_def_ids = check "(def a Nat 1)\n(def b Nat 1)" in
   let duplicate_graph = Json.parse (Canonical_ir.serialize_graph duplicate_def_ids) in
   let duplicate_node_defs = json_array_field "defs" (json_field "nodeGraph" duplicate_graph) in

@@ -340,6 +340,8 @@ let validate_node_graph graph program_hash defs =
             (json_string_array_field "edgeRefs" node))
         nodes;
       ensure_unique "node def" (List.map (json_string_field "name") node_defs);
+      if List.length node_defs <> List.length defs then
+        fail "canonical node graph def count mismatch";
       List.iter
         (fun (d : Kernel.canonical_def) ->
           let node_def =
@@ -362,7 +364,25 @@ let validate_node_graph graph program_hash defs =
             fail ("canonical node graph missing type node: " ^ type_ref);
           if node_by_id term_ref = None then
             fail ("canonical node graph missing term node: " ^ term_ref))
-        defs
+        defs;
+      let reachable = Hashtbl.create 32 in
+      let rec mark id =
+        if not (Hashtbl.mem reachable id) then (
+          Hashtbl.add reachable id ();
+          match node_by_id id with
+          | None -> fail ("canonical node graph missing edge target: " ^ id)
+          | Some node -> List.iter mark (json_string_array_field "edgeRefs" node))
+      in
+      node_defs
+      |> List.iter (fun node_def ->
+             mark (json_string_field "typeRef" node_def);
+             mark (json_string_field "termRef" node_def));
+      List.iter
+        (fun node ->
+          let id = json_string_field "id" node in
+          if not (Hashtbl.mem reachable id) then
+            fail ("canonical node graph unreachable node: " ^ id))
+        nodes
 
 let parse_graph input =
   let graph = try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg) in
