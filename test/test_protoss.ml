@@ -1501,6 +1501,38 @@ let () =
     (string_of_int
        (List.length
           (Canonical_ir.graph_capability_scopes_for process_graph_json human_capability_ref)));
+  let process_host_contract_json = Canonical_ir.graph_host_contract process_graph_json in
+  let process_host_contract = Json.parse process_host_contract_json in
+  assert_equal "process host contract format" "protoss-host-contract-v1"
+    (json_string_field "format" process_host_contract);
+  assert_equal "process host contract graph hash" (json_string_field "graphHash" process_graph)
+    (json_string_field "graphHash" process_host_contract);
+  assert_true "process host contract hash"
+    (String.length (json_string_field "contractHash" process_host_contract) > 3);
+  assert_equal "process host contract deterministic" process_host_contract_json
+    (Canonical_ir.graph_host_contract process_graph_json);
+  let process_host_caps = json_array_field "capabilities" process_host_contract in
+  assert_equal "process host contract capability count" "1"
+    (string_of_int (List.length process_host_caps));
+  let process_host_cap = List.hd process_host_caps in
+  assert_equal "process host contract capability ref" human_capability_ref
+    (json_string_field "capabilityRef" process_host_cap);
+  let process_host_requests = json_array_field "requests" process_host_cap in
+  let process_host_request = List.hd process_host_requests in
+  assert_equal "process host contract request ref" human_signature_ref
+    (json_string_field "requestSignatureRef" process_host_request);
+  assert_equal "process host contract payload type" "(Record (prompt String))"
+    (json_string_field "payloadTypeCanonical" process_host_request);
+  assert_equal "process host contract response type" "String"
+    (json_string_field "responseTypeCanonical" process_host_request);
+  let process_host_scopes = json_array_field "capabilityScopes" process_host_contract in
+  assert_equal "process host contract scope count" "1"
+    (string_of_int (List.length process_host_scopes));
+  let process_host_scope = List.hd process_host_scopes in
+  assert_equal "process host contract scope def" "askName"
+    (json_string_field "def" process_host_scope);
+  assert_equal "process host contract scope capability" "Human.ask"
+    (json_string_field "capability" process_host_scope);
   assert_equal "process graph capability refs" human_capability_ref
     (String.concat "," (json_string_array_field "capabilityRefs" process_graph));
   (try
@@ -2482,6 +2514,20 @@ let () =
        (List.length
           (Workspace.store_graph_capability_scopes_for build_a.store store_graph_hash
              store_graph_human_cap.Canonical_ir.graph_cap_ref)));
+  let store_graph_host_contract_json =
+    Workspace.store_graph_host_contract build_a.store store_graph_hash
+  in
+  let store_graph_host_contract = Json.parse store_graph_host_contract_json in
+  assert_equal "project store graph host contract format" "protoss-host-contract-v1"
+    (json_string_field "format" store_graph_host_contract);
+  assert_equal "project store graph host contract graph hash" store_graph_hash
+    (json_string_field "graphHash" store_graph_host_contract);
+  assert_equal "project store graph host contract deterministic" store_graph_host_contract_json
+    (Workspace.store_graph_host_contract build_a.store store_graph_hash);
+  assert_true "project store graph host contract includes capability"
+    (contains_substring store_graph_host_contract_json "Human.ask");
+  assert_true "project store graph host contract includes askName scope"
+    (contains_substring store_graph_host_contract_json "\"def\": \"askName\"");
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;

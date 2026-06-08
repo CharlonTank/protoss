@@ -33,8 +33,8 @@ let usage () =
      \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
-     \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --capability-scopes <graph.json> [nameOrCapRef] | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
-     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --node <nodeRef> | --def <nameOrDefId>\n\
+     \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --capability-scopes <graph.json> [nameOrCapRef] | --host-contract <graph.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
+     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --host-contract | --node <nodeRef> | --def <nameOrDefId>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
@@ -622,6 +622,8 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_capability_scopes
            (Protoss.Canonical_ir.graph_capability_scopes_for (Protoss.Store.read_file file) id))
+  | [ "--host-contract"; file ] ->
+      print_string (Protoss.Canonical_ir.graph_host_contract (Protoss.Store.read_file file))
   | [ "--node"; file; node_ref ] ->
       print_string
         (Protoss.Canonical_ir.describe_graph_node
@@ -678,6 +680,9 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_capability_scopes
            (Protoss.Workspace.store_graph_capability_scopes_for store graph_hash id))
+  | [ "--store-graph"; project_or_store; graph_hash; "--host-contract" ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      print_string (Protoss.Workspace.store_graph_host_contract store graph_hash)
   | [ "--store-graph"; project_or_store; graph_hash; "--node"; node_ref ] ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       print_string

@@ -831,6 +831,63 @@ let describe_graph_capability_scopes scopes =
   ^ String.concat "\n" (List.map line scopes)
   ^ (if scopes = [] then "" else "\n")
 
+let graph_capability_request_to_contract_json req =
+  Kernel.json_obj
+    [
+      Kernel.json_field "requestSignatureRef" (Kernel.json_string req.graph_cap_req_ref);
+      Kernel.json_field "tag" (Kernel.json_string req.graph_cap_req_tag);
+      Kernel.json_field "payloadType" (Kernel.type_to_graph_json req.graph_cap_req_payload_type);
+      Kernel.json_field "payloadTypeCanonical"
+        (Kernel.json_string (Kernel.type_to_canonical req.graph_cap_req_payload_type));
+      Kernel.json_field "responseType" (Kernel.type_to_graph_json req.graph_cap_req_response_type);
+      Kernel.json_field "responseTypeCanonical"
+        (Kernel.json_string (Kernel.type_to_canonical req.graph_cap_req_response_type));
+    ]
+
+let graph_capability_to_contract_json cap =
+  Kernel.json_obj
+    [
+      Kernel.json_field "name" (Kernel.json_string cap.graph_cap_name);
+      Kernel.json_field "capabilityRef" (Kernel.json_string cap.graph_cap_ref);
+      Kernel.json_field "requests"
+        (Kernel.json_array graph_capability_request_to_contract_json cap.graph_cap_requests);
+    ]
+
+let graph_capability_scope_to_contract_json scope =
+  Kernel.json_obj
+    [
+      Kernel.json_field "def" (Kernel.json_string scope.graph_scope_def_name);
+      Kernel.json_field "defId" (Kernel.json_string scope.graph_scope_def_id);
+      Kernel.json_field "defHash" (Kernel.json_string scope.graph_scope_def_hash);
+      Kernel.json_field "capability" (Kernel.json_string scope.graph_scope_capability);
+      Kernel.json_field "capabilityRef" (Kernel.json_string scope.graph_scope_capability_ref);
+    ]
+
+let graph_host_contract input =
+  ignore (checked_of_graph input);
+  let graph = Json.parse input in
+  let capabilities = graph_capabilities input in
+  let scopes = graph_capability_scopes input in
+  let format_field = Kernel.json_field "format" (Kernel.json_string "protoss-host-contract-v1") in
+  let contract_body_fields =
+    [
+      Kernel.json_field "graphHash" (Kernel.json_string (json_string_field "graphHash" graph));
+      Kernel.json_field "programHash" (Kernel.json_string (json_string_field "programHash" graph));
+      Kernel.json_field "hashAlgorithm" (Kernel.json_string Kernel.hash_algorithm);
+      Kernel.json_field "hashPrefix" (Kernel.json_string Kernel.hash_prefix);
+      Kernel.json_field "capabilities"
+        (Kernel.json_array graph_capability_to_contract_json capabilities);
+      Kernel.json_field "capabilityScopes"
+        (Kernel.json_array graph_capability_scope_to_contract_json scopes);
+    ]
+  in
+  let contract_hash = Kernel.hash_string (Kernel.json_obj (format_field :: contract_body_fields) ^ "\n") in
+  Kernel.json_obj
+    (format_field
+    :: Kernel.json_field "contractHash" (Kernel.json_string contract_hash)
+    :: contract_body_fields)
+  ^ "\n"
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program
