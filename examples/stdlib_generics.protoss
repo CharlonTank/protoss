@@ -74,6 +74,35 @@
 (def swapped (Pair Nat String)
   ((inst Pair.swap String Nat) pair))
 
+(def assoc (Assoc String Nat)
+  ((((inst Assoc.insert String Nat) "age") 41)
+    ((((inst Assoc.insert String Nat) "count") 2)
+      (inst Assoc.empty String Nat))))
+
+(def assocAge (Maybe Nat)
+  ((((inst Assoc.get String Nat) String.eqString) "age") assoc))
+
+(def assocHasCount Bool
+  ((((inst Assoc.contains String Nat) String.eqString) "count") assoc))
+
+(def assocKeys (List String)
+  ((inst Assoc.keys String Nat) assoc))
+
+(def assocValues (List Nat)
+  ((inst Assoc.values String Nat) assoc))
+
+(def setA (Set Nat)
+  ((((inst Set.insert Nat) Nat.eqNat) 2)
+    ((((inst Set.insert Nat) Nat.eqNat) 1)
+      (inst Set.empty Nat))))
+
+(def setHasTwo Bool
+  ((((inst Set.contains Nat) Nat.eqNat) 2) setA))
+
+(def setUnion (Set Nat)
+  ((((inst Set.union Nat) Nat.eqNat) setA)
+    (Cons Nat 2 (Cons Nat 3 (Nil Nat)))))
+
 (def total Nat
   (foldList bumped 0
     (lambda (x Nat)

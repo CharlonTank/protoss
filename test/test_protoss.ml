@@ -935,6 +935,21 @@ let () =
   let swapped, _ = Runtime.normalize_def stdlib_generics "swapped" in
   assert_equal "stdlib generic Pair.swap" "{first = 7, second = \"n\"}"
     (Runtime.value_to_string swapped);
+  let assoc_age, _ = Runtime.normalize_def stdlib_generics "assocAge" in
+  assert_equal "stdlib generic Assoc.get" "Some 41" (Runtime.value_to_string assoc_age);
+  let assoc_has_count, _ = Runtime.normalize_def stdlib_generics "assocHasCount" in
+  assert_equal "stdlib generic Assoc.contains" "true"
+    (Runtime.value_to_string assoc_has_count);
+  let assoc_keys, _ = Runtime.normalize_def stdlib_generics "assocKeys" in
+  assert_equal "stdlib generic Assoc.keys" "[\"age\", \"count\"]"
+    (Runtime.value_to_string assoc_keys);
+  let assoc_values, _ = Runtime.normalize_def stdlib_generics "assocValues" in
+  assert_equal "stdlib generic Assoc.values" "[41, 2]"
+    (Runtime.value_to_string assoc_values);
+  let set_has_two, _ = Runtime.normalize_def stdlib_generics "setHasTwo" in
+  assert_equal "stdlib generic Set.contains" "true" (Runtime.value_to_string set_has_two);
+  let set_union, _ = Runtime.normalize_def stdlib_generics "setUnion" in
+  assert_equal "stdlib generic Set.union" "[1, 2, 3]" (Runtime.value_to_string set_union);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in

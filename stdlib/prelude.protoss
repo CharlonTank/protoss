@@ -1,10 +1,12 @@
-; Protoss stdlib v0.5. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.6. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Result (E A) (Variant (Err E) (Ok A)))
 (type Pair (A B) (Record (first A) (second B)))
+(type Assoc (K V) (List (Pair K V)))
+(type Set (A) (List A))
 
-(def Stdlib.version String "v0.5")
+(def Stdlib.version String "v0.6")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -166,3 +168,85 @@
     (record
       (first (get p second))
       (second (get p first)))))
+
+(defpoly Assoc.empty (params K V)
+  (Assoc K V)
+  (Nil (Pair K V)))
+
+(defpoly Assoc.insert (params K V)
+  (-> K (-> V (-> (Assoc K V) (Assoc K V))))
+  (lambda (key K)
+    (lambda (value V)
+      (lambda (entries (Assoc K V))
+        (Cons (Pair K V)
+          (record (first key) (second value))
+          entries)))))
+
+(defpoly Assoc.get (params K V)
+  (-> (-> K (-> K Bool)) (-> K (-> (Assoc K V) (Maybe V))))
+  (lambda (eq (-> K (-> K Bool)))
+    (lambda (key K)
+      (lambda (entries (Assoc K V))
+        (foldList entries (variant (Maybe V) None unit)
+          (lambda (entry (Pair K V))
+            (lambda (acc (Maybe V))
+              (case ((eq (get entry first)) key)
+                (true (variant Some (get entry second)))
+                (false acc)))))))))
+
+(defpoly Assoc.contains (params K V)
+  (-> (-> K (-> K Bool)) (-> K (-> (Assoc K V) Bool)))
+  (lambda (eq (-> K (-> K Bool)))
+    (lambda (key K)
+      (lambda (entries (Assoc K V))
+        ((inst Maybe.isSome V)
+          ((((inst Assoc.get K V) eq) key) entries))))))
+
+(defpoly Assoc.keys (params K V)
+  (-> (Assoc K V) (List K))
+  (lambda (entries (Assoc K V))
+    (((inst List.map (Pair K V) K) entries)
+      (lambda (entry (Pair K V))
+        (get entry first)))))
+
+(defpoly Assoc.values (params K V)
+  (-> (Assoc K V) (List V))
+  (lambda (entries (Assoc K V))
+    (((inst List.map (Pair K V) V) entries)
+      (lambda (entry (Pair K V))
+        (get entry second)))))
+
+(defpoly Set.empty (params A)
+  (Set A)
+  (Nil A))
+
+(defpoly Set.contains (params A)
+  (-> (-> A (-> A Bool)) (-> A (-> (Set A) Bool)))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (value A)
+      (lambda (items (Set A))
+        (foldList items false
+          (lambda (item A)
+            (lambda (acc Bool)
+              (case ((eq item) value)
+                (true true)
+                (false acc)))))))))
+
+(defpoly Set.insert (params A)
+  (-> (-> A (-> A Bool)) (-> A (-> (Set A) (Set A))))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (value A)
+      (lambda (items (Set A))
+        (case ((((inst Set.contains A) eq) value) items)
+          (true items)
+          (false (Cons A value items)))))))
+
+(defpoly Set.union (params A)
+  (-> (-> A (-> A Bool)) (-> (Set A) (-> (Set A) (Set A))))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (left (Set A))
+      (lambda (right (Set A))
+        (foldList left right
+          (lambda (item A)
+            (lambda (acc (Set A))
+              ((((inst Set.insert A) eq) item) acc))))))))
