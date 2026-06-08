@@ -551,6 +551,21 @@
 (def protossParsedBadImport (Result String (List ProtossDecl))
   (Protoss.parseText "(import prelude.protoss)"))
 
+(def protossParsedAlias (Result String (List ProtossDecl))
+  (Protoss.parseText "(alias Count Nat)"))
+
+(def protossParsedDefPoly (Result String (List ProtossDecl))
+  (Protoss.parseText "(defpoly id (params A) (-> A A) (lambda (x A) x))"))
+
+(def protossParsedDefCap (Result String (List ProtossDecl))
+  (Protoss.parseText "(defcap askName (capabilities Human.ask) (Process String) (Human.ask \"Name?\"))"))
+
+(def protossParsedDefPolyCap (Result String (List ProtossDecl))
+  (Protoss.parseText "(defpolycap id (params A) (capabilities) (-> A A) (lambda (x A) x))"))
+
+(def protossParsedBadDefCap (Result String (List ProtossDecl))
+  (Protoss.parseText "(defcap askName Human.ask (Process String) (Human.ask \"Name?\"))"))
+
 (def protossParsedBadField (Result String (List ProtossDecl))
   (Protoss.parseText "(record Bad (name))"))
 
@@ -580,6 +595,9 @@
 
 (def protossFormattedModuleFile (Result String String)
   (Protoss.formatText " (module   Demo.Math)\n(import \"prelude.protoss\")\n(export   Number   double)\n(capabilities Human.ask Clock.read)"))
+
+(def protossFormattedPolyCaps (Result String String)
+  (Protoss.formatText "(alias Count Nat)\n(defpoly id (params A) (-> A A) (lambda (x A) x))\n(defcap askName (capabilities Human.ask) (Process String) (Human.ask \"Name?\"))\n(defpolycap pure (params A) (capabilities) (-> A A) (lambda (x A) x))"))
 
 (def jsonProfile Json
   (Json.object

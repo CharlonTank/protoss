@@ -2267,6 +2267,34 @@ let () =
   in
   assert_equal "stdlib Protoss.parseText bad import" "Err \"expected import path\""
     (Runtime.value_to_string protoss_parsed_bad_import);
+  let protoss_parsed_alias, _ = Runtime.normalize_def stdlib_generics "protossParsedAlias" in
+  assert_equal "stdlib Protoss.parseText alias"
+    "Ok [PDType {body = PTName \"Nat\", name = \"Count\", typeParams = []}]"
+    (Runtime.value_to_string protoss_parsed_alias);
+  let protoss_parsed_defpoly, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDefPoly"
+  in
+  assert_equal "stdlib Protoss.parseText defpoly"
+    "Ok [PDDefPoly {expr = PELambda {body = PEVar \"x\", param = {name = \"x\", typ = PTName \"A\"}}, name = \"id\", typ = PTFun {first = PTName \"A\", second = PTName \"A\"}, typeParams = [\"A\"]}]"
+    (Runtime.value_to_string protoss_parsed_defpoly);
+  let protoss_parsed_defcap, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDefCap"
+  in
+  assert_equal "stdlib Protoss.parseText defcap"
+    "Ok [PDDefCap {capabilities = [\"Human.ask\"], expr = PERequest PRAskHuman \"Name?\", name = \"askName\", typ = PTApply {args = [PTName \"String\"], name = \"Process\"}}]"
+    (Runtime.value_to_string protoss_parsed_defcap);
+  let protoss_parsed_defpolycap, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDefPolyCap"
+  in
+  assert_equal "stdlib Protoss.parseText defpolycap"
+    "Ok [PDDefPolyCap {capabilities = [], expr = PELambda {body = PEVar \"x\", param = {name = \"x\", typ = PTName \"A\"}}, name = \"id\", typ = PTFun {first = PTName \"A\", second = PTName \"A\"}, typeParams = [\"A\"]}]"
+    (Runtime.value_to_string protoss_parsed_defpolycap);
+  let protoss_parsed_bad_defcap, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadDefCap"
+  in
+  assert_equal "stdlib Protoss.parseText bad defcap"
+    "Err \"invalid definition capabilities\""
+    (Runtime.value_to_string protoss_parsed_bad_defcap);
   let protoss_parsed_bad_field, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadField"
   in
@@ -2323,6 +2351,12 @@ let () =
   assert_equal "stdlib Protoss.formatText module file"
     "Ok \"(module Demo.Math)\\n(import \\\"prelude.protoss\\\")\\n(export Number double)\\n(capabilities Human.ask Clock.read)\""
     (Runtime.value_to_string protoss_formatted_module_file);
+  let protoss_formatted_poly_caps, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedPolyCaps"
+  in
+  assert_equal "stdlib Protoss.formatText poly caps"
+    "Ok \"(type Count Nat)\\n(defpoly id (params A) (-> A A) (lambda (x A) x))\\n(defcap askName (capabilities Human.ask) (Process String) (Human.ask \\\"Name?\\\"))\\n(defpolycap pure (params A) (capabilities) (-> A A) (lambda (x A) x))\""
+    (Runtime.value_to_string protoss_formatted_poly_caps);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

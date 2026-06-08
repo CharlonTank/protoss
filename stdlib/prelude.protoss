@@ -1,4 +1,4 @@
-; Protoss stdlib v0.32. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.33. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -137,6 +137,22 @@
   (name String)
   (typ ProtossType)
   (expr ProtossExpr))
+(record ProtossPolyDef
+  (name String)
+  (typeParams (List String))
+  (typ ProtossType)
+  (expr ProtossExpr))
+(record ProtossCapDef
+  (name String)
+  (capabilities (List String))
+  (typ ProtossType)
+  (expr ProtossExpr))
+(record ProtossPolyCapDef
+  (name String)
+  (typeParams (List String))
+  (capabilities (List String))
+  (typ ProtossType)
+  (expr ProtossExpr))
 (record ProtossTypeAlias
   (name String)
   (typeParams (List String))
@@ -161,6 +177,9 @@
 (variant ProtossDecl
   (PDCapabilities (List String))
   (PDDef ProtossDef)
+  (PDDefCap ProtossCapDef)
+  (PDDefPoly ProtossPolyDef)
+  (PDDefPolyCap ProtossPolyCapDef)
   (PDExport (List String))
   (PDImport String)
   (PDModule String)
@@ -175,7 +194,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.32")
+(def Stdlib.version String "v0.33")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -2154,6 +2173,36 @@
                   (Ok names (Protoss.stringListOk (Cons String name names)))))
               (_ (Protoss.stringListErr message)))))))))
 
+(def Protoss.parseParamsClause (-> Sexp (Result String (List String)))
+  (lambda (node Sexp)
+    (case node
+      (SList items
+        (caseList items
+          (Nil (Protoss.stringListErr "invalid type parameter clause"))
+          (Cons head params
+            (case head
+              (SAtom tag
+                (case ((String.eqString tag) "params")
+                  (true (Protoss.parseParamNames params))
+                  (false (Protoss.stringListErr "invalid type parameter clause"))))
+              (_ (Protoss.stringListErr "invalid type parameter clause"))))))
+      (_ (Protoss.stringListErr "invalid type parameter clause")))))
+
+(def Protoss.parseCapabilityClause (-> Sexp (Result String (List String)))
+  (lambda (node Sexp)
+    (case node
+      (SList items
+        (caseList items
+          (Nil (Protoss.stringListErr "invalid definition capabilities"))
+          (Cons head caps
+            (case head
+              (SAtom tag
+                (case ((String.eqString tag) "capabilities")
+                  (true ((Protoss.parseNames "expected capability name") caps))
+                  (false (Protoss.stringListErr "invalid definition capabilities"))))
+              (_ (Protoss.stringListErr "invalid definition capabilities"))))))
+      (_ (Protoss.stringListErr "invalid definition capabilities")))))
+
 (def Protoss.paramTailOk (-> (List String) (-> (List Sexp) (Result String ProtossParamTail)))
   (lambda (params (List String))
     (lambda (rest (List Sexp))
@@ -2243,6 +2292,33 @@
           (SAtom name ((Protoss.parseDefTail name) defTail))
           (_ (Protoss.declErr "expected def name")))))))
 
+(def Protoss.parseDefCapDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected defcap name"))
+      (Cons nameNode defTail
+        (case nameNode
+          (SAtom name ((Protoss.parseDefCapTail name) defTail))
+          (_ (Protoss.declErr "expected defcap name")))))))
+
+(def Protoss.parseDefPolyDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected defpoly name"))
+      (Cons nameNode defTail
+        (case nameNode
+          (SAtom name ((Protoss.parseDefPolyTail name) defTail))
+          (_ (Protoss.declErr "expected defpoly name")))))))
+
+(def Protoss.parseDefPolyCapDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected defpolycap name"))
+      (Cons nameNode defTail
+        (case nameNode
+          (SAtom name ((Protoss.parseDefPolyCapTail name) defTail))
+          (_ (Protoss.declErr "expected defpolycap name")))))))
+
 (def Protoss.parseTypeDecl (-> (List Sexp) (Result String ProtossDecl))
   (lambda (tail (List Sexp))
     (caseList tail
@@ -2293,6 +2369,115 @@
                               (record (name name) (typ typ) (expr parsedExpr)))))))))
                 (Cons extraHead extraTail
                   (variant Err "too many def fields"))))))))))
+
+(def Protoss.parseDefCapTail
+  (-> String (-> (List Sexp) (Result String ProtossDecl)))
+  (lambda (name String)
+    (lambda (tail (List Sexp))
+      (caseList tail
+        (Nil (Protoss.declErr "expected defcap capabilities"))
+        (Cons capsNode rest
+          (caseList rest
+            (Nil (Protoss.declErr "expected defcap type"))
+            (Cons typeNode more
+              (caseList more
+                (Nil (Protoss.declErr "expected defcap expression"))
+                (Cons expr extra
+                  (caseList extra
+                    (Nil
+                      (case (Protoss.parseCapabilityClause capsNode)
+                        (Err err (Protoss.declErr err))
+                        (Ok capabilities
+                          (case (Protoss.parseType typeNode)
+                            (Err err (Protoss.declErr err))
+                            (Ok typ
+                              (case (Protoss.parseExpr expr)
+                                (Err err (Protoss.declErr err))
+                                (Ok parsedExpr
+                                  (Protoss.declOk
+                                    (variant PDDefCap
+                                      (record
+                                        (name name)
+                                        (capabilities capabilities)
+                                        (typ typ)
+                                        (expr parsedExpr)))))))))))
+                    (Cons extraHead extraTail
+                      (Protoss.declErr "too many defcap fields"))))))))))))
+
+(def Protoss.parseDefPolyTail
+  (-> String (-> (List Sexp) (Result String ProtossDecl)))
+  (lambda (name String)
+    (lambda (tail (List Sexp))
+      (caseList tail
+        (Nil (Protoss.declErr "expected defpoly params"))
+        (Cons paramsNode rest
+          (caseList rest
+            (Nil (Protoss.declErr "expected defpoly type"))
+            (Cons typeNode more
+              (caseList more
+                (Nil (Protoss.declErr "expected defpoly expression"))
+                (Cons expr extra
+                  (caseList extra
+                    (Nil
+                      (case (Protoss.parseParamsClause paramsNode)
+                        (Err err (Protoss.declErr err))
+                        (Ok typeParams
+                          (case (Protoss.parseType typeNode)
+                            (Err err (Protoss.declErr err))
+                            (Ok typ
+                              (case (Protoss.parseExpr expr)
+                                (Err err (Protoss.declErr err))
+                                (Ok parsedExpr
+                                  (Protoss.declOk
+                                    (variant PDDefPoly
+                                      (record
+                                        (name name)
+                                        (typeParams typeParams)
+                                        (typ typ)
+                                        (expr parsedExpr)))))))))))
+                    (Cons extraHead extraTail
+                      (Protoss.declErr "too many defpoly fields"))))))))))))
+
+(def Protoss.parseDefPolyCapTail
+  (-> String (-> (List Sexp) (Result String ProtossDecl)))
+  (lambda (name String)
+    (lambda (tail (List Sexp))
+      (caseList tail
+        (Nil (Protoss.declErr "expected defpolycap params"))
+        (Cons paramsNode rest
+          (caseList rest
+            (Nil (Protoss.declErr "expected defpolycap capabilities"))
+            (Cons capsNode more
+              (caseList more
+                (Nil (Protoss.declErr "expected defpolycap type"))
+                (Cons typeNode exprTail
+                  (caseList exprTail
+                    (Nil (Protoss.declErr "expected defpolycap expression"))
+                    (Cons expr extra
+                      (caseList extra
+                        (Nil
+                          (case (Protoss.parseParamsClause paramsNode)
+                            (Err err (Protoss.declErr err))
+                            (Ok typeParams
+                              (case (Protoss.parseCapabilityClause capsNode)
+                                (Err err (Protoss.declErr err))
+                                (Ok capabilities
+                                  (case (Protoss.parseType typeNode)
+                                    (Err err (Protoss.declErr err))
+                                    (Ok typ
+                                      (case (Protoss.parseExpr expr)
+                                        (Err err (Protoss.declErr err))
+                                        (Ok parsedExpr
+                                          (Protoss.declOk
+                                            (variant PDDefPolyCap
+                                              (record
+                                                (name name)
+                                                (typeParams typeParams)
+                                                (capabilities capabilities)
+                                                (typ typ)
+                                                (expr parsedExpr)))))))))))))
+                        (Cons extraHead extraTail
+                          (Protoss.declErr "too many defpolycap fields"))))))))))))))
 
 (def Protoss.parseTypeAliasTail
   (-> String (-> (List Sexp) (Result String ProtossDecl)))
@@ -2469,6 +2654,49 @@
                     (typeParams (get paramTail typeParams))
                     (cases cases)))))))))))
 
+(def Protoss.parseDeclByTag
+  (-> String (-> (List Sexp) (Result String ProtossDecl)))
+  (lambda (tag String)
+    (lambda (tail (List Sexp))
+      (case ((String.eqString tag) "module")
+        (true (Protoss.parseModuleDecl tail))
+        (false
+          (case ((String.eqString tag) "import")
+            (true (Protoss.parseImportDecl tail))
+            (false
+              (case ((String.eqString tag) "export")
+                (true (Protoss.parseExportDecl tail))
+                (false
+                  (case ((String.eqString tag) "capabilities")
+                    (true (Protoss.parseCapabilitiesDecl tail))
+                    (false
+                      (case ((String.eqString tag) "def")
+                        (true (Protoss.parseDefDecl tail))
+                        (false
+                          (case ((String.eqString tag) "defcap")
+                            (true (Protoss.parseDefCapDecl tail))
+                            (false
+                              (case ((String.eqString tag) "defpoly")
+                                (true (Protoss.parseDefPolyDecl tail))
+                                (false
+                                  (case ((String.eqString tag) "defpolycap")
+                                    (true (Protoss.parseDefPolyCapDecl tail))
+                                    (false
+                                      (case ((String.eqString tag) "type")
+                                        (true (Protoss.parseTypeDecl tail))
+                                        (false
+                                          (case ((String.eqString tag) "alias")
+                                            (true (Protoss.parseTypeDecl tail))
+                                            (false
+                                              (case ((String.eqString tag) "record")
+                                                (true (Protoss.parseRecordDecl tail))
+                                                (false
+                                                  (case ((String.eqString tag) "variant")
+                                                    (true (Protoss.parseVariantDecl tail))
+                                                    (false
+                                                      (Protoss.declErr
+                                                        "expected declaration tag"))))))))))))))))))))))))))))
+
 (def Protoss.parseDecl (-> Sexp (Result String ProtossDecl))
   (lambda (form Sexp)
     (case form
@@ -2479,33 +2707,7 @@
           (Nil (variant Err "empty declaration"))
           (Cons head tail
             (case head
-              (SAtom tag
-                (case ((String.eqString tag) "module")
-                  (true (Protoss.parseModuleDecl tail))
-                  (false
-                    (case ((String.eqString tag) "import")
-                      (true (Protoss.parseImportDecl tail))
-                      (false
-                        (case ((String.eqString tag) "export")
-                          (true (Protoss.parseExportDecl tail))
-                          (false
-                            (case ((String.eqString tag) "capabilities")
-                              (true (Protoss.parseCapabilitiesDecl tail))
-                              (false
-                                (case ((String.eqString tag) "def")
-                                  (true (Protoss.parseDefDecl tail))
-                                  (false
-                                    (case ((String.eqString tag) "type")
-                                      (true (Protoss.parseTypeDecl tail))
-                                      (false
-                                        (case ((String.eqString tag) "record")
-                                          (true (Protoss.parseRecordDecl tail))
-                                          (false
-                                            (case ((String.eqString tag) "variant")
-                                              (true (Protoss.parseVariantDecl tail))
-                                              (false
-                                                (Protoss.declErr
-                                                  "expected declaration tag"))))))))))))))))))
+              (SAtom tag ((Protoss.parseDeclByTag tag) tail))
               (_ (variant Err "expected declaration tag")))))))))
 
 (def Protoss.parseDecls (-> (List Sexp) (Result String (List ProtossDecl)))
@@ -2856,6 +3058,10 @@
         (Cons String (Protoss.renderForm "params" params)
           (Nil String))))))
 
+(def Protoss.renderCapabilitiesClause (-> (List String) String)
+  (lambda (capabilities (List String))
+    (Protoss.renderForm "capabilities" capabilities)))
+
 (def Protoss.renderDecl (-> ProtossDecl String)
   (lambda (decl ProtossDecl)
     (case decl
@@ -2867,6 +3073,28 @@
             (Cons String (Protoss.renderType (get def typ))
               (Cons String (Protoss.renderExpr (get def expr))
                 (Nil String))))))
+      (PDDefCap def
+        (Protoss.renderForm "defcap"
+          (Cons String (get def name)
+            (Cons String (Protoss.renderCapabilitiesClause (get def capabilities))
+              (Cons String (Protoss.renderType (get def typ))
+                (Cons String (Protoss.renderExpr (get def expr))
+                  (Nil String)))))))
+      (PDDefPoly def
+        (Protoss.renderForm "defpoly"
+          (Cons String (get def name)
+            (Cons String (Protoss.renderForm "params" (get def typeParams))
+              (Cons String (Protoss.renderType (get def typ))
+                (Cons String (Protoss.renderExpr (get def expr))
+                  (Nil String)))))))
+      (PDDefPolyCap def
+        (Protoss.renderForm "defpolycap"
+          (Cons String (get def name)
+            (Cons String (Protoss.renderForm "params" (get def typeParams))
+              (Cons String (Protoss.renderCapabilitiesClause (get def capabilities))
+                (Cons String (Protoss.renderType (get def typ))
+                  (Cons String (Protoss.renderExpr (get def expr))
+                    (Nil String))))))))
       (PDExport names
         (Protoss.renderForm "export" names))
       (PDImport path
