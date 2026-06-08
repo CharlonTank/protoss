@@ -1833,6 +1833,12 @@ let store_graph_capabilities store graph_hash =
 let store_graph_capability store graph_hash id =
   Canonical_ir.graph_capability (graph_store store graph_hash) id
 
+let store_graph_capability_scopes store graph_hash =
+  Canonical_ir.graph_capability_scopes (graph_store store graph_hash)
+
+let store_graph_capability_scopes_for store graph_hash id =
+  Canonical_ir.graph_capability_scopes_for (graph_store store graph_hash) id
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

@@ -1485,6 +1485,22 @@ let () =
     (Ast.string_of_typ inspected_human_request.Canonical_ir.graph_cap_req_payload_type);
   assert_equal "process graph inspected capability response type" "String"
     (Ast.string_of_typ inspected_human_request.Canonical_ir.graph_cap_req_response_type);
+  let graph_capability_scopes = Canonical_ir.graph_capability_scopes process_graph_json in
+  assert_equal "process graph capability scope count" "1"
+    (string_of_int (List.length graph_capability_scopes));
+  assert_true "process graph capability scope describes def"
+    (contains_substring (Canonical_ir.describe_graph_capability_scopes graph_capability_scopes)
+       "def=askName");
+  assert_true "process graph capability scope describes capability"
+    (contains_substring (Canonical_ir.describe_graph_capability_scopes graph_capability_scopes)
+       "capability=Human.ask");
+  assert_equal "process graph capability scope filter by name" "1"
+    (string_of_int
+       (List.length (Canonical_ir.graph_capability_scopes_for process_graph_json "Human.ask")));
+  assert_equal "process graph capability scope filter by ref" "1"
+    (string_of_int
+       (List.length
+          (Canonical_ir.graph_capability_scopes_for process_graph_json human_capability_ref)));
   assert_equal "process graph capability refs" human_capability_ref
     (String.concat "," (json_string_array_field "capabilityRefs" process_graph));
   (try
@@ -2450,6 +2466,22 @@ let () =
     (contains_substring
        (Canonical_ir.describe_graph_capabilities [ store_graph_human_cap ])
        "request=AskHuman");
+  let store_graph_capability_scopes =
+    Workspace.store_graph_capability_scopes_for build_a.store store_graph_hash "Human.ask"
+  in
+  assert_true "project store graph capability scope includes askName"
+    (contains_substring
+       (Canonical_ir.describe_graph_capability_scopes store_graph_capability_scopes)
+       "def=askName");
+  assert_true "project store graph capability scope includes Human.ask"
+    (contains_substring
+       (Canonical_ir.describe_graph_capability_scopes store_graph_capability_scopes)
+       "capability=Human.ask");
+  assert_equal "project store graph capability scope by ref" "1"
+    (string_of_int
+       (List.length
+          (Workspace.store_graph_capability_scopes_for build_a.store store_graph_hash
+             store_graph_human_cap.Canonical_ir.graph_cap_ref)));
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;

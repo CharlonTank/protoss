@@ -777,6 +777,60 @@ let describe_graph_capabilities caps =
   ^ String.concat "\n" lines
   ^ (if lines = [] then "" else "\n")
 
+type graph_capability_scope = {
+  graph_scope_def_name : string;
+  graph_scope_def_id : string;
+  graph_scope_def_hash : string;
+  graph_scope_capability : string;
+  graph_scope_capability_ref : string;
+}
+
+let graph_capability_scopes_for_def def =
+  let rec zip caps refs =
+    match (caps, refs) with
+    | [], [] -> []
+    | cap :: caps, ref :: refs ->
+        {
+          graph_scope_def_name = def.graph_def_name;
+          graph_scope_def_id = def.graph_def_id;
+          graph_scope_def_hash = def.graph_def_hash;
+          graph_scope_capability = cap;
+          graph_scope_capability_ref = ref;
+        }
+        :: zip caps refs
+    | _ -> fail ("canonical graph capability scope/ref length mismatch: " ^ def.graph_def_name)
+  in
+  zip def.graph_def_capability_scope def.graph_def_capability_scope_refs
+
+let sort_graph_capability_scopes scopes =
+  List.sort
+    (fun a b ->
+      match String.compare a.graph_scope_capability b.graph_scope_capability with
+      | 0 -> String.compare a.graph_scope_def_name b.graph_scope_def_name
+      | n -> n)
+    scopes
+
+let graph_capability_scopes input =
+  graph_definitions input
+  |> List.concat_map graph_capability_scopes_for_def
+  |> sort_graph_capability_scopes
+
+let graph_capability_scopes_for input id =
+  graph_capability_scopes input
+  |> List.filter (fun scope ->
+         String.equal id scope.graph_scope_capability
+         || String.equal id scope.graph_scope_capability_ref)
+
+let describe_graph_capability_scopes scopes =
+  let line scope =
+    "def=" ^ scope.graph_scope_def_name ^ " def_id=" ^ scope.graph_scope_def_id
+    ^ " def_hash=" ^ scope.graph_scope_def_hash ^ " capability="
+    ^ scope.graph_scope_capability ^ " capability_ref=" ^ scope.graph_scope_capability_ref
+  in
+  "Graph capability scopes\ncount=" ^ string_of_int (List.length scopes) ^ "\n"
+  ^ String.concat "\n" (List.map line scopes)
+  ^ (if scopes = [] then "" else "\n")
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program
