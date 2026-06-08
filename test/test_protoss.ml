@@ -1653,6 +1653,19 @@ let () =
   assert_equal "project package records lock hash" lock_hash package_a.lock_hash;
   assert_equal "project package current pointer" package_a.package_ref
     (String.trim (Store.read_file (Workspace.package_current_path manifest_a)));
+  assert_true "project package writes interface artifact"
+    (Sys.file_exists package_a.Workspace.interface_path);
+  assert_equal "project package current interface pointer" package_a.interface_ref
+    (String.trim (Store.read_file (Workspace.package_interface_current_path manifest_a)));
+  let stored_package_interface_json = Store.read_file package_a.interface_path in
+  assert_equal "project package interface artifact hash" package_a.interface_ref
+    (Kernel.hash_string stored_package_interface_json);
+  let stored_package_interface_obj = Json.parse stored_package_interface_json in
+  assert_equal "project package interface artifact package ref" package_a.package_ref
+    (json_string_field "packageRef" stored_package_interface_obj);
+  assert_equal "project package interface artifact contract hash"
+    package_a.interface_contract_hash
+    (json_string_field "contractHash" stored_package_interface_obj);
   let package_content = Store.read_file package_a.package_path in
   assert_true "project package records version"
     (contains_substring package_content "protoss-package-v1");
@@ -1678,6 +1691,12 @@ let () =
   let package_checked = Workspace.check_package manifest_a in
   assert_equal "project package check ref" package_a.package_ref package_checked.package_ref;
   assert_equal "project package check lock" lock_hash package_checked.lock_hash;
+  assert_equal "project package check interface ref" package_a.interface_ref
+    package_checked.interface_ref;
+  assert_equal "project package check interface path" package_a.interface_path
+    package_checked.interface_path;
+  assert_equal "project package check interface contract" package_a.interface_contract_hash
+    package_checked.interface_contract_hash;
   let package_interface_text = Workspace.package_interface_text manifest_a in
   assert_true "project package interface prints ref"
     (contains_substring package_interface_text ("package_ref=" ^ package_a.package_ref));
@@ -1691,6 +1710,8 @@ let () =
   assert_true "project package interface prints public type export"
     (contains_substring package_interface_text "export type PublicBox");
   let package_interface_json = Workspace.package_interface_json manifest_a in
+  assert_equal "project package interface artifact content" package_interface_json
+    stored_package_interface_json;
   let package_interface_obj = Json.parse package_interface_json in
   assert_equal "project package interface json format" "protoss-package-interface-v1"
     (json_string_field "format" package_interface_obj);
@@ -1770,6 +1791,8 @@ let () =
      fail "package interface contract check should reject corrupt capability descriptors"
    with Workspace.Error _ -> ());
   let package_invariants = Invariants.check_package ws_a in
+  assert_equal "package invariant interface ref" package_a.interface_ref
+    package_invariants.Invariants.interface_ref;
   assert_equal "package invariant interface hash" interface_hash
     package_invariants.Invariants.interface_hash;
   assert_equal "package invariant interface contract hash" package_interface_contract_hash
@@ -1785,10 +1808,28 @@ let () =
   let package_again = Workspace.write_package manifest_a in
   assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
   assert_equal "project package deterministic path" package_a.package_path package_again.package_path;
+  assert_equal "project package deterministic interface ref" package_a.interface_ref
+    package_again.interface_ref;
+  assert_equal "project package deterministic interface path" package_a.interface_path
+    package_again.interface_path;
   assert_equal "project package deterministic content" package_content
     (Store.read_file package_again.package_path);
+  assert_equal "project package deterministic interface content" package_interface_json
+    (Store.read_file package_again.interface_path);
   let package_locked = Workspace.write_package ~locked:true manifest_a in
   assert_equal "project package locked ref" package_a.package_ref package_locked.package_ref;
+  assert_equal "project package locked interface ref" package_a.interface_ref
+    package_locked.interface_ref;
+  let package_copy_root = temp_dir "workspace-package-copy" in
+  copy_tree ws_a package_copy_root;
+  let package_copy_manifest = Workspace.parse_manifest package_copy_root in
+  let package_copy = Workspace.write_package package_copy_manifest in
+  assert_equal "project package ref is path independent" package_a.package_ref
+    package_copy.package_ref;
+  assert_equal "project package interface ref is path independent" package_a.interface_ref
+    package_copy.interface_ref;
+  assert_equal "project package interface JSON is path independent" package_interface_json
+    (Store.read_file package_copy.interface_path);
   let interface_ws = temp_dir "workspace-interface-constraint" in
   copy_tree ws_a interface_ws;
   let manifest_path_interface = Filename.concat interface_ws "protoss.toml" in
@@ -1998,6 +2039,27 @@ let () =
   (try
      ignore (Workspace.audit package_corrupt_manifest);
      fail "audit should reject corrupt package descriptor"
+   with Workspace.Error _ -> ());
+  let interface_corrupt_root = temp_dir "workspace-interface-artifact-corrupt" in
+  copy_tree ws_a interface_corrupt_root;
+  let interface_corrupt_manifest = Workspace.parse_manifest interface_corrupt_root in
+  let interface_corrupt_ref =
+    String.trim
+      (Store.read_file (Workspace.package_interface_current_path interface_corrupt_manifest))
+  in
+  let interface_corrupt_path =
+    Workspace.package_interface_path_for_ref interface_corrupt_manifest interface_corrupt_ref
+  in
+  write_file interface_corrupt_path
+    (replace_once (Store.read_file interface_corrupt_path)
+       "protoss-package-interface-v1" "protoss-package-interface-bad");
+  (try
+     ignore (Workspace.check_package interface_corrupt_manifest);
+     fail "package check should reject corrupt interface artifact"
+   with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.audit interface_corrupt_manifest);
+     fail "audit should reject corrupt interface artifact"
    with Workspace.Error _ -> ());
   let package_outdated_root = temp_dir "workspace-package-outdated" in
   copy_tree ws_a package_outdated_root;

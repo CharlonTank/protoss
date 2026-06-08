@@ -622,6 +622,9 @@ type build_result = {
 type package_result = {
   package_ref : string;
   package_path : string;
+  interface_ref : string;
+  interface_path : string;
+  interface_contract_hash : string;
   lock_hash : string;
   build_id : string;
   store : string;
@@ -709,6 +712,15 @@ let packages_dir manifest = Filename.concat (Filename.concat manifest.root ".pro
 
 let package_path_for_ref manifest package_ref =
   Filename.concat (packages_dir manifest) (sanitize_id package_ref ^ ".package")
+
+let package_interface_current_path manifest =
+  Filename.concat (Filename.concat manifest.root ".protoss") "interface"
+
+let package_interfaces_dir manifest =
+  Filename.concat (Filename.concat manifest.root ".protoss") "interfaces"
+
+let package_interface_path_for_ref manifest interface_ref =
+  Filename.concat (package_interfaces_dir manifest) (sanitize_id interface_ref ^ ".interface.json")
 
 let package_items content =
   match Sexp.parse content with
@@ -1000,6 +1012,75 @@ let package_interface_from_items ?(project = "") package_ref items =
     interface_exports = exports;
   }
 
+let package_json_string = Ast.quote
+
+let package_json_field name value = package_json_string name ^ ": " ^ value
+
+let package_json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
+
+let package_json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
+
+let package_interface_export_json = function
+  | PackageDefExport
+      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
+      package_json_obj
+        [
+          package_json_field "kind" (package_json_string "def");
+          package_json_field "name" (package_json_string export_name);
+          package_json_field "typeCanonical" (package_json_string export_type_canonical);
+          package_json_field "typeHash" (package_json_string export_type_hash);
+          package_json_field "capabilities"
+            (package_json_array package_json_string export_capabilities);
+        ]
+  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
+      package_json_obj
+        [
+          package_json_field "kind" (package_json_string "type");
+          package_json_field "name" (package_json_string export_name);
+          package_json_field "params" (package_json_array package_json_string export_params);
+          package_json_field "typeCanonical" (package_json_string export_type_canonical);
+          package_json_field "typeHash" (package_json_string export_type_hash);
+        ]
+
+let package_interface_import_json (name, package_ref, lock_hash, interface_hash, contract_hash) =
+  package_json_obj
+    [
+      package_json_field "name" (package_json_string name);
+      package_json_field "packageRef" (package_json_string package_ref);
+      package_json_field "lockHash" (package_json_string lock_hash);
+      package_json_field "interfaceHash" (package_json_string interface_hash);
+      package_json_field "contractHash" (package_json_string contract_hash);
+    ]
+
+let package_interface_json_of_interface interface =
+  package_json_obj
+    [
+      package_json_field "format" (package_json_string "protoss-package-interface-v1");
+      package_json_field "canonicalVersion" (package_json_string Kernel.canonical_version);
+      package_json_field "canonicalGraphVersion" (package_json_string Kernel.canonical_graph_version);
+      package_json_field "canonicalNodeGraphVersion"
+        (package_json_string Kernel.canonical_node_graph_version);
+      package_json_field "hashAlgorithm" (package_json_string Kernel.hash_algorithm);
+      package_json_field "hashPrefix" (package_json_string Kernel.hash_prefix);
+      package_json_field "package" (package_json_string interface.interface_package);
+      package_json_field "packageVersion" (package_json_string interface.interface_package_version);
+      package_json_field "packageRef" (package_json_string interface.interface_package_ref);
+      package_json_field "lockHash" (package_json_string interface.interface_lock_hash);
+      package_json_field "buildId" (package_json_string interface.interface_build_id);
+      package_json_field "interfaceHash" (package_json_string interface.interface_hash);
+      package_json_field "capabilities"
+        (package_json_array package_json_string interface.interface_capabilities);
+      package_json_field "capabilityDescriptors"
+        (Kernel.capabilities_to_graph_json interface.interface_capabilities);
+      package_json_field "contractHash"
+        (package_json_string (package_interface_contract_hash interface));
+      package_json_field "imports"
+        (package_json_array package_interface_import_json interface.interface_imports);
+      package_json_field "exports"
+        (package_json_array package_interface_export_json interface.interface_exports);
+    ]
+  ^ "\n"
+
 type package_import_info = {
   import_name : string;
   import_ref : string;
@@ -1250,6 +1331,17 @@ let package_content manifest prepared lock_hash =
       "";
     ]
 
+let write_package_interface_artifact manifest package_ref package_content =
+  let items = package_items package_content in
+  let interface = package_interface_from_items ~project:manifest.root package_ref items in
+  let interface_json = package_interface_json_of_interface interface in
+  let interface_ref = Kernel.hash_string interface_json in
+  let dir = package_interfaces_dir manifest in
+  ensure_dir dir;
+  let interface_path = package_interface_path_for_ref manifest interface_ref in
+  write_file interface_path interface_json;
+  (interface_ref, interface_path, package_interface_contract_hash interface)
+
 let write_package ?(locked = false) manifest =
   let prepared = prepare_build manifest in
   let interface_hash = package_interface_hash manifest prepared in
@@ -1267,10 +1359,17 @@ let write_package ?(locked = false) manifest =
   ensure_dir dir;
   let package_path = package_path_for_ref manifest package_ref in
   write_file package_path content;
+  let interface_ref, interface_path, interface_contract_hash =
+    write_package_interface_artifact manifest package_ref content
+  in
+  write_file (package_interface_current_path manifest) (interface_ref ^ "\n");
   write_file (package_current_path manifest) (package_ref ^ "\n");
   {
     package_ref;
     package_path;
+    interface_ref;
+    interface_path;
+    interface_contract_hash;
     lock_hash;
     build_id = build_result.build_id;
     store = build_result.store;
@@ -1319,7 +1418,40 @@ let check_package manifest =
   let interface_hash = package_interface_hash manifest prepared in
   expect_atom "interface-hash" interface_hash;
   validate_package_interface_constraints manifest interface_hash;
-  { package_ref; package_path; lock_hash; build_id = prepared.build_id; store = store_root manifest }
+  let interface = package_interface_from_items ~project:manifest.root package_ref items in
+  let interface_json = package_interface_json_of_interface interface in
+  let expected_interface_ref = Kernel.hash_string interface_json in
+  let current_interface_path = package_interface_current_path manifest in
+  if not (Sys.file_exists current_interface_path) then
+    fail ("missing package interface pointer: " ^ current_interface_path);
+  let interface_ref = trim (read_file current_interface_path) in
+  if String.equal interface_ref "" then
+    fail ("empty package interface pointer: " ^ current_interface_path);
+  if not (String.equal interface_ref expected_interface_ref) then
+    fail
+      ("package interface pointer mismatch: expected " ^ expected_interface_ref ^ ", got "
+     ^ interface_ref);
+  let interface_path = package_interface_path_for_ref manifest interface_ref in
+  if not (Sys.file_exists interface_path) then
+    fail ("missing package interface artifact: " ^ interface_path);
+  let stored_interface_json = read_file interface_path in
+  let actual_interface_ref = Kernel.hash_string stored_interface_json in
+  if not (String.equal actual_interface_ref interface_ref) then
+    fail
+      ("package interface artifact hash mismatch: pointer " ^ interface_ref ^ ", content "
+     ^ actual_interface_ref);
+  if not (String.equal stored_interface_json interface_json) then
+    fail "package interface artifact out of date";
+  {
+    package_ref;
+    package_path;
+    interface_ref;
+    interface_path;
+    interface_contract_hash = package_interface_contract_hash interface;
+    lock_hash;
+    build_id = prepared.build_id;
+    store = store_root manifest;
+  }
 
 let read_package_interface manifest =
   let checked = check_package manifest in
@@ -1338,76 +1470,8 @@ let package_interface_export_text = function
       ^ (match export_params with [] -> "-" | _ -> String.concat "," export_params)
       ^ " type=" ^ export_type_canonical ^ " type_hash=" ^ export_type_hash
 
-let package_json_string = Ast.quote
-
-let package_json_field name value = package_json_string name ^ ": " ^ value
-
-let package_json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
-
-let package_json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
-
-let package_interface_export_json = function
-  | PackageDefExport
-      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
-      package_json_obj
-        [
-          package_json_field "kind" (package_json_string "def");
-          package_json_field "name" (package_json_string export_name);
-          package_json_field "typeCanonical" (package_json_string export_type_canonical);
-          package_json_field "typeHash" (package_json_string export_type_hash);
-          package_json_field "capabilities"
-            (package_json_array package_json_string export_capabilities);
-        ]
-  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
-      package_json_obj
-        [
-          package_json_field "kind" (package_json_string "type");
-          package_json_field "name" (package_json_string export_name);
-          package_json_field "params" (package_json_array package_json_string export_params);
-          package_json_field "typeCanonical" (package_json_string export_type_canonical);
-          package_json_field "typeHash" (package_json_string export_type_hash);
-        ]
-
-let package_interface_import_json (name, package_ref, lock_hash, interface_hash, contract_hash) =
-  package_json_obj
-    [
-      package_json_field "name" (package_json_string name);
-      package_json_field "packageRef" (package_json_string package_ref);
-      package_json_field "lockHash" (package_json_string lock_hash);
-      package_json_field "interfaceHash" (package_json_string interface_hash);
-      package_json_field "contractHash" (package_json_string contract_hash);
-    ]
-
 let package_interface_json manifest =
-  let interface = read_package_interface manifest in
-  package_json_obj
-    [
-      package_json_field "format" (package_json_string "protoss-package-interface-v1");
-      package_json_field "canonicalVersion" (package_json_string Kernel.canonical_version);
-      package_json_field "canonicalGraphVersion" (package_json_string Kernel.canonical_graph_version);
-      package_json_field "canonicalNodeGraphVersion"
-        (package_json_string Kernel.canonical_node_graph_version);
-      package_json_field "hashAlgorithm" (package_json_string Kernel.hash_algorithm);
-      package_json_field "hashPrefix" (package_json_string Kernel.hash_prefix);
-      package_json_field "project" (package_json_string interface.interface_project);
-      package_json_field "package" (package_json_string interface.interface_package);
-      package_json_field "packageVersion" (package_json_string interface.interface_package_version);
-      package_json_field "packageRef" (package_json_string interface.interface_package_ref);
-      package_json_field "lockHash" (package_json_string interface.interface_lock_hash);
-      package_json_field "buildId" (package_json_string interface.interface_build_id);
-      package_json_field "interfaceHash" (package_json_string interface.interface_hash);
-      package_json_field "capabilities"
-        (package_json_array package_json_string interface.interface_capabilities);
-      package_json_field "capabilityDescriptors"
-        (Kernel.capabilities_to_graph_json interface.interface_capabilities);
-      package_json_field "contractHash"
-        (package_json_string (package_interface_contract_hash interface));
-      package_json_field "imports"
-        (package_json_array package_interface_import_json interface.interface_imports);
-      package_json_field "exports"
-        (package_json_array package_interface_export_json interface.interface_exports);
-    ]
-  ^ "\n"
+  package_interface_json_of_interface (read_package_interface manifest)
 
 let package_interface_text manifest =
   let interface = read_package_interface manifest in

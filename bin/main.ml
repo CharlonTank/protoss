@@ -362,14 +362,16 @@ let command_project_package args =
   let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
   if has_flag "--check" args then
     let result = Protoss.Workspace.check_package manifest in
-    Printf.printf "Package OK %s\nPath %s\nLock %s\nBuild %s\nStore %s\n"
-      result.Protoss.Workspace.package_ref result.package_path result.lock_hash result.build_id
-      result.store
+    Printf.printf
+      "Package OK %s\nPath %s\nInterface %s\nInterfacePath %s\nContract %s\nLock %s\nBuild %s\nStore %s\n"
+      result.Protoss.Workspace.package_ref result.package_path result.interface_ref
+      result.interface_path result.interface_contract_hash result.lock_hash result.build_id result.store
   else
     let result = Protoss.Workspace.write_package ~locked:(has_flag "--locked" args) manifest in
-    Printf.printf "Package %s\nPath %s\nLock %s\nBuild %s\nStore %s\n"
-      result.Protoss.Workspace.package_ref result.package_path result.lock_hash result.build_id
-      result.store
+    Printf.printf
+      "Package %s\nPath %s\nInterface %s\nInterfacePath %s\nContract %s\nLock %s\nBuild %s\nStore %s\n"
+      result.Protoss.Workspace.package_ref result.package_path result.interface_ref
+      result.interface_path result.interface_contract_hash result.lock_hash result.build_id result.store
 
 let parse_project_interface_args args =
   let rec loop json check paths = function

@@ -43,6 +43,7 @@ type package_result = {
   lock_hash : string;
   build_id : string;
   store : string;
+  interface_ref : string;
   interface_hash : string;
   interface_contract_hash : string;
   interface_capabilities : int;
@@ -225,10 +226,14 @@ let check_package project =
      ^ package.lock_hash);
   if not (String.equal "Audit OK\n" (Workspace.audit manifest)) then
     fail ("package invariant audit failed: " ^ root);
+  let interface_source = Workspace.package_interface_json manifest in
+  if not (String.equal package.interface_ref (Kernel.hash_string interface_source)) then
+    fail
+      ("package invariant interface ref mismatch: expected " ^ package.interface_ref ^ ", got "
+     ^ Kernel.hash_string interface_source);
   let interface =
-    let source = Workspace.package_interface_json manifest in
-    ignore (Workspace.parse_package_interface_json "<current package interface>" source);
-    try Json.parse source
+    ignore (Workspace.parse_package_interface_json "<current package interface>" interface_source);
+    try Json.parse interface_source
     with Json.Error msg -> fail ("package invariant interface JSON invalid: " ^ msg)
   in
   let require_field name expected =
@@ -265,6 +270,7 @@ let check_package project =
     lock_hash = package.lock_hash;
     build_id = package.build_id;
     store = package.store;
+    interface_ref = package.interface_ref;
     interface_hash;
     interface_contract_hash;
     interface_capabilities = List.length capabilities;
@@ -304,7 +310,8 @@ let describe_package (result : package_result) =
   "Invariants OK\nkind=package\nproject=" ^ result.project ^ "\npackage_ref="
   ^ result.package_ref ^ "\nlock_hash=" ^ result.lock_hash ^ "\nbuild_id="
   ^ result.build_id ^ "\nstore=" ^ result.store ^ "\ninterface_hash="
-  ^ result.interface_hash ^ "\ninterface_contract_hash="
+  ^ result.interface_hash ^ "\ninterface_ref=" ^ result.interface_ref
+  ^ "\ninterface_contract_hash="
   ^ result.interface_contract_hash ^ "\ninterface_capabilities="
   ^ string_of_int result.interface_capabilities ^ "\ninterface_exports="
   ^ string_of_int result.interface_exports ^ "\ninterface_type_hashes="
