@@ -1,0 +1,3 @@
+(import "../stdlib/prelude.protoss")
+
+(def main (-> Nat Nat) (lambda (y Nat) ((Nat.add y) 1)))

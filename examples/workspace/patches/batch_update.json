@@ -1,0 +1,18 @@
+{
+  "ops": [
+    {
+      "op": "ReplaceDef",
+      "name": "base",
+      "deps": [],
+      "type": "Nat",
+      "expr": 3
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "total",
+      "deps": ["base"],
+      "type": "Nat",
+      "expr": ["Nat.add", "base", 40]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+(def askName (Process String) (Human.ask "Name?"))

@@ -1,0 +1,7 @@
+(executable
+ (name test_protoss)
+ (libraries protoss unix))
+
+(rule
+ (alias runtest)
+ (action (run ./test_protoss.exe)))

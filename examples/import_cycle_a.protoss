@@ -1,0 +1,3 @@
+(import "import_cycle_b.protoss")
+
+(def a Nat 1)

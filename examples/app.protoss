@@ -1,0 +1,9 @@
+(import "../stdlib/prelude.protoss")
+
+(def sample Nat ((Nat.add 2) 3))
+(def product Nat ((Nat.mul sample) 2))
+(def ok Bool ((Nat.eqNat product) 10))
+(def greeting String ((String.concat "he") "llo"))
+(def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))
+(def mapped (List Nat) ((List.mapNat numbers) (lambda (x Nat) (succ x))))
+(def folded Nat (foldList numbers 0 (lambda (x Nat) (lambda (acc Nat) ((Nat.add x) acc)))))

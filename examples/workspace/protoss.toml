@@ -1,0 +1,8 @@
+name = "workspace-demo"
+version = "0.4.0"
+entrypoints = ["src/app.protoss", "src/process.protoss"]
+stdlib = "../../stdlib/prelude.protoss"
+source_dirs = ["src"]
+store_dir = ".protoss/store"
+cache_dir = ".protoss/cache"
+capabilities = ["Human.ask"]

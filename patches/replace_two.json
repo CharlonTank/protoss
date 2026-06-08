@@ -1,0 +1,7 @@
+{
+  "op": "ReplaceDef",
+  "name": "two",
+  "deps": [],
+  "type": "Nat",
+  "expr": ["succ", 2]
+}

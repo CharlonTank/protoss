@@ -1,0 +1,2 @@
+(def value (Variant (None Unit) (Some Nat)) (variant (Variant (None Unit) (Some Nat)) Some 7))
+(def out Nat (case value (None u 0) (Some x x)))

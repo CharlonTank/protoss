@@ -1,0 +1,12 @@
+_build/
+target/
+dist/
+**/dist/
+**/.protoss/
+
+*.install
+*.cache
+*.log
+
+.env
+.DS_Store

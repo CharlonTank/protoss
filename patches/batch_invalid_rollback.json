@@ -1,0 +1,18 @@
+{
+  "ops": [
+    {
+      "op": "AddDef",
+      "name": "validBeforeFailure",
+      "deps": [],
+      "type": "Nat",
+      "expr": ["succ", 1]
+    },
+    {
+      "op": "AddDef",
+      "name": "badBatch",
+      "deps": [],
+      "type": "Nat",
+      "expr": true
+    }
+  ]
+}

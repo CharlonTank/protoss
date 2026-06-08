@@ -1,0 +1,50 @@
+; Protoss stdlib v0.3. This is ordinary Protoss source imported by programs.
+
+(def Stdlib.version String "v0.3")
+
+(def Nat.add (-> Nat (-> Nat Nat))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      (foldNat a b (lambda (x Nat) (succ x))))))
+
+(def Nat.mul (-> Nat (-> Nat Nat))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      (foldNat a 0 (lambda (acc Nat) ((Nat.add b) acc))))))
+
+(def Nat.eqNat (-> Nat (-> Nat Bool))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      ((prim.Nat.eq a) b))))
+
+(def Bool.not (-> Bool Bool)
+  (lambda (b Bool)
+    (case b (true false) (false true))))
+
+(def Bool.and (-> Bool (-> Bool Bool))
+  (lambda (a Bool)
+    (lambda (b Bool)
+      (case a (true b) (false false)))))
+
+(def Bool.or (-> Bool (-> Bool Bool))
+  (lambda (a Bool)
+    (lambda (b Bool)
+      (case a (true true) (false b)))))
+
+(def String.concat (-> String (-> String String))
+  (lambda (a String)
+    (lambda (b String)
+      ((prim.String.concat a) b))))
+
+(def String.eqString (-> String (-> String Bool))
+  (lambda (a String)
+    (lambda (b String)
+      ((prim.String.eq a) b))))
+
+(def List.mapNat (-> (List Nat) (-> (-> Nat Nat) (List Nat)))
+  (lambda (xs (List Nat))
+    (lambda (f (-> Nat Nat))
+      (foldList xs (Nil Nat)
+        (lambda (x Nat)
+          (lambda (acc (List Nat))
+            (Cons Nat (f x) acc)))))))

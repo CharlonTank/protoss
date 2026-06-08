@@ -1,0 +1,4 @@
+(executable
+ (public_name protoss)
+ (name main)
+ (libraries protoss unix))

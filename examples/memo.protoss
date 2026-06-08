@@ -1,0 +1,2 @@
+(def inc (-> Nat Nat) (lambda (x Nat) (succ x)))
+(def b Nat (let (x (inc 41)) (let (y (inc 41)) y)))

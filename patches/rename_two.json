@@ -1,0 +1,6 @@
+{
+  "op": "RenameDef",
+  "name": "two",
+  "newName": "dos",
+  "deps": []
+}

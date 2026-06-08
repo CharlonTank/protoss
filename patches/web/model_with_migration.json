@@ -1,0 +1,48 @@
+{
+  "ops": [
+    {
+      "op": "AddDef",
+      "name": "migrate_v1_v2",
+      "deps": [],
+      "type": {
+        "source": "(-> (Record (draft String) (items (List String)) (next Nat)) (Record (draft String) (filter String) (items (List String)) (next Nat)))"
+      },
+      "expr": {
+        "source": "(lambda (old (Record (draft String) (items (List String)) (next Nat))) (record (draft (get old draft)) (filter \"\") (items (get old items)) (next (get old next))))"
+      }
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "init",
+      "deps": [],
+      "type": {
+        "source": "(Process (Record (draft String) (filter String) (items (List String)) (next Nat)))"
+      },
+      "expr": {
+        "source": "(done (record (draft \"\") (filter \"\") (items (Nil String)) (next 0)))"
+      }
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "update",
+      "deps": [],
+      "type": {
+        "source": "(-> (Variant (AddTodo Unit) (NewTodoChanged String)) (-> (Record (draft String) (filter String) (items (List String)) (next Nat)) (Process (Record (draft String) (filter String) (items (List String)) (next Nat)))))"
+      },
+      "expr": {
+        "source": "(lambda (msg (Variant (AddTodo Unit) (NewTodoChanged String))) (lambda (model (Record (draft String) (filter String) (items (List String)) (next Nat))) (case msg (AddTodo _ (bind (Local.save \"todos\" \"updated\") (lambda (saved Unit) (done (record (draft \"\") (filter (get model filter)) (items (Cons String (get model draft) (get model items))) (next (succ (get model next)))))))) (NewTodoChanged s (done (record (draft s) (filter (get model filter)) (items (get model items)) (next (get model next))))))))"
+      }
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "view",
+      "deps": ["buttonLabel"],
+      "type": {
+        "source": "(-> (Record (draft String) (filter String) (items (List String)) (next Nat)) (View (Variant (AddTodo Unit) (NewTodoChanged String))))"
+      },
+      "expr": {
+        "source": "(lambda (model (Record (draft String) (filter String) (items (List String)) (next Nat))) (column (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (text \"Todos\") (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (input (get model draft) (lambda (s String) (variant (Variant (AddTodo Unit) (NewTodoChanged String)) NewTodoChanged s))) (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (button buttonLabel (variant (Variant (AddTodo Unit) (NewTodoChanged String)) AddTodo unit)) (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (list (get model items) (lambda (item String) (text item))) (Nil (View (Variant (AddTodo Unit) (NewTodoChanged String))))))))))"
+      }
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+open Ast
+
+let hash s = "p1:" ^ Hashcons.digest s
+
+let initial_world = hash "world:initial"
+
+let rec ensure_dir path =
+  if path <> "" && not (Sys.file_exists path) then (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let write_file_atomic path content =
+  ensure_dir (Filename.dirname path);
+  let tmp = path ^ ".tmp." ^ string_of_int (Unix.getpid ()) in
+  let oc = open_out tmp in
+  try
+    output_string oc content;
+    close_out oc;
+    Sys.rename tmp path
+  with exn ->
+    close_out_noerr oc;
+    if Sys.file_exists tmp then Sys.remove tmp;
+    raise exn
+
+let request_payload = function
+  | AskHuman prompt -> "AskHuman:" ^ prompt
+  | HttpGet url -> "HttpGet:" ^ url
+  | ReadClock -> "ReadClock"
+  | SaveLocal (key, value) -> "SaveLocal:" ^ key ^ ":" ^ value
+  | LoadLocal key -> "LoadLocal:" ^ key
+  | ServerRequest (route, payload) -> "ServerRequest:" ^ route ^ ":" ^ payload
+
+let add_event root world payload =
+  ensure_dir root;
+  let events = Filename.concat root "events" in
+  let worlds = Filename.concat root "worlds" in
+  ensure_dir events;
+  ensure_dir worlds;
+  let content = "world=" ^ world ^ "\n" ^ payload ^ "\n" in
+  let event_hash = hash ("event:" ^ content) in
+  let next_world = hash ("world:" ^ world ^ ":" ^ event_hash) in
+  let path = Filename.concat events event_hash in
+  if not (Sys.file_exists path) then write_file_atomic path content;
+  let world_path = Filename.concat worlds next_world in
+  if not (Sys.file_exists world_path) then
+    write_file_atomic world_path ("previous=" ^ world ^ "\nevent=" ^ event_hash ^ "\n");
+  (event_hash, next_world)
+
+let init root =
+  let worlds = Filename.concat root "worlds" in
+  ensure_dir worlds;
+  let path = Filename.concat worlds initial_world in
+  if not (Sys.file_exists path) then write_file_atomic path "previous=\nevent=\n";
+  initial_world
+
+let record_request root world req suspended request_id continuation_id cap_scope =
+  ignore (init root);
+  add_event root world
+    ("kind=request\nrequest-id=" ^ request_id ^ "\nrequest=" ^ request_payload req
+   ^ "\ncontinuation-id=" ^ continuation_id ^ "\ncap-scope="
+   ^ String.concat "," (List.sort_uniq String.compare cap_scope)
+   ^ "\nsuspended=" ^ String.escaped suspended)
+
+let record_resume root world event response result =
+  add_event root world
+    ("kind=resume\nresume=" ^ event ^ "\nresponse=" ^ String.escaped response ^ "\nresult="
+   ^ String.escaped result)
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let len = in_channel_length ic in
+      really_input_string ic len)
+
+let event_path root event = Filename.concat (Filename.concat root "events") event
+
+let world_path root world = Filename.concat (Filename.concat root "worlds") world
+
+let read_event root event = read_file (event_path root event)
+
+let read_world root world = read_file (world_path root world)
+
+let parse_lines content =
+  String.split_on_char '\n' content
+  |> List.filter_map (fun line ->
+         match String.index_opt line '=' with
+         | None -> None
+         | Some i ->
+             let k = String.sub line 0 i in
+             let v = String.sub line (i + 1) (String.length line - i - 1) in
+             Some (k, v))
+
+let field name fields =
+  List.find_opt (fun (k, _) -> String.equal k name) fields |> Option.map snd
+
+let validate_event event content =
+  let fields = parse_lines content in
+  let need name =
+    match field name fields with
+    | Some _ -> ()
+    | None -> failwith ("maltyped event " ^ event ^ ": missing " ^ name)
+  in
+  need "world";
+  need "kind";
+  (match field "kind" fields with
+  | Some "request" ->
+      List.iter need [ "request-id"; "request"; "continuation-id"; "cap-scope"; "suspended" ]
+  | Some "resume" -> List.iter need [ "resume"; "response"; "result" ]
+  | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
+  | None -> assert false);
+  fields
+
+let event_fields root event =
+  let content = read_event root event in
+  validate_event event content
+
+let inspect_event root event =
+  let content = read_event root event in
+  ignore (validate_event event content);
+  content
+
+let inspect_world root world =
+  let content = read_world root world in
+  let fields = parse_lines content in
+  if field "previous" fields = None || field "event" fields = None then
+    failwith ("maltyped world " ^ world);
+  content
+
+let next_world world event = hash ("world:" ^ world ^ ":" ^ event)
+
+let event_suspended root event =
+  match field "suspended" (event_fields root event) with
+  | Some s -> Scanf.unescaped s
+  | None -> failwith ("event has no suspended process: " ^ event)
+
+let inspect root ref_ =
+  if Sys.file_exists (world_path root ref_) then inspect_world root ref_
+  else inspect_event root ref_
+
+let rec replay_events root world =
+  if String.equal world initial_world then []
+  else
+    let content = inspect_world root world in
+    let fields = parse_lines content in
+    match (field "previous" fields, field "event" fields) with
+    | Some previous, Some event when event <> "" ->
+        replay_events root previous @ [ event ]
+    | _ -> []
+
+let replay root world =
+  let events = replay_events root world in
+  String.concat ""
+    (List.map
+       (fun event -> "Event " ^ event ^ "\n" ^ inspect_event root event)
+       events)
+
+let diff root world_a world_b =
+  let a = replay_events root world_a and b = replay_events root world_b in
+  let only_a = List.filter (fun e -> not (List.exists (String.equal e) b)) a in
+  let only_b = List.filter (fun e -> not (List.exists (String.equal e) a)) b in
+  "only_a=" ^ String.concat "," only_a ^ "\nonly_b=" ^ String.concat "," only_b ^ "\n"
+
+let export root world =
+  let events = replay_events root world in
+  "world=" ^ world ^ "\nevents=" ^ String.concat "," events ^ "\n"
+  ^ String.concat ""
+      (List.map
+         (fun event ->
+           "----- event " ^ event ^ " -----\n" ^ inspect_event root event)
+         events)
+
+let import root payload =
+  ignore (init root);
+  let imported = hash ("import:" ^ payload) in
+  let imports = Filename.concat root "imports" in
+  ensure_dir imports;
+  write_file_atomic (Filename.concat imports imported) payload;
+  imported
+
+let branches root =
+  let worlds = Filename.concat root "worlds" in
+  if not (Sys.file_exists worlds) then ""
+  else
+    Sys.readdir worlds |> Array.to_list |> List.sort String.compare
+    |> List.map (fun world ->
+           let fields = parse_lines (read_world root world) in
+           world ^ " previous=" ^ Option.value (field "previous" fields) ~default:""
+           ^ " event=" ^ Option.value (field "event" fields) ~default:"")
+    |> String.concat "\n"
+    |> fun s -> if s = "" then "" else s ^ "\n"

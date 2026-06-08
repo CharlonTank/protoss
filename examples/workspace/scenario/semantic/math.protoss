@@ -1,0 +1,5 @@
+(def base Nat 3)
+
+(def total Nat ((Nat.add base) 40))
+
+(def scaled Nat ((Nat.mul base) 21))

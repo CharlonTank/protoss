@@ -1,0 +1,11 @@
+{
+  "op": "ReplaceDef",
+  "name": "view",
+  "deps": ["buttonLabel"],
+  "type": {
+    "source": "(-> (Record (draft String) (items (List String)) (next Nat)) (View (Variant (AddTodo Unit) (NewTodoChanged String))))"
+  },
+  "expr": {
+    "source": "(lambda (model (Record (draft String) (items (List String)) (next Nat))) (button buttonLabel \"not-a-msg\"))"
+  }
+}

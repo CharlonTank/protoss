@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OCaml and Dune
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ocaml ocaml-dune
+      - name: Test
+        run: dune runtest --force

@@ -1,0 +1,5 @@
+(def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))
+
+(def bumped (List Nat) ((List.mapNat numbers) (lambda (x Nat) (succ x))))
+
+(def appMain Nat ((Nat.add total) scaled))

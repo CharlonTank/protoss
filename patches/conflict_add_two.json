@@ -1,0 +1,7 @@
+{
+  "op": "AddDef",
+  "name": "two",
+  "deps": [],
+  "type": "Nat",
+  "expr": ["succ", 1]
+}

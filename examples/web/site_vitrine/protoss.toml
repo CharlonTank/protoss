@@ -1,0 +1,8 @@
+name = "site-vitrine"
+version = "0.1.0"
+entrypoints = ["src/site.protoss"]
+stdlib = "../../../stdlib/prelude.protoss"
+source_dirs = ["src"]
+store_dir = ".protoss/store"
+cache_dir = ".protoss/cache"
+capabilities = []

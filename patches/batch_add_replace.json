@@ -1,0 +1,25 @@
+{
+  "ops": [
+    {
+      "op": "AddDef",
+      "name": "two",
+      "deps": [],
+      "type": "Nat",
+      "expr": ["succ", 1]
+    },
+    {
+      "op": "AddDef",
+      "name": "three",
+      "deps": ["two"],
+      "type": "Nat",
+      "expr": ["succ", "two"]
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "two",
+      "deps": [],
+      "type": "Nat",
+      "expr": ["succ", 2]
+    }
+  ]
+}
