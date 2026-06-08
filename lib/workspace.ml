@@ -1772,6 +1772,30 @@ let graph_store store graph_hash = fst (read_store_graph store graph_hash)
 
 let checked_store_graph store graph_hash = snd (read_store_graph store graph_hash)
 
+let checked_graph_dot (checked : Kernel.checked) =
+  let defs =
+    checked.defs
+    |> List.sort (fun (a : Kernel.checked_def) (b : Kernel.checked_def) ->
+           String.compare a.def.name b.def.name)
+  in
+  let lines =
+    "digraph protoss {" ::
+    (defs
+    |> List.concat_map (fun (d : Kernel.checked_def) ->
+           let name = d.def.name in
+           let node = "  " ^ Ast.quote name ^ ";" in
+           let deps =
+             Kernel.dependencies_of_defs checked.program.defs name
+             |> List.sort_uniq String.compare
+           in
+           node :: List.map (fun dep -> "  " ^ Ast.quote dep ^ " -> " ^ Ast.quote name ^ ";") deps))
+    @ [ "}" ]
+  in
+  String.concat "\n" lines ^ "\n"
+
+let store_graph_dot store graph_hash =
+  checked_graph_dot (checked_store_graph store graph_hash)
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

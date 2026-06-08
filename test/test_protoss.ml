@@ -2307,6 +2307,11 @@ let () =
     (Kernel.hash_program store_graph_checked);
   let store_graph_value, _ = Runtime.eval_entry store_graph_checked "appMain" in
   assert_equal "project checked store graph eval" "44" (Runtime.value_to_string store_graph_value);
+  let store_graph_dot = Workspace.store_graph_dot build_a.store store_graph_hash in
+  assert_true "project store graph dot header"
+    (contains_substring store_graph_dot "digraph protoss");
+  assert_true "project store graph dot deps"
+    (contains_substring store_graph_dot "\"base\" -> \"appMain\"");
   let graph_hash_mismatch_store = temp_dir "workspace-graph-hash-mismatch-store" in
   copy_tree build_a.store graph_hash_mismatch_store;
   Store.write_file_atomic

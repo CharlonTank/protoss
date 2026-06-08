@@ -30,6 +30,7 @@ let usage () =
      \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
+     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
@@ -560,6 +561,14 @@ let command_fmt = function
   | _ -> usage ()
 
 let command_graph = function
+  | [ "--store-graph"; project_or_store; graph_hash; "--out"; out ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      Protoss.Store.write_file_atomic out (Protoss.Workspace.graph_store store graph_hash);
+      Printf.printf "Wrote %s\n" out
+  | [ "--store-graph"; project_or_store; graph_hash; "--dot"; out ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      Protoss.Store.write_file_atomic out (Protoss.Workspace.store_graph_dot store graph_hash);
+      Printf.printf "Wrote %s\n" out
   | [ project; "--out"; out ] ->
       let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root project) in
       let build = Protoss.Workspace.build manifest in
