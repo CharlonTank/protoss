@@ -566,6 +566,17 @@ let () =
     (Canonical_ir.graph_to_program legacy_graph_json);
   assert_equal "legacy canonical graph checked hash" (Kernel.hash_program formatted_a)
     (Kernel.hash_program (Canonical_ir.checked_of_graph legacy_graph_json));
+  let migrated_graph_json = Canonical_ir.migrate_graph legacy_graph_json in
+  let migrated_graph = Json.parse migrated_graph_json in
+  assert_equal "migrated canonical graph version" Kernel.canonical_graph_version
+    (json_string_field "version" migrated_graph);
+  assert_equal "migrated canonical graph exact current serialization" graph_json
+    migrated_graph_json;
+  assert_equal "migrated canonical graph checked hash" (Kernel.hash_program formatted_a)
+    (Kernel.hash_program (Canonical_ir.checked_of_graph migrated_graph_json));
+  let migrated_current_graph_json = Canonical_ir.migrate_graph graph_json in
+  assert_equal "current canonical graph migration is stable" graph_json
+    migrated_current_graph_json;
   let graph_value, _ = Runtime.normalize_def graph_checked "main" in
   assert_equal "canonical graph eval" "2" (Runtime.value_to_string graph_value);
   let basic_path = find_up (Sys.getcwd ()) "examples/basic.protoss" in

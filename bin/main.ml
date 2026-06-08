@@ -2,7 +2,7 @@ let usage () =
   prerr_endline
     "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
      \       protoss check|nf|hash --store-graph <project-or-store> <graphHash>\n\
-     \       protoss canon <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json>\n\
+     \       protoss canon <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -174,6 +174,9 @@ let command_canon_graph file =
 
 let command_canon_from_graph file =
   print_endline (Protoss.Canonical_ir.graph_to_program (Protoss.Store.read_file file))
+
+let command_canon_migrate_graph file =
+  print_string (Protoss.Canonical_ir.migrate_graph (Protoss.Store.read_file file))
 
 let command_eval file args =
   let entry, rest = find_entry args in
@@ -793,6 +796,7 @@ let () =
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--graph"; file ] -> command_canon_graph file
       | [ "canon"; "--from-graph"; file ] -> command_canon_from_graph file
+      | [ "canon"; "--migrate-graph"; file ] -> command_canon_migrate_graph file
       | [ "canon"; file ] -> command_canon file
       | "eval" :: "--graph" :: file :: args -> command_eval_graph file args
       | "eval" :: "--store-graph" :: project_or_store :: graph_hash :: args ->

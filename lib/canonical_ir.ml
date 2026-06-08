@@ -538,6 +538,10 @@ let checked_of_graph input =
   let caps, defs = parse_graph input in
   Kernel.checked_of_canonical caps defs
 
+let migrate_graph input =
+  let caps, defs = parse_graph input in
+  Kernel.checked_to_graph_json (Kernel.checked_of_canonical caps defs)
+
 type graph_stats = {
   version : string;
   canonical_version : string;
