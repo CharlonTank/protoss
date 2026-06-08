@@ -1,10 +1,10 @@
-; Protoss stdlib v0.4. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.5. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Result (E A) (Variant (Err E) (Ok A)))
 (type Pair (A B) (Record (first A) (second B)))
 
-(def Stdlib.version String "v0.4")
+(def Stdlib.version String "v0.5")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -62,6 +62,26 @@
         (lambda (acc Nat)
           (succ acc))))))
 
+(defpoly List.append (params A)
+  (-> (List A) (-> (List A) (List A)))
+  (lambda (xs (List A))
+    (lambda (ys (List A))
+      (foldList xs ys
+        (lambda (x A)
+          (lambda (acc (List A))
+            (Cons A x acc)))))))
+
+(defpoly List.filter (params A)
+  (-> (List A) (-> (-> A Bool) (List A)))
+  (lambda (xs (List A))
+    (lambda (pred (-> A Bool))
+      (foldList xs (Nil A)
+        (lambda (x A)
+          (lambda (acc (List A))
+            (case (pred x)
+              (true (Cons A x acc))
+              (false acc))))))))
+
 (def List.mapNat (-> (List Nat) (-> (-> Nat Nat) (List Nat)))
   (lambda (xs (List Nat))
     (lambda (f (-> Nat Nat))
@@ -78,6 +98,20 @@
         (None _ fallback)
         (Some value value)))))
 
+(defpoly Maybe.isSome (params A)
+  (-> (Maybe A) Bool)
+  (lambda (m (Maybe A))
+    (case m
+      (None false)
+      (Some value true))))
+
+(defpoly Maybe.isNone (params A)
+  (-> (Maybe A) Bool)
+  (lambda (m (Maybe A))
+    (case m
+      (None true)
+      (Some value false))))
+
 (defpoly Maybe.map (params A B)
   (-> (-> A B) (-> (Maybe A) (Maybe B)))
   (lambda (f (-> A B))
@@ -86,6 +120,14 @@
         (None _ (variant None unit))
         (Some value (variant Some (f value)))))))
 
+(defpoly Maybe.andThen (params A B)
+  (-> (Maybe A) (-> (-> A (Maybe B)) (Maybe B)))
+  (lambda (m (Maybe A))
+    (lambda (f (-> A (Maybe B)))
+      (case m
+        (None (variant None unit))
+        (Some value (f value))))))
+
 (defpoly Result.map (params E A B)
   (-> (-> A B) (-> (Result E A) (Result E B)))
   (lambda (f (-> A B))
@@ -93,3 +135,34 @@
       (case r
         (Err err (variant Err err))
         (Ok value (variant Ok (f value)))))))
+
+(defpoly Result.withDefault (params E A)
+  (-> A (-> (Result E A) A))
+  (lambda (fallback A)
+    (lambda (r (Result E A))
+      (case r
+        (Err err fallback)
+        (Ok value value)))))
+
+(defpoly Result.mapError (params E F A)
+  (-> (-> E F) (-> (Result E A) (Result F A)))
+  (lambda (f (-> E F))
+    (lambda (r (Result E A))
+      (case r
+        (Err err (variant Err (f err)))
+        (Ok value (variant Ok value))))))
+
+(defpoly Result.andThen (params E A B)
+  (-> (Result E A) (-> (-> A (Result E B)) (Result E B)))
+  (lambda (r (Result E A))
+    (lambda (f (-> A (Result E B)))
+      (case r
+        (Err err (variant Err err))
+        (Ok value (f value))))))
+
+(defpoly Pair.swap (params A B)
+  (-> (Pair A B) (Pair B A))
+  (lambda (p (Pair A B))
+    (record
+      (first (get p second))
+      (second (get p first)))))

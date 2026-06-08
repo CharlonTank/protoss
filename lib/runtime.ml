@@ -77,6 +77,57 @@ and view_to_string = function
       "(column [" ^ String.concat ", " (List.map view_to_string children) ^ "])"
   | VRow children -> "(row [" ^ String.concat ", " (List.map view_to_string children) ^ "])"
 
+let rec value_to_cache_key = function
+  | VUnit -> "(Unit)"
+  | VBool b -> "(Bool " ^ string_of_bool b ^ ")"
+  | VNat n -> "(Nat " ^ string_of_int n ^ ")"
+  | VString s -> "(String " ^ Ast.quote s ^ ")"
+  | VList (typ, xs) ->
+      "(List " ^ Kernel.type_to_canonical typ ^ " "
+      ^ String.concat " " (List.map value_to_cache_key xs) ^ ")"
+  | VRecord fields ->
+      "(Record "
+      ^ String.concat " "
+          (List.map
+             (fun (n, v) -> "(" ^ n ^ " " ^ value_to_cache_key v ^ ")")
+             (sort_fields fields))
+      ^ ")"
+  | VVariant (typ, con, value) ->
+      "(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " "
+      ^ value_to_cache_key value ^ ")"
+  | VView view -> "(View " ^ view_to_cache_key view ^ ")"
+  | VClosure (typ, body, env, cap_scope) ->
+      "(Closure " ^ Kernel.type_to_canonical typ ^ " " ^ Kernel.cterm_to_string body
+      ^ " (env " ^ String.concat " " (List.map value_to_cache_key env)
+      ^ ") (cap-scope " ^ String.concat " " (List.sort_uniq String.compare cap_scope)
+      ^ "))"
+  | VBuiltinSucc -> "BuiltinSucc"
+  | VProcessDone value -> "(Done " ^ value_to_cache_key value ^ ")"
+  | VProcessRequest suspended -> "(Suspended " ^ suspended_to_cache_key suspended ^ ")"
+
+and view_to_cache_key = function
+  | VText s -> "(Text " ^ Ast.quote s ^ ")"
+  | VImage (src, alt) -> "(Image " ^ Ast.quote src ^ " " ^ Ast.quote alt ^ ")"
+  | VButton (label, msg) -> "(Button " ^ Ast.quote label ^ " " ^ value_to_cache_key msg ^ ")"
+  | VInput (value, handler) ->
+      "(Input " ^ Ast.quote value ^ " " ^ value_to_cache_key handler ^ ")"
+  | VColumn children ->
+      "(Column " ^ String.concat " " (List.map view_to_cache_key children) ^ ")"
+  | VRow children -> "(Row " ^ String.concat " " (List.map view_to_cache_key children) ^ ")"
+
+and continuation_to_cache_key = function
+  | KDone -> "KDone"
+  | KBind (inner, body, env, cap_scope) ->
+      "(KBind " ^ continuation_to_cache_key inner ^ " " ^ Kernel.cterm_to_string body
+      ^ " (env " ^ String.concat " " (List.map value_to_cache_key env)
+      ^ ") (cap-scope " ^ String.concat " " (List.sort_uniq String.compare cap_scope)
+      ^ "))"
+
+and suspended_to_cache_key suspended =
+  "(request " ^ Kernel.req_to_canonical suspended.req ^ ") (cont "
+  ^ continuation_to_cache_key suspended.cont ^ ") (cap-scope "
+  ^ String.concat " " (List.sort_uniq String.compare suspended.cap_scope) ^ ")"
+
 let trace st line = if st.trace_cache then st.trace <- line :: st.trace
 
 let has_prefix prefix s =
@@ -383,7 +434,7 @@ and expect_view = function
 and eval_app st fv av =
   let key =
     Kernel.hash_string
-      ("app:" ^ st.cache_scope ^ ":" ^ value_to_string fv ^ ":" ^ value_to_string av)
+      ("app-v2:" ^ st.cache_scope ^ ":" ^ value_to_cache_key fv ^ ":" ^ value_to_cache_key av)
   in
   match Hashtbl.find_opt st.app_cache key with
   | Some v ->

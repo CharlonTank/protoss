@@ -14,6 +14,16 @@
 (def len Nat
   ((inst List.length Nat) xs))
 
+(def ys (List Nat)
+  (Cons Nat 3 (Nil Nat)))
+
+(def appended (List Nat)
+  (((inst List.append Nat) xs) ys))
+
+(def filtered (List Nat)
+  (((inst List.filter Nat) appended)
+    (lambda (x Nat) ((Nat.eqNat x) 2))))
+
 (def maybeAge (Maybe Nat)
   (variant Some 41))
 
@@ -25,6 +35,16 @@
 (def label String
   (((inst Maybe.withDefault String) "unknown") maybeLabel))
 
+(def maybeHasAge Bool
+  ((inst Maybe.isSome Nat) maybeAge))
+
+(def maybeMissingAge Bool
+  ((inst Maybe.isNone Nat) (variant None unit)))
+
+(def maybeNext (Maybe Nat)
+  (((inst Maybe.andThen Nat Nat) maybeAge)
+    (lambda (age Nat) (variant Some (succ age)))))
+
 (def resultAge (Result String Nat)
   (variant Ok 7))
 
@@ -32,6 +52,27 @@
   (((inst Result.map String Nat String)
     (lambda (age Nat) "ok"))
     resultAge))
+
+(def resultDefault Nat
+  (((inst Result.withDefault String Nat) 0) resultAge))
+
+(def resultErr (Result String Nat)
+  (variant Err "bad"))
+
+(def resultMappedErr (Result Bool Nat)
+  (((inst Result.mapError String Bool Nat)
+    (lambda (err String) true))
+    resultErr))
+
+(def resultNext (Result String Nat)
+  (((inst Result.andThen String Nat Nat) resultAge)
+    (lambda (age Nat) (variant Ok (succ age)))))
+
+(def pair (Pair String Nat)
+  (record (first "n") (second 7)))
+
+(def swapped (Pair Nat String)
+  ((inst Pair.swap String Nat) pair))
 
 (def total Nat
   (foldList bumped 0

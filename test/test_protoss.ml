@@ -848,6 +848,18 @@ let () =
   let _, trace = Runtime.eval_entry ~trace_cache:true memo "b" in
   assert_true "memo trace should contain cache hit"
     (List.exists (fun line -> String.length line >= 9 && String.sub line 0 9 = "cache hit") trace);
+  let closure_cache =
+    check
+      "(def eqTo (-> Nat (-> Nat Bool)) \
+       (lambda (n Nat) (lambda (x Nat) ((prim.Nat.eq n) x))))\n\
+       (def out Bool \
+       (let (eqOne (eqTo 1)) \
+       (let (eqTwo (eqTo 2)) \
+       (case (eqOne 2) (true false) (false (eqTwo 2))))))"
+  in
+  let closure_cache_out, _ = Runtime.normalize_def ~trace_cache:true closure_cache "out" in
+  assert_equal "memo key includes closure environment" "true"
+    (Runtime.value_to_string closure_cache_out);
 
   let cache_dir = temp_dir "persistent-cache" in
   let _, _ = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
@@ -897,10 +909,32 @@ let () =
   assert_equal "stdlib generic List.map" "[2, 3]" (Runtime.value_to_string bumped);
   let len, _ = Runtime.normalize_def stdlib_generics "len" in
   assert_equal "stdlib generic List.length" "2" (Runtime.value_to_string len);
+  let appended, _ = Runtime.normalize_def stdlib_generics "appended" in
+  assert_equal "stdlib generic List.append" "[1, 2, 3]" (Runtime.value_to_string appended);
+  let filtered, _ = Runtime.normalize_def stdlib_generics "filtered" in
+  assert_equal "stdlib generic List.filter" "[2]" (Runtime.value_to_string filtered);
   let label, _ = Runtime.normalize_def stdlib_generics "label" in
   assert_equal "stdlib generic Maybe.map/default" "\"known\"" (Runtime.value_to_string label);
+  let maybe_has_age, _ = Runtime.normalize_def stdlib_generics "maybeHasAge" in
+  assert_equal "stdlib generic Maybe.isSome" "true" (Runtime.value_to_string maybe_has_age);
+  let maybe_missing_age, _ = Runtime.normalize_def stdlib_generics "maybeMissingAge" in
+  assert_equal "stdlib generic Maybe.isNone" "true"
+    (Runtime.value_to_string maybe_missing_age);
+  let maybe_next, _ = Runtime.normalize_def stdlib_generics "maybeNext" in
+  assert_equal "stdlib generic Maybe.andThen" "Some 42" (Runtime.value_to_string maybe_next);
   let result_label, _ = Runtime.normalize_def stdlib_generics "resultLabel" in
   assert_equal "stdlib generic Result.map" "Ok \"ok\"" (Runtime.value_to_string result_label);
+  let result_default, _ = Runtime.normalize_def stdlib_generics "resultDefault" in
+  assert_equal "stdlib generic Result.withDefault" "7"
+    (Runtime.value_to_string result_default);
+  let result_mapped_err, _ = Runtime.normalize_def stdlib_generics "resultMappedErr" in
+  assert_equal "stdlib generic Result.mapError" "Err true"
+    (Runtime.value_to_string result_mapped_err);
+  let result_next, _ = Runtime.normalize_def stdlib_generics "resultNext" in
+  assert_equal "stdlib generic Result.andThen" "Ok 8" (Runtime.value_to_string result_next);
+  let swapped, _ = Runtime.normalize_def stdlib_generics "swapped" in
+  assert_equal "stdlib generic Pair.swap" "{first = 7, second = \"n\"}"
+    (Runtime.value_to_string swapped);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in
