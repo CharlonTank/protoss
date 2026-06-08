@@ -4,7 +4,7 @@ Executable OCaml/Dune prototype for graph-first, content-addressed Protoss apps.
 
 What works now:
 
-- The pure core remains total: typed AST, canonical DefIds, stable hashes, deterministic normalization, explicit `Process` effects, capabilities, atomic patches, project stores, diff, and audit.
+- The pure core remains total: typed AST, canonical DefIds, stable hashes, deterministic normalization, explicit `Process` effects, typed capability descriptors, atomic patches, project stores, diff, and audit.
 - Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, `program.canon`, `program.graph.json`, types, deps, normal forms, roots, build refs, and web markers.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
@@ -12,7 +12,7 @@ What works now:
 - `View msg` is a typed canonical UI type. Supported constructors are `text`, `image`, `button`, `input`, `column`, `row`, `list`, and `when`.
 - UI/message mismatches are rejected statically by the typechecker.
 - Web bundles are deterministic and include `index.html`, `protoss-runtime.js`, `protoss-app.json`, `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-capabilities.json`, and `protoss-world.json`.
-- `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Typed resume rejects wrong response tags.
+- `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Capabilities are checked against the kernel catalog and exported with typed request/response signatures. Typed resume rejects wrong response tags.
 - Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 

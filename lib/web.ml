@@ -589,7 +589,13 @@ let build ?out project =
   write_file (Filename.concat out_dir "protoss-canon-graph.json")
     (Kernel.checked_to_graph_json build.checked);
   write_file (Filename.concat out_dir "protoss-capabilities.json")
-    (json_obj [ json_field "capabilities" (json_array json_string build.checked.program.capabilities) ] ^ "\n");
+    (json_obj
+       [
+         json_field "capabilities" (json_array json_string build.checked.program.capabilities);
+         json_field "capabilityDescriptors"
+           (Kernel.capabilities_to_graph_json build.checked.program.capabilities);
+       ]
+    ^ "\n");
   write_file (Filename.concat out_dir "protoss-world.json") (current_world_json ());
   { build; contract; out_dir }
 

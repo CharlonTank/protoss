@@ -61,6 +61,98 @@ let req_result_type = function
   | AskHuman _ | HttpGet _ | ReadClock | LoadLocal _ | ServerRequest _ -> TString
   | SaveLocal _ -> TUnit
 
+type capability_request_signature = {
+  request_tag : string;
+  request_payload_type : typ;
+  response_type : typ;
+}
+
+type capability_descriptor = {
+  capability_name : string;
+  request_signatures : capability_request_signature list;
+}
+
+let capability_catalog =
+  [
+    {
+      capability_name = "Clock.read";
+      request_signatures =
+        [ { request_tag = "ReadClock"; request_payload_type = TUnit; response_type = TString } ];
+    };
+    {
+      capability_name = "Http.get";
+      request_signatures =
+        [
+          {
+            request_tag = "HttpGet";
+            request_payload_type = TRecord [ ("url", TString) ];
+            response_type = TString;
+          };
+        ];
+    };
+    {
+      capability_name = "Human.ask";
+      request_signatures =
+        [
+          {
+            request_tag = "AskHuman";
+            request_payload_type = TRecord [ ("prompt", TString) ];
+            response_type = TString;
+          };
+        ];
+    };
+    {
+      capability_name = "Local.storage";
+      request_signatures =
+        [
+          {
+            request_tag = "LoadLocal";
+            request_payload_type = TRecord [ ("key", TString) ];
+            response_type = TString;
+          };
+          {
+            request_tag = "SaveLocal";
+            request_payload_type = TRecord [ ("key", TString); ("value", TString) ];
+            response_type = TUnit;
+          };
+        ];
+    };
+    {
+      capability_name = "Server.request";
+      request_signatures =
+        [
+          {
+            request_tag = "ServerRequest";
+            request_payload_type = TRecord [ ("payload", TString); ("route", TString) ];
+            response_type = TString;
+          };
+        ];
+    };
+  ]
+
+let capability_descriptor name =
+  List.find_opt (fun d -> String.equal d.capability_name name) capability_catalog
+
+let known_capabilities () =
+  capability_catalog |> List.map (fun d -> d.capability_name) |> List.sort String.compare
+
+let validate_capabilities caps =
+  let unknown =
+    caps
+    |> List.filter (fun cap -> capability_descriptor cap = None)
+    |> List.sort_uniq String.compare
+  in
+  match unknown with
+  | [] -> ()
+  | [ cap ] ->
+      fail
+        ("unknown capability: " ^ cap ^ ". Known capabilities: "
+        ^ String.concat ", " (known_capabilities ()))
+  | caps ->
+      fail
+        ("unknown capabilities: " ^ String.concat ", " caps ^ ". Known capabilities: "
+        ^ String.concat ", " (known_capabilities ()))
+
 let req_to_canonical = function
   | AskHuman prompt -> "(AskHuman " ^ Ast.quote prompt ^ ")"
   | HttpGet url -> "(HttpGet " ^ Ast.quote url ^ ")"
@@ -806,6 +898,29 @@ let req_to_graph_json req =
     (json_field "tag" (json_string tag) :: json_field "capability" (json_string (req_capability req))
     :: fields)
 
+let capability_request_to_graph_json req =
+  json_obj
+    [
+      json_field "tag" (json_string req.request_tag);
+      json_field "payloadType" (type_to_graph_json req.request_payload_type);
+      json_field "responseType" (type_to_graph_json req.response_type);
+    ]
+
+let capability_descriptor_to_graph_json desc =
+  json_obj
+    [
+      json_field "name" (json_string desc.capability_name);
+      json_field "requests" (json_array capability_request_to_graph_json desc.request_signatures);
+    ]
+
+let declared_capability_descriptors caps =
+  caps
+  |> List.sort_uniq String.compare
+  |> List.filter_map capability_descriptor
+
+let capabilities_to_graph_json caps =
+  json_array capability_descriptor_to_graph_json (declared_capability_descriptors caps)
+
 let rec cterm_to_graph_json def_id_of = function
   | CUnit -> json_obj [ json_field "tag" (json_string "Unit") ]
   | CBool b -> json_obj [ json_field "tag" (json_string "Bool"); json_field "value" (json_bool b) ]
@@ -1156,6 +1271,7 @@ type checked = {
 
 let check_program (program : program) =
   let program = resolve_program_types program in
+  validate_capabilities program.capabilities;
   check_duplicate_names program.defs;
   reject_cycles program.defs;
   let globals = List.map (fun d -> (d.name, d.typ)) program.defs in
@@ -1249,6 +1365,7 @@ let checked_to_graph_json checked =
       json_field "programHash" (json_string (hash_program checked));
       json_field "capabilities"
         (json_array json_string (List.sort_uniq String.compare checked.program.capabilities));
+      json_field "capabilityDescriptors" (capabilities_to_graph_json checked.program.capabilities);
       json_field "defs" (json_array def_json defs);
     ]
   ^ "\n"

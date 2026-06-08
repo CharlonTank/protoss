@@ -29,6 +29,10 @@ let json_array_field name obj =
   | Some xs -> xs
   | None -> fail ("JSON field is not array: " ^ name)
 
+let json_string_array_field name obj =
+  json_array_field name obj
+  |> List.map (function Json.String s -> s | _ -> fail ("JSON field is not string array: " ^ name))
+
 let expect_parse_error input =
   try
     let _ = Parser.parse_string input in
@@ -157,6 +161,8 @@ let () =
   assert_equal "canonical graph program hash" (Kernel.hash_program formatted_a)
     (json_string_field "programHash" graph);
   assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
+  assert_true "canonical graph empty capability descriptors"
+    (json_array_field "capabilityDescriptors" graph = []);
   assert_equal "canonical graph deterministic" graph_json (Canonical_ir.serialize_graph formatted_a);
   assert_equal "canonical graph alpha-stable" (Canonical_ir.serialize_graph alpha_a)
     (Canonical_ir.serialize_graph alpha_b);
@@ -380,6 +386,20 @@ let () =
   let pv, _ = Runtime.eval_entry process "askName" in
   assert_true "process should suspend"
     (match pv with Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true | _ -> false);
+  let process_graph = Json.parse (Canonical_ir.serialize_graph process) in
+  let process_capabilities = json_string_array_field "capabilities" process_graph in
+  assert_equal "process graph capability list" "Human.ask" (String.concat "," process_capabilities);
+  let process_descriptors = json_array_field "capabilityDescriptors" process_graph in
+  assert_true "process graph capability descriptor count" (List.length process_descriptors = 1);
+  let human_descriptor = List.hd process_descriptors in
+  assert_equal "process graph capability descriptor name" "Human.ask"
+    (json_string_field "name" human_descriptor);
+  let human_requests = json_array_field "requests" human_descriptor in
+  assert_true "process graph capability request count" (List.length human_requests = 1);
+  let ask_request = List.hd human_requests in
+  assert_equal "process graph request tag" "AskHuman" (json_string_field "tag" ask_request);
+  assert_equal "process graph response type" "String"
+    (json_string_field "tag" (json_field "responseType" ask_request));
 
   let process_resume =
     check
@@ -409,6 +429,7 @@ let () =
    with Kernel.Error _ -> ());
 
   expect_check_error "(def askName (Process String) (Human.ask \"Name?\"))";
+  expect_check_error "(capabilities Space.laser)\n(def main Nat 0)";
   expect_check_error
     "(capabilities Human.ask)\n(def bad Nat (let (p (Human.ask \"x\")) 0))";
 
@@ -435,6 +456,18 @@ let () =
    with Patch.Error _ -> ());
   assert_true "invalid patch must not modify store" (count_objects store = before);
   assert_true "invalid patch must not modify ledger" (count_files ledger = ledger_before);
+
+  let unknown_cap_patch =
+    patch_file "protoss-unknown-cap.json"
+      "{ \"op\":\"AddDef\", \"name\":\"capBad\", \"deps\":[], \"capabilities\":[\"Space.laser\"], \
+       \"type\":\"Nat\", \"expr\":0 }"
+  in
+  let unknown_cap_before = snapshot store in
+  (try
+     let _ = Patch.apply store unknown_cap_patch in
+     fail "unknown capability patch should be rejected"
+   with Patch.Error _ -> ());
+  assert_true "unknown capability patch must not modify store" (snapshot store = unknown_cap_before);
 
   let duplicate_before = count_files store in
   (try
@@ -738,6 +771,18 @@ let () =
     (json_string_field "version" web_canon_graph);
   assert_equal "web canonical graph hash" (Kernel.hash_program web_a.Web.build.Workspace.checked)
     (json_string_field "programHash" web_canon_graph);
+  let web_capabilities =
+    Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-capabilities.json"))
+  in
+  assert_equal "web capabilities names" "Local.storage"
+    (String.concat "," (json_string_array_field "capabilities" web_capabilities));
+  let web_capability_descriptors = json_array_field "capabilityDescriptors" web_capabilities in
+  assert_true "web capability descriptor count" (List.length web_capability_descriptors = 1);
+  let local_storage_descriptor = List.hd web_capability_descriptors in
+  assert_equal "web capability descriptor name" "Local.storage"
+    (json_string_field "name" local_storage_descriptor);
+  assert_true "web capability request signatures"
+    (List.length (json_array_field "requests" local_storage_descriptor) = 2);
   let web_dist_b = temp_dir "web-dist-b" in
   ignore (Web.build ~out:web_dist_b todo);
   List.iter
