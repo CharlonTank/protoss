@@ -1812,6 +1812,9 @@ let store_graph_dot store graph_hash =
 let store_graph_stats store graph_hash =
   Canonical_ir.graph_stats (graph_store store graph_hash)
 
+let store_graph_node store graph_hash node_ref =
+  Canonical_ir.graph_node (graph_store store graph_hash) node_ref
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

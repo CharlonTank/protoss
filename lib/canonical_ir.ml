@@ -555,6 +555,41 @@ let describe_graph_stats stats =
   ^ "\nterm_nodes=" ^ string_of_int stats.term_nodes ^ "\nedges="
   ^ string_of_int stats.edges ^ "\n"
 
+type graph_node = {
+  node_id : string;
+  node_kind : string;
+  node_canonical : string;
+  node_payload_tag : string;
+  node_edge_refs : string list;
+}
+
+let graph_node input node_ref =
+  ignore (checked_of_graph input);
+  let graph = Json.parse input in
+  let nodes = json_array_field "nodes" (json_field "nodeGraph" graph) in
+  match List.find_opt (fun node -> String.equal (json_string_field "id" node) node_ref) nodes with
+  | None -> fail ("canonical graph node not found: " ^ node_ref)
+  | Some node ->
+      let payload = json_field "payload" node in
+      let payload_tag =
+        match Json.string (json_field "tag" payload) with Some tag -> tag | None -> "-"
+      in
+      {
+        node_id = json_string_field "id" node;
+        node_kind = json_string_field "kind" node;
+        node_canonical = json_string_field "canonical" node;
+        node_payload_tag = payload_tag;
+        node_edge_refs = json_string_array_field "edgeRefs" node;
+      }
+
+let describe_graph_node node =
+  "Graph node\nid=" ^ node.node_id ^ "\nkind=" ^ node.node_kind
+  ^ "\npayload_tag=" ^ node.node_payload_tag ^ "\ncanonical="
+  ^ node.node_canonical ^ "\nedges=" ^ string_of_int (List.length node.node_edge_refs)
+  ^ "\nedge_refs="
+  ^ (match node.node_edge_refs with [] -> "" | refs -> String.concat "," refs)
+  ^ "\n"
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program

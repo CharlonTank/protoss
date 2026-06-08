@@ -419,6 +419,19 @@ let () =
   let graph_main_def = graph_def graph "main" in
   let top_type_ref = json_string_field "typeRef" graph_main_def in
   let top_term_ref = json_string_field "termRef" graph_main_def in
+  let top_type_node = Canonical_ir.graph_node graph_json top_type_ref in
+  assert_equal "canonical graph node type kind" "Type" top_type_node.Canonical_ir.node_kind;
+  assert_true "canonical graph node type describes"
+    (contains_substring (Canonical_ir.describe_graph_node top_type_node) "Graph node");
+  let top_term_node = Canonical_ir.graph_node graph_json top_term_ref in
+  assert_equal "canonical graph node term kind" "Term" top_term_node.Canonical_ir.node_kind;
+  assert_true "canonical graph node term edges" (List.length top_term_node.Canonical_ir.node_edge_refs > 0);
+  (try
+     ignore (Canonical_ir.graph_node graph_json "p2:missing");
+     fail "canonical graph missing node should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph reports missing node"
+       (contains_substring msg "canonical graph node not found"));
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -2353,6 +2366,11 @@ let () =
     store_graph_stats.Canonical_ir.graph_hash;
   assert_true "project store graph stats defs" (store_graph_stats.Canonical_ir.defs > 1);
   assert_true "project store graph stats edges" (store_graph_stats.Canonical_ir.edges > 0);
+  let store_graph_app_main_ref = json_string_field "termRef" (graph_def store_graph "appMain") in
+  let store_graph_node = Workspace.store_graph_node build_a.store store_graph_hash store_graph_app_main_ref in
+  assert_equal "project store graph node kind" "Term" store_graph_node.Canonical_ir.node_kind;
+  assert_true "project store graph node describes"
+    (contains_substring (Canonical_ir.describe_graph_node store_graph_node) "Graph node");
   let graph_hash_mismatch_store = temp_dir "workspace-graph-hash-mismatch-store" in
   copy_tree build_a.store graph_hash_mismatch_store;
   Store.write_file_atomic
