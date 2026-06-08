@@ -1750,7 +1750,7 @@ let graphs_store store =
     |> String.concat "\n"
     |> fun s -> if s = "" then "" else s ^ "\n"
 
-let graph_store store graph_hash =
+let read_store_graph store graph_hash =
   let path = Store.graph_path store graph_hash in
   if not (Sys.file_exists path) then fail ("graph not found: " ^ graph_hash);
   let graph_json = read_file path in
@@ -1766,7 +1766,11 @@ let graph_store store graph_hash =
     fail
       ("stored canonical graph hash mismatch: requested " ^ graph_hash ^ ", content "
      ^ expected_graph_hash);
-  graph_json
+  (graph_json, checked)
+
+let graph_store store graph_hash = fst (read_store_graph store graph_hash)
+
+let checked_store_graph store graph_hash = snd (read_store_graph store graph_hash)
 
 let roots_store store =
   let path = Filename.concat store "roots" in

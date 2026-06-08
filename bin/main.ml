@@ -1,13 +1,17 @@
 let usage () =
   prerr_endline
     "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
+     \       protoss check|nf|hash --store-graph <project-or-store> <graphHash>\n\
      \       protoss canon <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
+     \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss run <file> --entry <name> [--ledger <root>]\n\
      \       protoss run --graph <graph.json> --entry <name> [--ledger <root>]\n\
+     \       protoss run --store-graph <project-or-store> <graphHash> --entry <name> [--ledger <root>]\n\
      \       protoss resume <file> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss resume --graph <graph.json> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
+     \       protoss resume --store-graph <project-or-store> <graphHash> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss world init [<ledger-root>]\n\
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
@@ -100,8 +104,17 @@ let command_check file =
 let checked_graph file =
   Protoss.Canonical_ir.checked_of_graph (Protoss.Store.read_file file)
 
+let checked_store_graph project_or_store graph_hash =
+  Protoss.Workspace.checked_store_graph
+    (Protoss.Workspace.store_of_arg project_or_store)
+    graph_hash
+
 let command_check_graph file =
   let checked = checked_graph file in
+  Printf.printf "Graph OK: %d definitions\n" (List.length checked.Protoss.Kernel.defs)
+
+let command_check_store_graph project_or_store graph_hash =
+  let checked = checked_store_graph project_or_store graph_hash in
   Printf.printf "Graph OK: %d definitions\n" (List.length checked.Protoss.Kernel.defs)
 
 let command_nf file =
@@ -116,12 +129,22 @@ let command_nf_graph file =
   |> List.iter (fun (name, value) ->
          Printf.printf "%s = %s\n" name (Protoss.Runtime.value_to_string value))
 
+let command_nf_store_graph project_or_store graph_hash =
+  let checked = checked_store_graph project_or_store graph_hash in
+  Protoss.Runtime.normalize_all checked
+  |> List.iter (fun (name, value) ->
+         Printf.printf "%s = %s\n" name (Protoss.Runtime.value_to_string value))
+
 let command_hash file =
   let checked = parse_and_check file in
   print_endline (Protoss.Kernel.hash_program checked)
 
 let command_hash_graph file =
   let checked = checked_graph file in
+  print_endline (Protoss.Kernel.hash_program checked)
+
+let command_hash_store_graph project_or_store graph_hash =
+  let checked = checked_store_graph project_or_store graph_hash in
   print_endline (Protoss.Kernel.hash_program checked)
 
 let canonical_program checked =
@@ -167,6 +190,16 @@ let command_eval_graph file args =
   List.iter print_endline trace;
   Printf.printf "%s = %s\n" entry (Protoss.Runtime.value_to_string value)
 
+let command_eval_store_graph project_or_store graph_hash args =
+  let entry, rest = find_entry args in
+  let checked = checked_store_graph project_or_store graph_hash in
+  let value, trace =
+    Protoss.Runtime.eval_entry ~trace_cache:(has_flag "--trace-cache" rest)
+      ?cache_dir:(find_arg "--cache" rest) checked entry
+  in
+  List.iter print_endline trace;
+  Printf.printf "%s = %s\n" entry (Protoss.Runtime.value_to_string value)
+
 let run_checked checked args =
   let entry, _ = find_entry args in
   let value, _ = Protoss.Runtime.eval_entry checked entry in
@@ -198,6 +231,9 @@ let command_run file args =
 
 let command_run_graph file args =
   run_checked (checked_graph file) args
+
+let command_run_store_graph project_or_store graph_hash args =
+  run_checked (checked_store_graph project_or_store graph_hash) args
 
 let resume_checked checked args =
   let _entry, _ = find_entry args in
@@ -235,6 +271,9 @@ let command_resume file args =
 
 let command_resume_graph file args =
   resume_checked (checked_graph file) args
+
+let command_resume_store_graph project_or_store graph_hash args =
+  resume_checked (checked_store_graph project_or_store graph_hash) args
 
 let default_ledger = Filename.concat "target" "ledger"
 
@@ -578,20 +617,32 @@ let () =
       match Array.to_list Sys.argv |> List.tl with
       | [ "parse"; file ] -> command_parse file
       | [ "check"; "--graph"; file ] -> command_check_graph file
+      | [ "check"; "--store-graph"; project_or_store; graph_hash ] ->
+          command_check_store_graph project_or_store graph_hash
       | [ "check"; file ] -> command_check file
       | [ "nf"; "--graph"; file ] -> command_nf_graph file
+      | [ "nf"; "--store-graph"; project_or_store; graph_hash ] ->
+          command_nf_store_graph project_or_store graph_hash
       | [ "nf"; file ] -> command_nf file
       | [ "hash"; "--graph"; file ] -> command_hash_graph file
+      | [ "hash"; "--store-graph"; project_or_store; graph_hash ] ->
+          command_hash_store_graph project_or_store graph_hash
       | [ "hash"; file ] -> command_hash file
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--graph"; file ] -> command_canon_graph file
       | [ "canon"; "--from-graph"; file ] -> command_canon_from_graph file
       | [ "canon"; file ] -> command_canon file
       | "eval" :: "--graph" :: file :: args -> command_eval_graph file args
+      | "eval" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
+          command_eval_store_graph project_or_store graph_hash args
       | "eval" :: file :: args -> command_eval file args
       | "run" :: "--graph" :: file :: args -> command_run_graph file args
+      | "run" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
+          command_run_store_graph project_or_store graph_hash args
       | "run" :: file :: args -> command_run file args
       | "resume" :: "--graph" :: file :: args -> command_resume_graph file args
+      | "resume" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
+          command_resume_store_graph project_or_store graph_hash args
       | "resume" :: file :: args -> command_resume file args
       | "world" :: args -> command_world args
       | "ledger" :: args -> command_ledger args

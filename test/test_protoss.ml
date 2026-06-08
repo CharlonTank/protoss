@@ -2302,6 +2302,11 @@ let () =
     (contains_substring (Workspace.graphs_store build_a.store) store_graph_hash);
   assert_equal "project store graph by hash" (Store.read_file store_graph_path)
     (Workspace.graph_store build_a.store store_graph_hash);
+  let store_graph_checked = Workspace.checked_store_graph build_a.store store_graph_hash in
+  assert_equal "project checked store graph hash" (Kernel.hash_program build_a.Workspace.checked)
+    (Kernel.hash_program store_graph_checked);
+  let store_graph_value, _ = Runtime.eval_entry store_graph_checked "appMain" in
+  assert_equal "project checked store graph eval" "44" (Runtime.value_to_string store_graph_value);
   let graph_hash_mismatch_store = temp_dir "workspace-graph-hash-mismatch-store" in
   copy_tree build_a.store graph_hash_mismatch_store;
   Store.write_file_atomic
