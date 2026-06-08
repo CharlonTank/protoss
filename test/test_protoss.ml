@@ -282,13 +282,34 @@ let () =
      (def xs (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
      (def mapped (List Nat) ((List.mapNat xs) (lambda (y Nat) (succ y))))\n\
      (def total Nat (foldList mapped 0 (lambda (z Nat) (lambda (acc Nat) ((Nat.add z) acc)))))\n";
-  let imported_a = Loader.check_file app_a in
-  let imported_b = Loader.check_file app_b in
-  let total, _ = Runtime.normalize_def imported_a "total" in
-  assert_equal "imports stdlib List/foldList" "5" (Runtime.value_to_string total);
-  assert_equal "import path raw text ignored by hash" (Kernel.hash_program imported_a)
-    (Kernel.hash_program imported_b);
-  let cycle_a = Filename.concat import_root "cycle_a.protoss" in
+	  let imported_a = Loader.check_file app_a in
+	  let imported_b = Loader.check_file app_b in
+	  let total, _ = Runtime.normalize_def imported_a "total" in
+	  assert_equal "imports stdlib List/foldList" "5" (Runtime.value_to_string total);
+	  assert_equal "import path raw text ignored by hash" (Kernel.hash_program imported_a)
+	    (Kernel.hash_program imported_b);
+	  let module_root = temp_dir "modules" in
+	  ensure_dir module_root;
+	  let module_math = Filename.concat module_root "math.protoss" in
+	  let module_app = Filename.concat module_root "app.protoss" in
+	  let module_bad = Filename.concat module_root "bad.protoss" in
+	  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
+	  write_file module_math
+	    ("(module Demo.Math)\n(import " ^ Ast.quote stdlib_path
+	   ^ ")\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
+	      (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n");
+	  write_file module_app
+	    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 3))\n";
+	  let module_checked = Loader.check_file module_app in
+	  let module_result, _ = Runtime.normalize_def module_checked "result" in
+	  assert_equal "module export with private dependency" "6" (Runtime.value_to_string module_result);
+	  write_file module_bad
+	    "(import \"math.protoss\")\n(def leak Demo.Math.Number Demo.Math.hidden)\n";
+	  (try
+	     ignore (Loader.check_file module_bad);
+	     fail "private module definition should not be importable"
+	   with Loader.Error msg -> assert_true "private module export error" (String.contains msg 'e'));
+	  let cycle_a = Filename.concat import_root "cycle_a.protoss" in
   let cycle_b = Filename.concat import_root "cycle_b.protoss" in
   write_file cycle_a "(import \"cycle_b.protoss\")\n(def a Nat 1)\n";
   write_file cycle_b "(import \"cycle_a.protoss\")\n(def b Nat 2)\n";
@@ -553,12 +574,13 @@ let () =
     write_file (Filename.concat root "src/math.protoss")
       ("(def base Nat " ^ string_of_int base_value
      ^ ")\n(def total Nat ((Nat.add base) 40))\n");
-    write_file (Filename.concat root "src/app.protoss")
-      ("(def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
-        (def bumped (List Nat) ((List.mapNat numbers) (lambda ("
-      ^ bound ^ " Nat) (succ " ^ bound
-      ^ "))))\n(def appMain Nat ((Nat.add total) base))\n\
-        (def askName (Process String) (Human.ask \"Name?\"))\n");
+	    write_file (Filename.concat root "src/app.protoss")
+	      ("(import \"math.protoss\")\n\
+	        (def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
+	        (def bumped (List Nat) ((List.mapNat numbers) (lambda ("
+	      ^ bound ^ " Nat) (succ " ^ bound
+	      ^ "))))\n(def appMain Nat ((Nat.add total) base))\n\
+	        (def askName (Process String) (Human.ask \"Name?\"))\n");
     root
   in
   let ws_a = make_workspace "workspace-a" 2 "x" in
@@ -571,10 +593,34 @@ let () =
   assert_true "project store get" (String.length (Workspace.get_store build_a.store "appMain") > 0);
   assert_equal "project store deps" "Nat.add,base,total"
     (String.concat "," (Workspace.read_deps build_a.store "appMain"));
-  assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
-  assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
+	  assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
+	  assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
 
-  let second_build = Workspace.build manifest_a in
+	  let module_ws = temp_dir "workspace-modules" in
+	  ensure_dir module_ws;
+	  ensure_dir (Filename.concat module_ws "src");
+	  write_file (Filename.concat module_ws "protoss.toml")
+	    ("name = \"workspace-modules\"\nversion = \"0.5.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
+	   ^ stdlib_path
+	    ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = []\n");
+	  write_file (Filename.concat module_ws "src/math.protoss")
+	    "(module Demo.Math)\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
+	     (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n";
+	  write_file (Filename.concat module_ws "src/app.protoss")
+	    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n";
+	  let module_manifest = Workspace.parse_manifest module_ws in
+	  let module_build = Workspace.build module_manifest in
+	  let module_checked = module_build.Workspace.checked in
+	  let module_value, _ = Runtime.normalize_def module_checked "result" in
+	  assert_equal "workspace module export" "8" (Runtime.value_to_string module_value);
+	  write_file (Filename.concat module_ws "src/bad.protoss")
+	    "(def leak Demo.Math.Number Demo.Math.hidden)\n";
+	  (try
+	     ignore (Workspace.build module_manifest);
+	     fail "workspace should reject non-imported private module symbol"
+	   with Workspace.Error msg -> assert_true "workspace private module error" (String.contains msg 'i'));
+
+	  let second_build = Workspace.build manifest_a in
   assert_equal "incremental parsed" "0" (string_of_int second_build.Workspace.stats.Workspace.parsed);
   assert_true "incremental reused" (second_build.Workspace.stats.Workspace.reused > 0);
   assert_equal "incremental normalized" "0"

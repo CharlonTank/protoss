@@ -1,0 +1,11 @@
+(module Demo.Math)
+(import "../../stdlib/prelude.protoss")
+(export Number double)
+
+(type Number Nat)
+
+(def hidden Number 2)
+
+(def double (-> Number Number)
+  (lambda (x Number)
+    ((Nat.mul x) hidden)))

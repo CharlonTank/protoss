@@ -1,3 +1,5 @@
+(import "math.protoss")
+
 (def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))
 
 (def bumped (List Nat) ((List.mapNat numbers) (lambda (x Nat) (succ x))))

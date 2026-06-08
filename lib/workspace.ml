@@ -263,8 +263,12 @@ type unit_load = {
   source_hash : string;
   imports : string list;
   capabilities : string list;
+  module_name : string option;
+  exports : string list option;
   type_aliases : type_alias list;
   defs : def list;
+  public_symbols : string list;
+  all_symbols : string list;
   parsed_from_source : bool;
 }
 
@@ -280,19 +284,78 @@ let empty_stats () = { parsed = 0; reused = 0; typechecked = 0; normalized = 0; 
 
 let source_hash source = Kernel.hash_string ("source:" ^ source)
 
+let local_symbols_of_program (program : program) =
+  List.map (fun (d : def) -> d.name) program.defs
+  @ List.map (fun (a : type_alias) -> a.type_name) program.type_aliases
+
+let public_symbols_of_program (program : program) =
+  match program.exports with Some names -> names | None -> local_symbols_of_program program
+
+let rec type_refs = function
+  | TUnit | TBool | TNat | TString -> []
+  | TFun (a, b) -> type_refs a @ type_refs b
+  | TRecord fields | TVariant fields -> List.concat_map (fun (_, t) -> type_refs t) fields
+  | TList t | TView t | TProcess t -> type_refs t
+  | TNamed (n, args) -> n :: List.concat_map type_refs args
+
+let rec expr_type_refs = function
+  | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ -> []
+  | ELambda (_, t, body) -> type_refs t @ expr_type_refs body
+  | EApp (f, x) -> expr_type_refs f @ expr_type_refs x
+  | ELet (_, e, body) -> expr_type_refs e @ expr_type_refs body
+  | ERecord fields -> List.concat_map (fun (_, e) -> expr_type_refs e) fields
+  | EField (e, _) -> expr_type_refs e
+  | EVariant (t, _, e) -> type_refs t @ expr_type_refs e
+  | ECase (e, branches) -> expr_type_refs e @ List.concat_map branch_type_refs branches
+  | EFoldNat (n, z, step) -> expr_type_refs n @ expr_type_refs z @ expr_type_refs step
+  | ENil t -> type_refs t
+  | ECons (t, head, tail) -> type_refs t @ expr_type_refs head @ expr_type_refs tail
+  | EFoldList (xs, z, step) -> expr_type_refs xs @ expr_type_refs z @ expr_type_refs step
+  | EText e | EColumn e | ERow e | EDone e -> expr_type_refs e
+  | EImage (a, b) | EButton (a, b) | EInput (a, b) | EListView (a, b)
+  | EWhenView (a, b) ->
+      expr_type_refs a @ expr_type_refs b
+  | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
+
+and branch_type_refs = function
+  | BBool (_, e) -> expr_type_refs e
+  | BVariant (_, _, e) -> expr_type_refs e
+
+let unit_type_refs (unit : unit_load) =
+  let alias_refs =
+    unit.type_aliases
+    |> List.concat_map (fun a ->
+           type_refs a.type_body
+           |> List.filter (fun n -> not (List.exists (String.equal n) a.type_params)))
+  in
+  let def_refs = unit.defs |> List.concat_map (fun d -> type_refs d.typ @ expr_type_refs d.body) in
+  sort_uniq (alias_refs @ def_refs)
+
 let parse_cached_unit store path hash =
   let fields = meta_assoc (unit_meta_path store path) in
   match (meta_field "source_hash" fields, Sys.file_exists (unit_defs_path store path)) with
   | Some old_hash, true when String.equal old_hash hash ->
       let parsed = Parser.parse_string (read_file (unit_defs_path store path)) in
+      let local_symbols = local_symbols_of_program parsed in
       Some
         {
           path;
           source_hash = hash;
           imports = meta_field "imports" fields |> Option.value ~default:"" |> split_words;
           capabilities = meta_field "capabilities" fields |> Option.value ~default:"" |> split_words;
+          module_name = meta_field "module" fields;
+          exports =
+            (match meta_field "exports" fields with
+            | None -> parsed.exports
+            | Some s -> Some (split_words s));
           type_aliases = parsed.type_aliases;
           defs = parsed.defs;
+          public_symbols =
+            meta_field "public_symbols" fields |> Option.map split_words
+            |> Option.value ~default:(public_symbols_of_program parsed);
+          all_symbols =
+            meta_field "all_symbols" fields |> Option.map split_words
+            |> Option.value ~default:local_symbols;
           parsed_from_source = false;
         }
   | _ -> None
@@ -304,8 +367,12 @@ let parse_source_unit path source hash =
     source_hash = hash;
     imports = parsed.imports;
     capabilities = parsed.capabilities;
+    module_name = parsed.module_name;
+    exports = parsed.exports;
     type_aliases = parsed.type_aliases;
     defs = parsed.defs;
+    public_symbols = public_symbols_of_program parsed;
+    all_symbols = local_symbols_of_program parsed;
     parsed_from_source = true;
   }
 
@@ -313,12 +380,16 @@ let write_unit store unit =
   let forms = List.map string_of_type_alias unit.type_aliases @ List.map string_of_def unit.defs in
   let defs_source = String.concat "\n" forms ^ if forms = [] then "" else "\n" in
   write_file (unit_defs_path store unit.path) defs_source;
-  write_file (unit_meta_path store unit.path)
-    ("path=" ^ unit.path ^ "\nsource_hash=" ^ unit.source_hash ^ "\nimports="
-   ^ String.concat " " unit.imports ^ "\ncapabilities="
-    ^ String.concat " " unit.capabilities ^ "\ndefs="
-   ^ String.concat " " (List.map (fun (d : def) -> d.name) unit.defs)
-   ^ "\n")
+	  write_file (unit_meta_path store unit.path)
+	    ("path=" ^ unit.path ^ "\nsource_hash=" ^ unit.source_hash ^ "\nimports="
+	   ^ String.concat " " unit.imports ^ "\ncapabilities="
+	    ^ String.concat " " unit.capabilities ^ "\nmodule="
+	    ^ Option.value unit.module_name ~default:"" ^ "\nexports="
+	    ^ Option.value (Option.map (String.concat " ") unit.exports) ~default:"" ^ "\npublic_symbols="
+	    ^ String.concat " " unit.public_symbols ^ "\nall_symbols="
+	    ^ String.concat " " unit.all_symbols ^ "\ndefs="
+	   ^ String.concat " " (List.map (fun (d : def) -> d.name) unit.defs)
+	   ^ "\n")
 
 let manifest_roots manifest =
   let stdlib =
@@ -368,8 +439,66 @@ let load_units manifest store stats =
           else fail (path ^ ":1:1: missing import: " ^ import_path))
         unit.imports)
   in
-  List.iter (load []) (manifest_roots manifest);
-  !units |> List.sort (fun a b -> String.compare a.path b.path)
+	  List.iter (load []) (manifest_roots manifest);
+	  !units |> List.sort (fun a b -> String.compare a.path b.path)
+
+let unit_by_path (units : unit_load list) path =
+  let path = realpath_or path in
+  List.find_opt (fun u -> String.equal u.path path) units
+
+let direct_import_units (units : unit_load list) (unit : unit_load) =
+  unit.imports
+  |> List.filter_map (fun import_path ->
+         let target = normalize_path (Filename.dirname unit.path) import_path in
+         unit_by_path units target)
+
+let rec reachable_symbols (units : unit_load list) seen (unit : unit_load) =
+  if List.exists (String.equal unit.path) seen then []
+  else
+    let seen = unit.path :: seen in
+    unit.all_symbols
+    @ (direct_import_units units unit
+      |> List.concat_map (reachable_symbols units seen))
+
+let manifest_stdlib_unit (manifest : manifest) (units : unit_load list) =
+  match manifest.stdlib with
+  | None -> None
+  | Some path -> unit_by_path units (path_in_project manifest path)
+
+let check_unit_access (manifest : manifest) (units : unit_load list) =
+  let all_defs = units |> List.concat_map (fun (u : unit_load) -> u.defs) in
+  let project_symbols =
+    units |> List.concat_map (fun (u : unit_load) -> u.all_symbols) |> sort_uniq
+  in
+  let stdlib_public, stdlib_all =
+    match manifest_stdlib_unit manifest units with
+    | None -> ([], [])
+    | Some u -> (u.public_symbols, reachable_symbols units [] u |> sort_uniq)
+  in
+  List.iter
+    (fun (unit : unit_load) ->
+      let direct_imports = direct_import_units units unit in
+      let import_public =
+        direct_imports |> List.concat_map (fun u -> u.public_symbols) |> sort_uniq
+      in
+      let import_all =
+        direct_imports |> List.concat_map (fun u -> reachable_symbols units [] u) |> sort_uniq
+      in
+      let allowed = sort_uniq (unit.all_symbols @ import_public @ stdlib_public) in
+      let known = sort_uniq (project_symbols @ import_all @ stdlib_all) in
+      let check_ref kind name =
+        if List.exists (String.equal name) allowed then ()
+        else if List.exists (String.equal name) known then
+          fail
+            (unit.path ^ ":1:1: " ^ kind
+           ^ " is not imported or exported for this unit: " ^ name)
+      in
+      List.iter
+        (fun (d : def) ->
+          Kernel.dependencies_of_defs all_defs d.name |> List.iter (check_ref "definition"))
+        unit.defs;
+      unit_type_refs unit |> List.iter (check_ref "type"))
+    units
 
 let checked_def_by_name checked name =
   checked.Kernel.defs
@@ -441,12 +570,15 @@ let build ?(write = true) manifest =
   let stats = empty_stats () in
   let store = store_root manifest in
   let units = load_units manifest store stats in
+  check_unit_access manifest units;
   let program =
 	    {
 	      imports = [];
 	      capabilities =
 	        List.sort_uniq String.compare
 	          (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
+	      module_name = None;
+	      exports = None;
 	      type_aliases = List.concat (List.map (fun u -> u.type_aliases) units);
 	      defs = List.concat (List.map (fun u -> u.defs) units);
 	    }

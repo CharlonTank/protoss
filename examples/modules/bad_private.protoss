@@ -1,0 +1,4 @@
+(import "math.protoss")
+
+(def leak Demo.Math.Number
+  Demo.Math.hidden)

@@ -67,6 +67,8 @@ type type_alias = {
 type program = {
   imports : string list;
   capabilities : string list;
+  module_name : string option;
+  exports : string list option;
   type_aliases : type_alias list;
   defs : def list;
 }
@@ -216,6 +218,14 @@ let string_of_type_alias a =
       ^ string_of_typ a.type_body ^ ")"
 
 let string_of_program p =
+  let module_form =
+    match p.module_name with None -> [] | Some name -> [ "(module " ^ name ^ ")" ]
+  in
+  let exports =
+    match p.exports with
+    | None -> []
+    | Some names -> [ "(export " ^ String.concat " " names ^ ")" ]
+  in
   let caps =
     match p.capabilities with
     | [] -> []
@@ -223,6 +233,6 @@ let string_of_program p =
   in
   let imports = List.map (fun path -> "(import " ^ quote path ^ ")") p.imports in
   String.concat "\n"
-    (imports @ caps @ List.map string_of_type_alias p.type_aliases
+    (module_form @ imports @ exports @ caps @ List.map string_of_type_alias p.type_aliases
    @ List.map string_of_def p.defs)
   ^ "\n"

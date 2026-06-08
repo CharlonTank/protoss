@@ -92,7 +92,8 @@ let load_program root =
       |> List.filter (fun s -> s <> "")
     else []
   in
-  if not (Sys.file_exists defs_path) then { imports = []; capabilities; type_aliases = []; defs = [] }
+  if not (Sys.file_exists defs_path) then
+    { imports = []; capabilities; module_name = None; exports = None; type_aliases = []; defs = [] }
   else
     let files =
       Sys.readdir defs_path |> Array.to_list
@@ -106,7 +107,7 @@ let load_program root =
           (aliases @ p.type_aliases, defs @ p.defs))
         ([], []) files
     in
-    { imports = []; capabilities; type_aliases; defs }
+    { imports = []; capabilities; module_name = None; exports = None; type_aliases; defs }
 
 let list_objects root =
   let dir = objects_dir root in

@@ -94,10 +94,27 @@ let dirname path = Filename.dirname path
 type loaded = {
   program : program;
   locations : (string * string) list;
+  public_symbols : string list;
+  all_symbols : string list;
 }
 
 let empty_loaded =
-  { program = { imports = []; capabilities = []; type_aliases = []; defs = [] }; locations = [] }
+  {
+    program =
+      { imports = []; capabilities = []; module_name = None; exports = None; type_aliases = []; defs = [] };
+    locations = [];
+    public_symbols = [];
+    all_symbols = [];
+  }
+
+let sort_uniq xs = List.sort_uniq String.compare xs
+
+let local_symbols program =
+  List.map (fun d -> d.name) program.defs
+  @ List.map (fun a -> a.type_name) program.type_aliases
+
+let public_symbols program =
+  match program.exports with Some names -> names | None -> local_symbols program
 
 let merge_loaded acc loaded import_path =
   {
@@ -105,11 +122,74 @@ let merge_loaded acc loaded import_path =
       {
         imports = acc.program.imports @ loaded.program.imports @ [ import_path ];
         capabilities = acc.program.capabilities @ loaded.program.capabilities;
+        module_name = None;
+        exports = None;
         type_aliases = acc.program.type_aliases @ loaded.program.type_aliases;
         defs = acc.program.defs @ loaded.program.defs;
       };
     locations = acc.locations @ loaded.locations;
+    public_symbols = acc.public_symbols;
+    all_symbols = sort_uniq (acc.all_symbols @ loaded.all_symbols);
   }
+
+let rec type_refs = function
+  | TUnit | TBool | TNat | TString -> []
+  | TFun (a, b) -> type_refs a @ type_refs b
+  | TRecord fields | TVariant fields -> List.concat_map (fun (_, t) -> type_refs t) fields
+  | TList t | TView t | TProcess t -> type_refs t
+  | TNamed (n, args) -> n :: List.concat_map type_refs args
+
+let rec expr_type_refs = function
+  | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ -> []
+  | ELambda (_, t, body) -> type_refs t @ expr_type_refs body
+  | EApp (f, x) -> expr_type_refs f @ expr_type_refs x
+  | ELet (_, e, body) -> expr_type_refs e @ expr_type_refs body
+  | ERecord fields -> List.concat_map (fun (_, e) -> expr_type_refs e) fields
+  | EField (e, _) -> expr_type_refs e
+  | EVariant (t, _, e) -> type_refs t @ expr_type_refs e
+  | ECase (e, branches) -> expr_type_refs e @ List.concat_map branch_type_refs branches
+  | EFoldNat (n, z, step) -> expr_type_refs n @ expr_type_refs z @ expr_type_refs step
+  | ENil t -> type_refs t
+  | ECons (t, head, tail) -> type_refs t @ expr_type_refs head @ expr_type_refs tail
+  | EFoldList (xs, z, step) -> expr_type_refs xs @ expr_type_refs z @ expr_type_refs step
+  | EText e | EColumn e | ERow e | EDone e -> expr_type_refs e
+  | EImage (src, alt) | EButton (src, alt) | EInput (src, alt) | EListView (src, alt)
+  | EWhenView (src, alt) ->
+      expr_type_refs src @ expr_type_refs alt
+  | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
+
+and branch_type_refs = function
+  | BBool (_, e) -> expr_type_refs e
+  | BVariant (_, _, e) -> expr_type_refs e
+
+let parsed_type_refs parsed =
+  let alias_refs =
+    parsed.type_aliases
+    |> List.concat_map (fun a ->
+           type_refs a.type_body
+           |> List.filter (fun n -> not (List.exists (String.equal n) a.type_params)))
+  in
+  let def_refs =
+    parsed.defs |> List.concat_map (fun d -> type_refs d.typ @ expr_type_refs d.body)
+  in
+  sort_uniq (alias_refs @ def_refs)
+
+let check_import_access path parsed imported direct_imports =
+  let imported_all = direct_imports |> List.concat_map (fun (_, loaded) -> loaded.all_symbols) |> sort_uniq in
+  let imported_public =
+    direct_imports |> List.concat_map (fun (_, loaded) -> loaded.public_symbols) |> sort_uniq
+  in
+  let reject_private kind name =
+    if List.exists (String.equal name) imported_all
+       && not (List.exists (String.equal name) imported_public)
+    then fail (locate path (kind ^ " is not exported by an import: " ^ name))
+  in
+  let all_defs = imported.program.defs @ parsed.defs in
+  List.iter
+    (fun d ->
+      Kernel.dependencies_of_defs all_defs d.name |> List.iter (reject_private "definition"))
+    parsed.defs;
+  parsed_type_refs parsed |> List.iter (reject_private "type")
 
 let rec load_file_with_locations ?(stack = []) path =
   let path = normalize_path (Sys.getcwd ()) path in
@@ -123,24 +203,33 @@ let rec load_file_with_locations ?(stack = []) path =
     | Parser.Error msg -> fail (locate path msg)
   in
   let base = dirname path in
-  let imported =
+  let imported, direct_imports =
     List.fold_left
-      (fun acc import_path ->
+      (fun (acc, direct) import_path ->
         let target = normalize_path base import_path in
         let imported = load_file_with_locations ~stack:(path :: stack) target in
-        merge_loaded acc imported import_path)
-      empty_loaded
+        (merge_loaded acc imported import_path, (import_path, imported) :: direct))
+      (empty_loaded, [])
       parsed.imports
   in
+  check_import_access path parsed imported direct_imports;
   let program =
     {
       imports = imported.program.imports @ parsed.imports;
       capabilities = List.sort_uniq String.compare (imported.program.capabilities @ parsed.capabilities);
+      module_name = parsed.module_name;
+      exports = parsed.exports;
       type_aliases = imported.program.type_aliases @ parsed.type_aliases;
       defs = imported.program.defs @ parsed.defs;
     }
   in
-  { program; locations = imported.locations @ def_locations path source parsed.defs }
+  let local = local_symbols parsed in
+  {
+    program;
+    locations = imported.locations @ def_locations path source parsed.defs;
+    public_symbols = public_symbols parsed;
+    all_symbols = sort_uniq (imported.all_symbols @ local);
+  }
 
 let load_file ?stack path = (load_file_with_locations ?stack path).program
 

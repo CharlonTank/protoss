@@ -8,6 +8,7 @@ What works now:
 - Workspaces use `protoss.toml`; `project build` writes `.protoss/store` with canonical defs, types, deps, normal forms, roots, build refs, and web markers.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
+- Source-level modules work with `(module Name)` and `(export symbol ...)`. Module-local definitions and type aliases are namespace-qualified, and imports may only reference exported symbols directly.
 - `View msg` is a typed canonical UI type. Supported constructors are `text`, `image`, `button`, `input`, `column`, `row`, `list`, and `when`.
 - UI/message mismatches are rejected statically by the typechecker.
 - Web bundles are deterministic and include `index.html`, `protoss-runtime.js`, `protoss-app.json`, `protoss-graph.json`, `protoss-capabilities.json`, and `protoss-world.json`.
@@ -58,5 +59,6 @@ dune exec protoss -- hash examples/alpha_a.protoss
 dune exec protoss -- hash examples/alpha_b.protoss
 dune exec protoss -- canon --version
 dune exec protoss -- check examples/app.protoss
+dune exec protoss -- check examples/modules/app.protoss
 dune exec protoss -- project build examples/workspace --stats
 ```

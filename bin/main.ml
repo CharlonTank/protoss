@@ -68,6 +68,10 @@ let protect f =
 let command_parse file =
   let p = Protoss.Parser.parse_file file in
   Printf.printf "Program: %d definitions\n" (List.length p.Protoss.Ast.defs);
+  (match p.module_name with Some name -> Printf.printf "Module: %s\n" name | None -> ());
+  (match p.exports with
+  | Some exports -> Printf.printf "Exports: %s\n" (String.concat ", " exports)
+  | None -> ());
   if p.capabilities <> [] then
     Printf.printf "Capabilities: %s\n" (String.concat ", " p.capabilities);
   List.iter

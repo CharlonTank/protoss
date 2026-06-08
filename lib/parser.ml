@@ -130,7 +130,156 @@ and parse_branch = function
   | Sexp.List [ Sexp.Atom con; Sexp.Atom x; e ] -> BVariant (con, x, parse_expr e)
   | x -> fail ("invalid case branch: " ^ Sexp.to_string x)
 
+let has_dot s = String.contains s '.'
+
+let qualify module_name name =
+  match module_name with
+  | Some m when not (has_dot name) -> m ^ "." ^ name
+  | _ -> name
+
+let assoc_opt name xs =
+  List.find_opt (fun (n, _) -> String.equal n name) xs |> Option.map snd
+
+let rec qualify_type local_types params = function
+  | TUnit -> TUnit
+  | TBool -> TBool
+  | TNat -> TNat
+  | TString -> TString
+  | TFun (a, b) -> TFun (qualify_type local_types params a, qualify_type local_types params b)
+  | TRecord fields ->
+      TRecord (sort_fields (List.map (fun (n, t) -> (n, qualify_type local_types params t)) fields))
+  | TVariant cases ->
+      TVariant (sort_fields (List.map (fun (n, t) -> (n, qualify_type local_types params t)) cases))
+  | TList t -> TList (qualify_type local_types params t)
+  | TView t -> TView (qualify_type local_types params t)
+  | TProcess t -> TProcess (qualify_type local_types params t)
+  | TNamed (n, args) ->
+      let args = List.map (qualify_type local_types params) args in
+      if List.exists (String.equal n) params then TNamed (n, args)
+      else (
+        match assoc_opt n local_types with
+        | Some q -> TNamed (q, args)
+        | None -> TNamed (n, args))
+
+let rec qualify_expr local_defs local_types bound = function
+  | EUnit -> EUnit
+  | EBool b -> EBool b
+  | ENat n -> ENat n
+  | EString s -> EString s
+  | EName n ->
+      if List.exists (String.equal n) bound then EName n
+      else (
+        match assoc_opt n local_defs with Some q -> EName q | None -> EName n)
+  | ELambda (x, t, body) ->
+      ELambda (x, qualify_type local_types [] t, qualify_expr local_defs local_types (x :: bound) body)
+  | EApp (f, x) ->
+      EApp (qualify_expr local_defs local_types bound f, qualify_expr local_defs local_types bound x)
+  | ELet (x, e, body) ->
+      ELet
+        ( x,
+          qualify_expr local_defs local_types bound e,
+          qualify_expr local_defs local_types (x :: bound) body )
+  | ERecord fields ->
+      ERecord (sort_fields (List.map (fun (n, e) -> (n, qualify_expr local_defs local_types bound e)) fields))
+  | EField (e, field) -> EField (qualify_expr local_defs local_types bound e, field)
+  | EVariant (t, con, e) ->
+      EVariant (qualify_type local_types [] t, con, qualify_expr local_defs local_types bound e)
+  | ECase (e, branches) ->
+      ECase
+        ( qualify_expr local_defs local_types bound e,
+          List.map (qualify_branch local_defs local_types bound) branches )
+  | EFoldNat (n, z, step) ->
+      EFoldNat
+        ( qualify_expr local_defs local_types bound n,
+          qualify_expr local_defs local_types bound z,
+          qualify_expr local_defs local_types bound step )
+  | ENil t -> ENil (qualify_type local_types [] t)
+  | ECons (t, head, tail) ->
+      ECons
+        ( qualify_type local_types [] t,
+          qualify_expr local_defs local_types bound head,
+          qualify_expr local_defs local_types bound tail )
+  | EFoldList (xs, z, step) ->
+      EFoldList
+        ( qualify_expr local_defs local_types bound xs,
+          qualify_expr local_defs local_types bound z,
+          qualify_expr local_defs local_types bound step )
+  | EText e -> EText (qualify_expr local_defs local_types bound e)
+  | EImage (src, alt) ->
+      EImage
+        (qualify_expr local_defs local_types bound src, qualify_expr local_defs local_types bound alt)
+  | EButton (label, msg) ->
+      EButton
+        ( qualify_expr local_defs local_types bound label,
+          qualify_expr local_defs local_types bound msg )
+  | EInput (value, handler) ->
+      EInput
+        ( qualify_expr local_defs local_types bound value,
+          qualify_expr local_defs local_types bound handler )
+  | EColumn children -> EColumn (qualify_expr local_defs local_types bound children)
+  | ERow children -> ERow (qualify_expr local_defs local_types bound children)
+  | EListView (items, render) ->
+      EListView
+        ( qualify_expr local_defs local_types bound items,
+          qualify_expr local_defs local_types bound render )
+  | EWhenView (cond, view) ->
+      EWhenView
+        (qualify_expr local_defs local_types bound cond, qualify_expr local_defs local_types bound view)
+  | EDone e -> EDone (qualify_expr local_defs local_types bound e)
+  | ERequest req -> ERequest req
+  | EBind (p, x, t, body) ->
+      EBind
+        ( qualify_expr local_defs local_types bound p,
+          x,
+          qualify_type local_types [] t,
+          qualify_expr local_defs local_types (x :: bound) body )
+
+and qualify_branch local_defs local_types bound = function
+  | BBool (b, e) -> BBool (b, qualify_expr local_defs local_types bound e)
+  | BVariant (con, x, e) -> BVariant (con, x, qualify_expr local_defs local_types (x :: bound) e)
+
+let qualify_program module_name exports aliases defs =
+  let local_defs = List.map (fun d -> (d.name, qualify module_name d.name)) defs in
+  let local_types = List.map (fun a -> (a.type_name, qualify module_name a.type_name)) aliases in
+  let aliases =
+    List.map
+      (fun a ->
+        {
+          type_name = qualify module_name a.type_name;
+          type_params = a.type_params;
+          type_body = qualify_type local_types a.type_params a.type_body;
+        })
+      aliases
+  in
+  let defs =
+    List.map
+      (fun d ->
+        {
+          name = qualify module_name d.name;
+          typ = qualify_type local_types [] d.typ;
+          body = qualify_expr local_defs local_types [] d.body;
+        })
+      defs
+  in
+  let local_symbols = List.map snd local_defs @ List.map snd local_types in
+  let exports =
+    Option.map
+      (fun names ->
+        let names = List.map (qualify module_name) names in
+        ensure_unique "export" names;
+        List.iter
+          (fun name ->
+            if not (List.exists (String.equal name) local_symbols) then
+              fail ("exported symbol is not defined in module: " ^ name))
+          names;
+        names)
+      exports
+  in
+  (aliases, defs, exports)
+
 let parse_toplevel = function
+  | Sexp.List [ Sexp.Atom "module"; Sexp.Atom name ] -> `Module name
+  | Sexp.List (Sexp.Atom "export" :: names) -> `Export (List.map atom names)
   | Sexp.List [ Sexp.Atom "import"; Sexp.Str path ] -> `Import path
   | Sexp.List (Sexp.Atom "capabilities" :: caps) ->
       `Capabilities (List.map atom caps)
@@ -150,10 +299,17 @@ let parse_string input =
   let forms =
     try Sexp.parse input with Sexp.Error msg -> fail msg
   in
+  let module_name = ref None and exports = ref None in
   let imports = ref [] and caps = ref [] and aliases = ref [] and defs = ref [] in
   List.iter
     (fun form ->
       match parse_toplevel form with
+      | `Module name ->
+          if !module_name <> None then fail "duplicate module declaration";
+          module_name := Some name
+      | `Export names ->
+          if !exports <> None then fail "duplicate export declaration";
+          exports := Some names
       | `Import path -> imports := path :: !imports
       | `Capabilities xs -> caps := xs @ !caps
       | `TypeAlias a -> aliases := a :: !aliases
@@ -161,11 +317,16 @@ let parse_string input =
     forms;
   ensure_unique "type alias" (List.map (fun a -> a.type_name) !aliases);
   ensure_unique "definition" (List.map (fun d -> d.name) !defs);
+  let type_aliases, defs, exports =
+    qualify_program !module_name !exports (List.rev !aliases) (List.rev !defs)
+  in
   {
     imports = List.rev !imports;
     capabilities = List.sort_uniq String.compare !caps;
-    type_aliases = List.rev !aliases;
-    defs = List.rev !defs;
+    module_name = !module_name;
+    exports;
+    type_aliases;
+    defs;
   }
 
 let parse_file path =
