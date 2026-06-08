@@ -285,7 +285,14 @@ let rec eval_cterm st env = function
       if String.equal n "succ" then VBuiltinSucc
       else if
         List.exists (String.equal n)
-          [ "prim.Nat.eq"; "prim.Nat.toString"; "prim.String.concat"; "prim.String.eq" ]
+          [
+            "prim.Nat.eq";
+            "prim.Nat.toString";
+            "prim.String.concat";
+            "prim.String.eq";
+            "prim.String.length";
+            "prim.String.slice";
+          ]
       then VClosure (TUnit, Kernel.CGlobal n, [], [])
       else eval_def st n
   | Kernel.CInst (n, args) -> (
@@ -476,6 +483,18 @@ and eval_app st fv av =
                 | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.eq", [ av ], [])
                 | [ VString a ], VString b -> VBool (String.equal a b)
                 | _ -> fail "prim.String.eq expects String String")
+            | VClosure (_, Kernel.CGlobal "prim.String.length", closure_env, _) -> (
+                match (closure_env, av) with
+                | [], VString s -> VNat (String_prim.length s)
+                | _ -> fail "prim.String.length expects String")
+            | VClosure (_, Kernel.CGlobal "prim.String.slice", closure_env, _) -> (
+                match (closure_env, av) with
+                | [], VString _ -> VClosure (TNat, Kernel.CGlobal "prim.String.slice", [ av ], [])
+                | [ VString _ ], VNat _ ->
+                    VClosure (TNat, Kernel.CGlobal "prim.String.slice", closure_env @ [ av ], [])
+                | [ VString s; VNat start ], VNat count ->
+                    VString (String_prim.slice s start count)
+                | _ -> fail "prim.String.slice expects String Nat Nat")
             | VClosure (_, body, closure_env, cap_scope) ->
                 eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
             | v -> fail ("application of non-function runtime value: " ^ value_to_string v)

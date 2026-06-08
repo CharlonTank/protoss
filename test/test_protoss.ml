@@ -78,6 +78,9 @@ let () =
   assert_equal "content address hash prefix"
     "p2:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     (Hashcons.hash "abc");
+  let utf8_sample = "A" ^ "\195\169" ^ "\240\157\132\158" in
+  assert_equal "string primitive utf8 length" "3" (string_of_int (String_prim.length utf8_sample));
+  assert_equal "string primitive utf8 slice" "\195\169" (String_prim.slice utf8_sample 1 1);
   assert_equal "kernel hash algorithm" "sha256" Kernel.hash_algorithm;
   assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
@@ -1624,7 +1627,10 @@ let () =
     check
       "(def natText String (prim.Nat.toString 42))\n\
        (def cat String ((prim.String.concat \"a\") \"b\"))\n\
-       (def eq Bool ((prim.Nat.eq 2) 2))\n"
+       (def eq Bool ((prim.Nat.eq 2) 2))\n\
+       (def textLen Nat (prim.String.length \"abcd\"))\n\
+       (def textSlice String (((prim.String.slice \"abcd\") 1) 2))\n\
+       (def textSliceEmpty String (((prim.String.slice \"abcd\") 9) 2))\n"
   in
   assert_equal "kernel Nat.toString normalizer" "\"42\""
     (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "natText"));
@@ -1632,6 +1638,12 @@ let () =
     (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "cat"));
   assert_equal "kernel Nat.eq normalizer" "true"
     (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "eq"));
+  assert_equal "kernel String.length normalizer" "4"
+    (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "textLen"));
+  assert_equal "kernel String.slice normalizer" "\"bc\""
+    (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "textSlice"));
+  assert_equal "kernel String.slice out of range normalizer" "\"\""
+    (Kernel.cterm_to_string (Kernel.normalize_checked_def primitive_nf "textSliceEmpty"));
 
   assert_equal "deterministic hash" (Kernel.hash_program norm) (Kernel.hash_program norm);
   let diff = check "(def two Nat (succ 2))" in
@@ -1711,6 +1723,13 @@ let () =
   assert_equal "stdlib String.nonEmpty" "true" (Runtime.value_to_string non_empty_label);
   let joined_labels, _ = Runtime.normalize_def stdlib_generics "joinedLabels" in
   assert_equal "stdlib String.join" "\"item,item\"" (Runtime.value_to_string joined_labels);
+  let greeting_length, _ = Runtime.normalize_def stdlib_generics "greetingLength" in
+  assert_equal "stdlib String.length" "12" (Runtime.value_to_string greeting_length);
+  let greeting_prefix, _ = Runtime.normalize_def stdlib_generics "greetingPrefix" in
+  assert_equal "stdlib String.slice" "\"Ada\"" (Runtime.value_to_string greeting_prefix);
+  let greeting_starts_with, _ = Runtime.normalize_def stdlib_generics "greetingStartsWith" in
+  assert_equal "stdlib String.startsWith" "true"
+    (Runtime.value_to_string greeting_starts_with);
   let nat_text, _ = Runtime.normalize_def stdlib_generics "natText" in
   assert_equal "stdlib Nat.toString" "\"42\"" (Runtime.value_to_string nat_text);
   let source_span_text, _ = Runtime.normalize_def stdlib_generics "sourceSpanText" in

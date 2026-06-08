@@ -23,6 +23,15 @@
 (def joinedLabels String
   ((String.join ",") labels))
 
+(def greetingLength Nat
+  (String.length greeting))
+
+(def greetingPrefix String
+  (((String.slice greeting) 0) 3))
+
+(def greetingStartsWith Bool
+  ((String.startsWith greeting) "Ada"))
+
 (def natText String
   (Nat.toString 42))
 

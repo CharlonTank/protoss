@@ -358,6 +358,17 @@ let runtime_js =
           if (!fn.args.length) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
           return { tag: "Bool", value: String(fn.args[0].value) === String(arg.value) };
         }
+        if (fn.name === "prim.String.length") {
+          return { tag: "Nat", value: Array.from(String(arg.value)).length };
+        }
+        if (fn.name === "prim.String.slice") {
+          if (fn.args.length === 0) return { tag: "BuiltinPrim", name: fn.name, args: [arg] };
+          if (fn.args.length === 1) return { tag: "BuiltinPrim", name: fn.name, args: fn.args.concat([arg]) };
+          var chars = Array.from(String(fn.args[0].value));
+          var start = Number(fn.args[1].value);
+          var count = Number(arg.value);
+          return { tag: "String", value: chars.slice(start, start + count).join("") };
+        }
       }
       if (fn.tag === "Closure") return evalTerm(fn.body, [arg].concat(fn.env));
       throw new Error("application of non-function: " + JSON.stringify(fn));

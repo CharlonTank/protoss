@@ -17,6 +17,8 @@ let builtin_types =
     ("prim.Nat.toString", TFun (TNat, TString));
     ("prim.String.concat", TFun (TString, TFun (TString, TString)));
     ("prim.String.eq", TFun (TString, TFun (TString, TBool)));
+    ("prim.String.length", TFun (TString, TNat));
+    ("prim.String.slice", TFun (TString, TFun (TNat, TFun (TNat, TString))));
   ]
 
 let builtin_names = List.map fst builtin_types
@@ -3438,6 +3440,9 @@ let rec normalize_cterm checked = function
       | CApp (CGlobal "prim.Nat.eq", CNat a), CNat b -> CBool (a = b)
       | CApp (CGlobal "prim.String.concat", CString a), CString b -> CString (a ^ b)
       | CApp (CGlobal "prim.String.eq", CString a), CString b -> CBool (String.equal a b)
+      | CGlobal "prim.String.length", CString s -> CNat (String_prim.length s)
+      | CApp (CApp (CGlobal "prim.String.slice", CString s), CNat start), CNat count ->
+          CString (String_prim.slice s start count)
       | _ -> CApp (nf, nx))
   | CLet (e, body) -> normalize_cterm checked (subst_top (normalize_cterm checked e) body)
   | CRecord fields ->

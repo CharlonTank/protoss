@@ -1,4 +1,4 @@
-; Protoss stdlib v0.16. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.17. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -21,7 +21,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.16")
+(def Stdlib.version String "v0.17")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -72,6 +72,21 @@
   (lambda (a String)
     (lambda (b String)
       ((prim.String.eq a) b))))
+
+(def String.length (-> String Nat)
+  (lambda (value String)
+    (prim.String.length value)))
+
+(def String.slice (-> String (-> Nat (-> Nat String)))
+  (lambda (value String)
+    (lambda (start Nat)
+      (lambda (count Nat)
+        (((prim.String.slice value) start) count)))))
+
+(def String.startsWith (-> String (-> String Bool))
+  (lambda (value String)
+    (lambda (prefix String)
+      ((String.eqString (((String.slice value) 0) (String.length prefix))) prefix))))
 
 (def String.isEmpty (-> String Bool)
   (lambda (value String)
