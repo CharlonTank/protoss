@@ -453,6 +453,22 @@ let () =
   (try
      ignore
        (Canonical_ir.parse_graph
+          (replace_once graph_json "{ \"version\"" "{ \"extra\": true, \"version\""));
+     fail "canonical graph extra top-level field should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects extra top-level field"
+       (contains_substring msg "canonical graph serialization mismatch"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json "\"value\": 1" "\"extra\": true, \"value\": 1"));
+     fail "canonical graph extra term field should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects extra term field"
+       (contains_substring msg "canonical graph serialization mismatch"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
           (replace_once graph_json "\"deps\": []" "\"deps\": [\"main\"]"));
      fail "canonical graph extra deps should be rejected"
    with Kernel.Error msg ->

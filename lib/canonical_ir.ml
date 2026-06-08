@@ -435,6 +435,12 @@ let validate_node_graph graph program_hash defs =
         fail ("canonical node graph unreachable node: " ^ id))
     nodes
 
+let validate_exact_serialization input caps defs =
+  let checked = Kernel.checked_of_canonical caps defs in
+  let expected = String.trim (Kernel.checked_to_graph_json checked) in
+  if not (String.equal (String.trim input) expected) then
+    fail "canonical graph serialization mismatch"
+
 let parse_graph input =
   let graph = try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg) in
   let version = json_string_field "version" graph in
@@ -474,6 +480,7 @@ let parse_graph input =
   if not (String.equal program_hash (Kernel.hash_string canonical)) then
     fail ("canonical graph programHash mismatch: " ^ program_hash);
   validate_node_graph graph program_hash defs;
+  validate_exact_serialization input caps defs;
   (caps, defs)
 
 let graph_to_program input =
