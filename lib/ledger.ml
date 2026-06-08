@@ -134,6 +134,14 @@ let request_signature_ref signature =
   Kernel.capability_request_signature_ref signature.capability
     (kernel_request_signature signature)
 
+let host_codec_version = Canonical_ir.host_codec_version
+
+let host_codec_ref typ = Canonical_ir.host_codec_ref typ
+
+let request_codec_ref signature = host_codec_ref signature.payload_type
+
+let response_codec_ref signature = host_codec_ref signature.response_type
+
 let validate_request_signature_fields event fields request =
   let signature =
     match request_payload_signature request with
@@ -158,6 +166,9 @@ let validate_request_signature_fields event fields request =
   require_equal "request-signature-ref" (request_signature_ref signature);
   require_equal "request-payload-type" (type_text signature.payload_type);
   require_equal "response-type" (type_text signature.response_type);
+  require_equal "host-codec-version" host_codec_version;
+  require_equal "request-codec-ref" (request_codec_ref signature);
+  require_equal "response-codec-ref" (response_codec_ref signature);
   signature
 
 let add_event root world payload =
@@ -216,6 +227,9 @@ let record_request root world req suspended request_id continuation_id cap_scope
    ^ "\nrequest-signature-ref=" ^ request_signature_ref signature
    ^ "\nrequest-payload-type=" ^ type_text signature.payload_type
    ^ "\nresponse-type=" ^ type_text signature.response_type
+   ^ "\nhost-codec-version=" ^ host_codec_version
+   ^ "\nrequest-codec-ref=" ^ request_codec_ref signature
+   ^ "\nresponse-codec-ref=" ^ response_codec_ref signature
    ^ "\ncontinuation-id=" ^ continuation_id ^ "\ncap-scope="
    ^ String.concat "," (List.sort_uniq String.compare cap_scope)
    ^ "\nsuspended=" ^ String.escaped suspended)
@@ -289,13 +303,18 @@ let validate_resume_response root event resume response =
     failwith ("maltyped event " ^ event ^ ": suspended continuation-id mismatch");
   (try ignore (Runtime.response_value suspended.Runtime.req response)
    with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": invalid response: " ^ msg));
-  (type_text signature.response_type, request_signature_ref signature)
+  ( type_text signature.response_type,
+    request_signature_ref signature,
+    response_codec_ref signature )
 
 let record_resume root world event response result =
-  let response_type, signature_ref = validate_resume_response root "<new>" event response in
+  let response_type, signature_ref, codec_ref =
+    validate_resume_response root "<new>" event response
+  in
   add_event root world
     ("kind=resume\nresume=" ^ event ^ "\nrequest-signature-ref=" ^ signature_ref
-   ^ "\nresponse-type=" ^ response_type ^ "\nresponse="
+   ^ "\nresponse-type=" ^ response_type ^ "\nhost-codec-version=" ^ host_codec_version
+   ^ "\nresponse-codec-ref=" ^ codec_ref ^ "\nresponse="
    ^ String.escaped response ^ "\nresult=" ^ String.escaped result)
 
 let validate_event root event content =
@@ -319,6 +338,9 @@ let validate_event root event content =
           "request-signature-ref";
           "request-payload-type";
           "response-type";
+          "host-codec-version";
+          "request-codec-ref";
+          "response-codec-ref";
           "continuation-id";
           "cap-scope";
           "suspended";
@@ -356,10 +378,21 @@ let validate_event root event content =
            ^ Runtime.continuation_id suspended ^ ", got " ^ continuation_id)
       | None -> assert false)
   | Some "resume" ->
-      List.iter need [ "resume"; "request-signature-ref"; "response-type"; "response"; "result" ];
+      List.iter need
+        [
+          "resume";
+          "request-signature-ref";
+          "response-type";
+          "host-codec-version";
+          "response-codec-ref";
+          "response";
+          "result";
+        ];
       let resume = Option.value (field "resume" fields) ~default:"" in
       let response = Option.value (field "response" fields) ~default:"" |> Scanf.unescaped in
-      let response_type, signature_ref = validate_resume_response root event resume response in
+      let response_type, signature_ref, codec_ref =
+        validate_resume_response root event resume response
+      in
       (match field "response-type" fields with
       | Some declared when String.equal declared response_type -> ()
       | Some declared ->
@@ -373,6 +406,20 @@ let validate_event root event content =
           failwith
             ("maltyped event " ^ event ^ ": request-signature-ref mismatch: expected "
            ^ signature_ref ^ ", got " ^ declared)
+      | None -> assert false);
+      (match field "host-codec-version" fields with
+      | Some declared when String.equal declared host_codec_version -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": host-codec-version mismatch: expected "
+           ^ host_codec_version ^ ", got " ^ declared)
+      | None -> assert false);
+      (match field "response-codec-ref" fields with
+      | Some declared when String.equal declared codec_ref -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": response-codec-ref mismatch: expected "
+           ^ codec_ref ^ ", got " ^ declared)
       | None -> assert false)
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);

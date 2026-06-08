@@ -1854,6 +1854,16 @@ let () =
     ledger_invariants.Invariants.request_signature_ref;
   assert_equal "invariants ledger response type" "String"
     ledger_invariants.Invariants.response_type;
+  let invariant_request_codec_ref =
+    Canonical_ir.host_codec_ref (Ast.TRecord [ ("prompt", Ast.TString) ])
+  in
+  let invariant_response_codec_ref = Canonical_ir.host_codec_ref Ast.TString in
+  assert_equal "invariants ledger host codec version" Canonical_ir.host_codec_version
+    ledger_invariants.Invariants.host_codec_version;
+  assert_equal "invariants ledger request codec ref" invariant_request_codec_ref
+    ledger_invariants.Invariants.request_codec_ref;
+  assert_equal "invariants ledger response codec ref" invariant_response_codec_ref
+    ledger_invariants.Invariants.response_codec_ref;
   let process_graph_dir = temp_dir "invariants-process-graph" in
   ensure_dir process_graph_dir;
   let process_graph_path = Filename.concat process_graph_dir "ask_human.graph.json" in
@@ -3482,6 +3492,10 @@ let () =
   in
   assert_true "ledger event inspectable" (String.length (Ledger.inspect_event ledger_root event) > 0);
   let inspected_request_event = Ledger.inspect_event ledger_root event in
+  let human_request_codec_ref =
+    Canonical_ir.host_codec_ref (Ast.TRecord [ ("prompt", Ast.TString) ])
+  in
+  let string_response_codec_ref = Canonical_ir.host_codec_ref Ast.TString in
   assert_true "ledger request records capability signature"
     (contains_substring inspected_request_event "capability=Human.ask");
   assert_true "ledger request records capability ref"
@@ -3492,26 +3506,48 @@ let () =
     (contains_substring inspected_request_event ("request-signature-ref=" ^ human_signature_ref));
   assert_true "ledger request records response type"
     (contains_substring inspected_request_event "response-type=String");
+  assert_true "ledger request records host codec version"
+    (contains_substring inspected_request_event
+       ("host-codec-version=" ^ Canonical_ir.host_codec_version));
+  assert_true "ledger request records request codec ref"
+    (contains_substring inspected_request_event
+       ("request-codec-ref=" ^ human_request_codec_ref));
+  assert_true "ledger request records response codec ref"
+    (contains_substring inspected_request_event
+       ("response-codec-ref=" ^ string_response_codec_ref));
   assert_true "ledger world inspectable" (String.length (Ledger.inspect_world ledger_root next_world) > 0);
   let resume_event, resume_world =
     Ledger.record_resume ledger_root next_world event "String:Ada" "Done \"Ada\""
   in
-  assert_true "ledger resume event inspectable"
-    (String.length (Ledger.inspect_event ledger_root resume_event) > 0);
+  let inspected_resume_event = Ledger.inspect_event ledger_root resume_event in
+  assert_true "ledger resume event inspectable" (String.length inspected_resume_event > 0);
   assert_true "ledger resume records response type"
-    (contains_substring (Ledger.inspect_event ledger_root resume_event) "response-type=String");
+    (contains_substring inspected_resume_event "response-type=String");
   assert_true "ledger resume records signature ref"
-    (contains_substring (Ledger.inspect_event ledger_root resume_event)
-       ("request-signature-ref=" ^ human_signature_ref));
+    (contains_substring inspected_resume_event ("request-signature-ref=" ^ human_signature_ref));
+  assert_true "ledger resume records host codec version"
+    (contains_substring inspected_resume_event
+       ("host-codec-version=" ^ Canonical_ir.host_codec_version));
+  assert_true "ledger resume records response codec ref"
+    (contains_substring inspected_resume_event
+       ("response-codec-ref=" ^ string_response_codec_ref));
   assert_true "ledger resume world inspectable"
     (String.length (Ledger.inspect_world ledger_root resume_world) > 0);
   let bad_resume_signature_ref_event = "p2:bad-resume-signature-ref-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_signature_ref_event)
-    ("world=x\nkind=resume\nresume=" ^ event
-   ^ "\nrequest-signature-ref=p2:bad\nresponse-type=String\nresponse=String:Ada\nresult=Done \"Ada\"\n");
+    (replace_once inspected_resume_event ("request-signature-ref=" ^ human_signature_ref)
+       "request-signature-ref=p2:bad");
   (try
      ignore (Ledger.inspect_event ledger_root bad_resume_signature_ref_event);
      fail "ledger resume event with bad signature ref should be rejected"
+   with Failure _ -> ());
+  let bad_resume_codec_ref_event = "p2:bad-resume-codec-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_codec_ref_event)
+    (replace_once inspected_resume_event ("response-codec-ref=" ^ string_response_codec_ref)
+       "response-codec-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_resume_codec_ref_event);
+     fail "ledger resume event with bad codec ref should be rejected"
    with Failure _ -> ());
   let before_bad_resume = snapshot ledger_root in
   (try
@@ -3583,11 +3619,25 @@ let () =
      ignore (Ledger.inspect_event ledger_root bad_request_signature_ref_event);
      fail "ledger request event with bad request signature ref should be rejected"
    with Failure _ -> ());
+  let bad_request_codec_ref_event = "p2:bad-request-codec-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_request_codec_ref_event)
+    (replace_once inspected_request_event ("request-codec-ref=" ^ human_request_codec_ref)
+       "request-codec-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_request_codec_ref_event);
+     fail "ledger request event with bad request codec ref should be rejected"
+   with Failure _ -> ());
+  let bad_response_codec_ref_event = "p2:bad-response-codec-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_response_codec_ref_event)
+    (replace_once inspected_request_event ("response-codec-ref=" ^ string_response_codec_ref)
+       "response-codec-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_response_codec_ref_event);
+     fail "ledger request event with bad response codec ref should be rejected"
+   with Failure _ -> ());
   let bad_resume_event = "p2:bad-resume-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_event)
-    ("world=x\nkind=resume\nresume=" ^ event
-   ^ "\nrequest-signature-ref=" ^ human_signature_ref
-   ^ "\nresponse-type=String\nresponse=Nat:1\nresult=bad\n");
+    (replace_once inspected_resume_event "response=String:Ada" "response=Nat:1");
   (try
      ignore (Ledger.inspect_event ledger_root bad_resume_event);
      fail "ledger resume event with wrong response type should be rejected"
@@ -3599,19 +3649,28 @@ let () =
     | None -> fail "missing Http.get capability ref"
   in
   let http_signature_ref = Kernel.req_signature_ref (Ast.HttpGet "") in
+  let http_request_codec_ref =
+    Canonical_ir.host_codec_ref (Ast.TRecord [ ("url", Ast.TString) ])
+  in
   Store.write_file_atomic (Ledger.event_path ledger_root mismatched_request_event)
     ("world=x\nkind=request\nrequest-id=req\nrequest=HttpGet:https://example.invalid\n\
       capability=Http.get\ncapability-ref="
     ^ http_capability_ref
     ^ "\nrequest-tag=HttpGet\nrequest-signature-ref=" ^ http_signature_ref
     ^ "\nrequest-payload-type=(Record (url String))\n\
-      response-type=String\ncontinuation-id=cont\ncap-scope=Http.get\nsuspended="
+      response-type=String\nhost-codec-version="
+    ^ Canonical_ir.host_codec_version
+    ^ "\nrequest-codec-ref=" ^ http_request_codec_ref
+    ^ "\nresponse-codec-ref=" ^ string_response_codec_ref
+    ^ "\ncontinuation-id=cont\ncap-scope=Http.get\nsuspended="
     ^ String.escaped suspended ^ "\n");
   let bad_resume_mismatch_event = "p2:bad-resume-mismatch-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_mismatch_event)
     ("world=x\nkind=resume\nresume=" ^ mismatched_request_event
    ^ "\nrequest-signature-ref=" ^ http_signature_ref
-   ^ "\nresponse-type=String\nresponse=String:Ada\nresult=bad\n");
+   ^ "\nresponse-type=String\nhost-codec-version=" ^ Canonical_ir.host_codec_version
+   ^ "\nresponse-codec-ref=" ^ string_response_codec_ref
+   ^ "\nresponse=String:Ada\nresult=bad\n");
   (try
      ignore (Ledger.inspect_event ledger_root bad_resume_mismatch_event);
      fail "ledger resume event with mismatched suspended request should be rejected"

@@ -36,6 +36,9 @@ type ledger_result = {
   request_tag : string;
   request_signature_ref : string;
   response_type : string;
+  host_codec_version : string;
+  request_codec_ref : string;
+  response_codec_ref : string;
   result : string;
 }
 
@@ -213,6 +216,9 @@ let check_ledger_process_checked ?ledger source checked entry response =
         request_tag = field "request-tag";
         request_signature_ref = field "request-signature-ref";
         response_type = field "response-type";
+        host_codec_version = field "host-codec-version";
+        request_codec_ref = field "request-codec-ref";
+        response_codec_ref = field "response-codec-ref";
         result = result_text;
       }
   | Runtime.VProcessDone value ->
@@ -329,6 +335,9 @@ let describe_ledger (result : ledger_result) =
   ^ result.capability_ref ^ "\nrequest_tag=" ^ result.request_tag
   ^ "\nrequest_signature_ref=" ^ result.request_signature_ref
   ^ "\nresponse_type=" ^ result.response_type
+  ^ "\nhost_codec_version=" ^ result.host_codec_version
+  ^ "\nrequest_codec_ref=" ^ result.request_codec_ref
+  ^ "\nresponse_codec_ref=" ^ result.response_codec_ref
   ^ "\nresult=" ^ result.result ^ "\n"
 
 let describe_package (result : package_result) =
