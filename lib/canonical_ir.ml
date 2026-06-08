@@ -301,11 +301,13 @@ let validate_node_payload id kind canonical payload =
   | "Type" ->
       let typ = Kernel.type_of_canonical_sexp (Kernel.single_sexp canonical) in
       let expected = Json.parse (Kernel.type_to_graph_json typ) in
-      if payload <> expected then fail ("canonical node payload mismatch: " ^ id)
+      if payload <> expected then fail ("canonical node payload mismatch: " ^ id);
+      Kernel.type_node_edges typ
   | "Term" ->
       let term = Kernel.cterm_of_canonical_sexp (Kernel.single_sexp canonical) in
       let expected = Json.parse (Kernel.cterm_to_graph_json (fun x -> x) term) in
-      if payload <> expected then fail ("canonical node payload mismatch: " ^ id)
+      if payload <> expected then fail ("canonical node payload mismatch: " ^ id);
+      Kernel.cterm_node_edges (fun x -> x) term
   | _ -> fail ("unknown canonical node kind: " ^ kind)
 
 let validate_node_graph graph program_hash defs =
@@ -333,11 +335,17 @@ let validate_node_graph graph program_hash defs =
           let canonical = json_string_field "canonical" node in
           let expected_id = Kernel.canonical_node_id kind canonical in
           if not (String.equal id expected_id) then fail ("canonical node id mismatch: " ^ id);
-          validate_node_payload id kind canonical (json_field "payload" node);
+          let expected_edges =
+            validate_node_payload id kind canonical (json_field "payload" node)
+            |> List.sort_uniq String.compare
+          in
+          let edge_refs = json_string_array_field "edgeRefs" node |> List.sort_uniq String.compare in
+          if edge_refs <> expected_edges then
+            fail ("canonical node edgeRefs mismatch: " ^ id);
           List.iter
             (fun edge ->
               if node_by_id edge = None then fail ("canonical node missing edge target: " ^ edge))
-            (json_string_array_field "edgeRefs" node))
+            edge_refs)
         nodes;
       ensure_unique "node def" (List.map (json_string_field "name") node_defs);
       if List.length node_defs <> List.length defs then

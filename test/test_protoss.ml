@@ -68,6 +68,9 @@ let json_string_array_field name obj =
   json_array_field name obj
   |> List.map (function Json.String s -> s | _ -> fail ("JSON field is not string array: " ^ name))
 
+let json_string_array_literal xs =
+  "[" ^ String.concat ", " (List.map Ast.quote xs) ^ "]"
+
 let () =
   assert_equal "sha256 empty digest"
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -456,6 +459,40 @@ let () =
      ignore (Canonical_ir.parse_graph (replace_once graph_json "\"kind\": \"Type\"" "\"kind\": \"Term\""));
      fail "canonical node graph mismatch should be rejected"
    with Kernel.Error _ -> ());
+  let graph_nodes = json_array_field "nodes" node_graph in
+  let node_with_edges =
+    match
+      graph_nodes
+      |> List.find_opt (fun node -> json_string_array_field "edgeRefs" node <> [])
+    with
+    | Some node -> node
+    | None -> fail "missing canonical node with edge refs"
+  in
+  let edge_refs = json_string_array_field "edgeRefs" node_with_edges in
+  let all_node_ids = List.map (json_string_field "id") graph_nodes in
+  let extra_edge =
+    match List.find_opt (fun id -> not (List.exists (String.equal id) edge_refs)) all_node_ids with
+    | Some id -> id
+    | None -> fail "missing extra canonical node edge target"
+  in
+  let edge_refs_json = "\"edgeRefs\": " ^ json_string_array_literal edge_refs in
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json edge_refs_json "\"edgeRefs\": []"));
+     fail "canonical node graph missing edge ref should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical node graph rejects missing edgeRefs"
+       (contains_substring msg "canonical node edgeRefs mismatch"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json edge_refs_json
+             ("\"edgeRefs\": " ^ json_string_array_literal (edge_refs @ [ extra_edge ]))));
+     fail "canonical node graph extra edge ref should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical node graph rejects extra edgeRefs"
+       (contains_substring msg "canonical node edgeRefs mismatch"));
   let first_node_def =
     match node_defs with
     | def :: _ -> def
