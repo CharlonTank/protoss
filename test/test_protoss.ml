@@ -1722,10 +1722,19 @@ let () =
     (contains_substring consumer_package_content ("workspace-a=" ^ interface_hash));
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
+  let consumer_package_invariants = Invariants.check_package consumer_ws in
+  assert_equal "package invariant ref" consumer_package.package_ref
+    consumer_package_invariants.Invariants.package_ref;
+  assert_equal "package invariant imported count" "1"
+    (string_of_int consumer_package_invariants.Invariants.imported_packages);
   let import_math_path = Filename.concat ws_a "src/math.protoss" in
   let import_math_before = Store.read_file import_math_path in
   let consumer_dot_before_import_drift = snapshot (Filename.concat consumer_ws ".protoss") in
   write_file import_math_path (import_math_before ^ "(def importedDrift Nat 9)\n");
+  (try
+     ignore (Invariants.check_package consumer_ws);
+     fail "package invariant should reject imported package source drift"
+   with Workspace.Error _ | Kernel.Error _ -> ());
   (try
      ignore (Workspace.check_package consumer_manifest);
      fail "package check should reject imported package source drift"

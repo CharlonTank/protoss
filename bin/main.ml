@@ -23,6 +23,7 @@ let usage () =
      \       protoss invariants process --graph <graph.json> --entry <name> --response <value>\n\
      \       protoss invariants ledger <file> --entry <name> --response <value> [--ledger <root>]\n\
      \       protoss invariants ledger --graph <graph.json> --entry <name> --response <value> [--ledger <root>]\n\
+     \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss repl\n\
@@ -460,6 +461,9 @@ let command_invariants = function
         (Protoss.Invariants.describe_ledger
            (Protoss.Invariants.check_ledger_process ?ledger:(find_arg "--ledger" args) file
               entry response))
+  | [ "package"; project ] ->
+      print_string
+        (Protoss.Invariants.describe_package (Protoss.Invariants.check_package project))
   | _ -> usage ()
 
 let command_fmt = function

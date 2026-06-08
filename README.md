@@ -29,6 +29,7 @@ What works now:
 - `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Capabilities are checked against the kernel catalog and exported with typed request/response signatures. Typed resume rejects wrong response tags.
 - Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs. Request events record and validate `capability`, `request-tag`, `request-payload-type`, `response-type`, request/continuation ids, suspended request payload, and `cap-scope` before insertion and during inspection. Resume events record `response-type` and validate the typed host response against the suspended request before insertion and during inspection.
 - `invariants` runs executable checks over canonicalization, graph round-trip, graph-first loading, normalization, alpha-stability, typed `Process` resume, and typed ledger request/resume events.
+- `invariants package <project>` checks package lock consistency, package descriptor freshness, imported package freshness, package refs, and audit.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 
 Main commands:
@@ -81,6 +82,7 @@ dune exec protoss -- invariants process examples/ask_human.protoss --entry askNa
 dune exec protoss -- invariants process --graph /tmp/ask_human.protoss.graph.json --entry askName --response String:Ada
 dune exec protoss -- invariants ledger examples/ask_human.protoss --entry askName --response String:Ada --ledger /tmp/protoss-ledger-invariant
 dune exec protoss -- invariants ledger --graph /tmp/ask_human.protoss.graph.json --entry askName --response String:Ada --ledger /tmp/protoss-ledger-invariant-graph
+dune exec protoss -- invariants package examples/workspace
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app
 ```

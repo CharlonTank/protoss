@@ -37,6 +37,15 @@ type ledger_result = {
   result : string;
 }
 
+type package_result = {
+  project : string;
+  package_ref : string;
+  lock_hash : string;
+  build_id : string;
+  store : string;
+  imported_packages : int;
+}
+
 let fail = Kernel.fail
 
 let validate_checked source checked =
@@ -185,6 +194,26 @@ let check_graph_ledger_process ?ledger file entry response =
     (Canonical_ir.checked_of_graph (Store.read_file file))
     entry response
 
+let check_package project =
+  let root = Workspace.project_root project in
+  let manifest = Workspace.parse_manifest root in
+  let lock_hash = Workspace.check_lock manifest in
+  let package = Workspace.check_package manifest in
+  if not (String.equal lock_hash package.Workspace.lock_hash) then
+    fail
+      ("package invariant lock hash mismatch: expected " ^ lock_hash ^ ", got "
+     ^ package.lock_hash);
+  if not (String.equal "Audit OK\n" (Workspace.audit manifest)) then
+    fail ("package invariant audit failed: " ^ root);
+  {
+    project = root;
+    package_ref = package.package_ref;
+    lock_hash = package.lock_hash;
+    build_id = package.build_id;
+    store = package.store;
+    imported_packages = List.length (Workspace.package_imports manifest);
+  }
+
 let describe_file (result : file_result) =
   "Invariants OK\nkind=file\nsource=" ^ result.source ^ "\ndefs="
   ^ string_of_int result.defs ^ "\nprogram_hash=" ^ result.program_hash
@@ -211,3 +240,9 @@ let describe_ledger (result : ledger_result) =
   ^ "\ncapability=" ^ result.capability ^ "\nrequest_tag="
   ^ result.request_tag ^ "\nresponse_type=" ^ result.response_type
   ^ "\nresult=" ^ result.result ^ "\n"
+
+let describe_package (result : package_result) =
+  "Invariants OK\nkind=package\nproject=" ^ result.project ^ "\npackage_ref="
+  ^ result.package_ref ^ "\nlock_hash=" ^ result.lock_hash ^ "\nbuild_id="
+  ^ result.build_id ^ "\nstore=" ^ result.store ^ "\nimported_packages="
+  ^ string_of_int result.imported_packages ^ "\n"
