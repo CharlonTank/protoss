@@ -1970,6 +1970,33 @@ let () =
   in
   assert_equal "stdlib Sexp.parseText unterminated list" "Err \"unterminated list\""
     (Runtime.value_to_string sexp_parsed_unterminated_list);
+  let protoss_parsed_def, _ = Runtime.normalize_def stdlib_generics "protossParsedDef" in
+  assert_equal "stdlib Protoss.parseText def"
+    "Ok [PDDef {expr = SString \"Ada\", name = \"greeting\", typ = PTName \"String\"}]"
+    (Runtime.value_to_string protoss_parsed_def);
+  let protoss_parsed_function_def, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedFunctionDef"
+  in
+  assert_equal "stdlib Protoss.parseText function def"
+    "Ok [PDDef {expr = SList [SAtom \"lambda\", SList [SAtom \"x\", SAtom \"Nat\"], SList [SAtom \"succ\", SAtom \"x\"]], name = \"inc\", typ = PTFun {first = PTName \"Nat\", second = PTName \"Nat\"}}]"
+    (Runtime.value_to_string protoss_parsed_function_def);
+  let protoss_parsed_type_apply, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedTypeApply"
+  in
+  assert_equal "stdlib Protoss.parseText type application"
+    "Ok [PDDef {expr = SAtom \"value\", name = \"xs\", typ = PTApply {args = [PTName \"Nat\"], name = \"List\"}}]"
+    (Runtime.value_to_string protoss_parsed_type_apply);
+  let protoss_parsed_bad_tag, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadTag"
+  in
+  assert_equal "stdlib Protoss.parseText bad tag" "Err \"expected def\""
+    (Runtime.value_to_string protoss_parsed_bad_tag);
+  let protoss_parsed_bad_function_type, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadFunctionType"
+  in
+  assert_equal "stdlib Protoss.parseText bad function type"
+    "Err \"expected function result type\""
+    (Runtime.value_to_string protoss_parsed_bad_function_type);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

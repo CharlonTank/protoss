@@ -1,4 +1,4 @@
-; Protoss stdlib v0.21. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.22. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -33,6 +33,16 @@
   (stack (List (List Sexp)))
   (values (List Sexp))
   (error (Maybe String)))
+(variant ProtossType
+  (PTName String)
+  (PTFun (Pair ProtossType ProtossType))
+  (PTApply (Record (name String) (args (List ProtossType)))))
+(record ProtossDef
+  (name String)
+  (typ ProtossType)
+  (expr Sexp))
+(variant ProtossDecl
+  (PDDef ProtossDef))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -41,7 +51,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.21")
+(def Stdlib.version String "v0.22")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -949,6 +959,132 @@
     (case (Sexp.lexTokens source)
       (Err err (variant Err err))
       (Ok tokens (Sexp.parseTokens tokens)))))
+
+(def Protoss.typeOk (-> ProtossType (Result String ProtossType))
+  (lambda (typ ProtossType)
+    (variant Ok typ)))
+
+(def Protoss.typeErr (-> String (Result String ProtossType))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.typeListOk (-> (List ProtossType) (Result String (List ProtossType)))
+  (lambda (types (List ProtossType))
+    (variant Ok types)))
+
+(def Protoss.typeListErr (-> String (Result String (List ProtossType)))
+  (lambda (message String)
+    (variant Err message)))
+
+(defrec Protoss.parseType (-> Sexp (Result String ProtossType))
+  (variant value)
+  (SAtom name (Protoss.typeOk (variant PTName name)))
+  (SString text (Protoss.typeErr "expected type"))
+  (SList items
+    (caseList items
+      (Nil (Protoss.typeErr "expected type form"))
+      (Cons head rawArgs
+        (case head
+          (SAtom name
+            (case
+              (foldList items (Protoss.typeListOk (Nil ProtossType))
+                (lambda (item Sexp)
+                  (lambda (acc (Result String (List ProtossType)))
+                    (case (recur item)
+                      (Err err (Protoss.typeListErr err))
+                      (Ok parsedItem
+                        (case acc
+                          (Err err (Protoss.typeListErr err))
+                          (Ok parsedItems
+                            (Protoss.typeListOk
+                              (Cons ProtossType parsedItem parsedItems)))))))))
+              (Err err (Protoss.typeErr err))
+              (Ok parsedItems
+                (caseList parsedItems
+                  (Nil (Protoss.typeErr "expected type form"))
+                  (Cons parsedHead parsedArgs
+                    (case ((String.eqString name) "->")
+                      (true
+                        (caseList parsedArgs
+                          (Nil (Protoss.typeErr "expected function type arguments"))
+                          (Cons fromType rest
+                            (caseList rest
+                              (Nil (Protoss.typeErr "expected function result type"))
+                              (Cons toType extra
+                                (caseList extra
+                                  (Nil
+                                    (Protoss.typeOk
+                                      (variant PTFun
+                                        (record (first fromType) (second toType)))))
+                                  (Cons extraHead extraTail
+                                    (Protoss.typeErr "too many function type arguments"))))))))
+                      (false
+                        (Protoss.typeOk
+                          (variant PTApply
+                            (record (name name) (args parsedArgs)))))))))))
+          (_ (Protoss.typeErr "expected type constructor")))))))
+
+(def Protoss.parseDefTail
+  (-> String (-> (List Sexp) (Result String ProtossDecl)))
+  (lambda (name String)
+    (lambda (tail (List Sexp))
+      (caseList tail
+        (Nil (variant Err "expected def type"))
+        (Cons typeNode rest
+          (caseList rest
+            (Nil (variant Err "expected def expression"))
+            (Cons expr extra
+              (caseList extra
+                (Nil
+                  (case (Protoss.parseType typeNode)
+                    (Err err (variant Err err))
+                    (Ok typ
+                      (variant Ok
+                        (variant PDDef
+                          (record (name name) (typ typ) (expr expr)))))))
+                (Cons extraHead extraTail
+                  (variant Err "too many def fields"))))))))))
+
+(def Protoss.parseDecl (-> Sexp (Result String ProtossDecl))
+  (lambda (form Sexp)
+    (case form
+      (SAtom atom (variant Err "expected declaration list"))
+      (SString text (variant Err "expected declaration list"))
+      (SList items
+        (caseList items
+          (Nil (variant Err "empty declaration"))
+          (Cons head tail
+            (case head
+              (SAtom tag
+                (case ((String.eqString tag) "def")
+                  (true
+                    (caseList tail
+                      (Nil (variant Err "expected def name"))
+                      (Cons nameNode defTail
+                        (case nameNode
+                          (SAtom name ((Protoss.parseDefTail name) defTail))
+                          (_ (variant Err "expected def name"))))))
+                  (false (variant Err "expected def"))))
+              (_ (variant Err "expected declaration tag")))))))))
+
+(def Protoss.parseDecls (-> (List Sexp) (Result String (List ProtossDecl)))
+  (lambda (forms (List Sexp))
+    (foldList forms (variant Ok (Nil ProtossDecl))
+      (lambda (form Sexp)
+        (lambda (acc (Result String (List ProtossDecl)))
+          (case (Protoss.parseDecl form)
+            (Err err (variant Err err))
+            (Ok decl
+              (case acc
+                (Err err (variant Err err))
+                (Ok decls
+                  (variant Ok (Cons ProtossDecl decl decls)))))))))))
+
+(def Protoss.parseText (-> String (Result String (List ProtossDecl)))
+  (lambda (source String)
+    (case (Sexp.parseText source)
+      (Err err (variant Err err))
+      (Ok forms (Protoss.parseDecls forms)))))
 
 (def Sexp.isAtom (-> Sexp Bool)
   (lambda (value Sexp)

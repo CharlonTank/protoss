@@ -413,6 +413,21 @@
 (def sexpParsedUnterminatedList (Result String (List Sexp))
   (Sexp.parseText "(def main"))
 
+(def protossParsedDef (Result String (List ProtossDecl))
+  (Protoss.parseText "(def greeting String \"Ada\")"))
+
+(def protossParsedFunctionDef (Result String (List ProtossDecl))
+  (Protoss.parseText "(def inc (-> Nat Nat) (lambda (x Nat) (succ x)))"))
+
+(def protossParsedTypeApply (Result String (List ProtossDecl))
+  (Protoss.parseText "(def xs (List Nat) value)"))
+
+(def protossParsedBadTag (Result String (List ProtossDecl))
+  (Protoss.parseText "(let x String \"Ada\")"))
+
+(def protossParsedBadFunctionType (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad (-> Nat) x)"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
