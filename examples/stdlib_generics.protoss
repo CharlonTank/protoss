@@ -401,6 +401,18 @@
 (def sexpTokensUnterminated (Result String (List SexpToken))
   (Sexp.lexTokens "(def bad \"oops)"))
 
+(def sexpParsed (Result String (List Sexp))
+  (Sexp.parseText "(def main \"Ada\")"))
+
+(def sexpParsedNested (Result String (List Sexp))
+  (Sexp.parseText "(outer (inner \"Ada\") tail)"))
+
+(def sexpParsedUnexpectedClose (Result String (List Sexp))
+  (Sexp.parseText ")"))
+
+(def sexpParsedUnterminatedList (Result String (List Sexp))
+  (Sexp.parseText "(def main"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

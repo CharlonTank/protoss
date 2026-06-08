@@ -1,4 +1,4 @@
-; Protoss stdlib v0.20. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.21. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -29,6 +29,10 @@
   (mode SexpLexMode)
   (tokens (List SexpToken))
   (error (Maybe String)))
+(record SexpParserState
+  (stack (List (List Sexp)))
+  (values (List Sexp))
+  (error (Maybe String)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -37,7 +41,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.20")
+(def Stdlib.version String "v0.21")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -861,6 +865,90 @@
 (def Sexp.list (-> (List Sexp) Sexp)
   (lambda (items (List Sexp))
     (variant SList items)))
+
+(def SexpParserState.make (-> (List (List Sexp)) (-> (List Sexp) (-> (Maybe String) SexpParserState)))
+  (lambda (stack (List (List Sexp)))
+    (lambda (values (List Sexp))
+      (lambda (error (Maybe String))
+        (record (stack stack) (values values) (error error))))))
+
+(def SexpParserState.ok (-> (List (List Sexp)) (-> (List Sexp) SexpParserState))
+  (lambda (stack (List (List Sexp)))
+    (lambda (values (List Sexp))
+      (((SexpParserState.make stack) values) (variant None unit)))))
+
+(def SexpParserState.initial SexpParserState
+  ((SexpParserState.ok (Nil (List Sexp))) (Nil Sexp)))
+
+(def SexpParserState.fail (-> String (-> SexpParserState SexpParserState))
+  (lambda (message String)
+    (lambda (state SexpParserState)
+      (((SexpParserState.make (get state stack)) (get state values)) (variant Some message)))))
+
+(def SexpParserState.openList (-> SexpParserState SexpParserState)
+  (lambda (state SexpParserState)
+    (((SexpParserState.make
+      (Cons (List Sexp) (Nil Sexp) (get state stack)))
+      (get state values))
+      (get state error))))
+
+(def SexpParserState.emit (-> Sexp (-> SexpParserState SexpParserState))
+  (lambda (value Sexp)
+    (lambda (state SexpParserState)
+      (caseList (get state stack)
+        (Nil
+          (((SexpParserState.make (Nil (List Sexp)))
+            (Cons Sexp value (get state values)))
+            (get state error)))
+        (Cons frame rest
+          (((SexpParserState.make
+            (Cons (List Sexp) (Cons Sexp value frame) rest))
+            (get state values))
+            (get state error)))))))
+
+(def SexpParserState.closeList (-> SexpParserState SexpParserState)
+  (lambda (state SexpParserState)
+    (caseList (get state stack)
+      (Nil ((SexpParserState.fail "unexpected )") state))
+      (Cons frame rest
+        ((SexpParserState.emit (Sexp.list ((inst List.reverse Sexp) frame)))
+          (((SexpParserState.make rest) (get state values)) (get state error)))))))
+
+(def Sexp.parseToken (-> SexpParserState (-> SexpToken SexpParserState))
+  (lambda (state SexpParserState)
+    (lambda (token SexpToken)
+      (case (get state error)
+        (Some message state)
+        (None
+          (case token
+            (SLParen (SexpParserState.openList state))
+            (SRParen (SexpParserState.closeList state))
+            (SAtomToken atom ((SexpParserState.emit (Sexp.atom atom)) state))
+            (SStringToken text ((SexpParserState.emit (Sexp.string text)) state))))))))
+
+(def Sexp.parseFinalize (-> SexpParserState (Result String (List Sexp)))
+  (lambda (state SexpParserState)
+    (case (get state error)
+      (Some message (variant Err message))
+      (None
+        (caseList (get state stack)
+          (Nil (variant Ok ((inst List.reverse Sexp) (get state values))))
+          (Cons frame rest (variant Err "unterminated list")))))))
+
+(def Sexp.parseTokens (-> (List SexpToken) (Result String (List Sexp)))
+  (lambda (tokens (List SexpToken))
+    (Sexp.parseFinalize
+      (foldList ((inst List.reverse SexpToken) tokens)
+        SexpParserState.initial
+        (lambda (token SexpToken)
+          (lambda (state SexpParserState)
+            ((Sexp.parseToken state) token)))))))
+
+(def Sexp.parseText (-> String (Result String (List Sexp)))
+  (lambda (source String)
+    (case (Sexp.lexTokens source)
+      (Err err (variant Err err))
+      (Ok tokens (Sexp.parseTokens tokens)))))
 
 (def Sexp.isAtom (-> Sexp Bool)
   (lambda (value Sexp)

@@ -1952,6 +1952,24 @@ let () =
   in
   assert_equal "stdlib Sexp.lexTokens unterminated string" "Err \"unterminated string\""
     (Runtime.value_to_string sexp_tokens_unterminated);
+  let sexp_parsed, _ = Runtime.normalize_def stdlib_generics "sexpParsed" in
+  assert_equal "stdlib Sexp.parseText"
+    "Ok [SList [SAtom \"def\", SAtom \"main\", SString \"Ada\"]]"
+    (Runtime.value_to_string sexp_parsed);
+  let sexp_parsed_nested, _ = Runtime.normalize_def stdlib_generics "sexpParsedNested" in
+  assert_equal "stdlib Sexp.parseText nested"
+    "Ok [SList [SAtom \"outer\", SList [SAtom \"inner\", SString \"Ada\"], SAtom \"tail\"]]"
+    (Runtime.value_to_string sexp_parsed_nested);
+  let sexp_parsed_unexpected_close, _ =
+    Runtime.normalize_def stdlib_generics "sexpParsedUnexpectedClose"
+  in
+  assert_equal "stdlib Sexp.parseText unexpected close" "Err \"unexpected )\""
+    (Runtime.value_to_string sexp_parsed_unexpected_close);
+  let sexp_parsed_unterminated_list, _ =
+    Runtime.normalize_def stdlib_generics "sexpParsedUnterminatedList"
+  in
+  assert_equal "stdlib Sexp.parseText unterminated list" "Err \"unterminated list\""
+    (Runtime.value_to_string sexp_parsed_unterminated_list);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
