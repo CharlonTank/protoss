@@ -66,6 +66,7 @@ type manifest = {
   store_dir : string;
   cache_dir : string;
   capabilities : string list;
+  package_interfaces : (string * string) list;
 }
 
 let manifest_name = "protoss.toml"
@@ -113,6 +114,11 @@ let parse_array s =
   in
   loop [] 0
 
+let parse_package_interface s =
+  match split_once '=' s with
+  | Some (name, hash) when trim name <> "" && trim hash <> "" -> (trim name, trim hash)
+  | _ -> fail ("package interface constraint expected name=hash: " ^ s)
+
 let parse_manifest root =
   let root = realpath_or root in
   let path = manifest_path root in
@@ -158,6 +164,8 @@ let parse_manifest root =
     store_dir = string_field "store_dir" ".protoss/store";
     cache_dir = string_field "cache_dir" ".protoss/cache";
     capabilities = array_field "capabilities" [];
+    package_interfaces =
+      array_field "package_interfaces" [] |> List.map parse_package_interface;
   }
 
 let path_in_project manifest path = normalize_path manifest.root path
@@ -190,7 +198,8 @@ let init ?(force = false) root =
      source_dirs = [\"src\"]\n\
      store_dir = \".protoss/store\"\n\
      cache_dir = \".protoss/cache\"\n\
-     capabilities = []\n";
+     capabilities = []\n\
+     package_interfaces = []\n";
   let main = Filename.concat src "main.protoss" in
   if not (Sys.file_exists main) then write_file main "(def main Nat 0)\n";
   manifest
@@ -706,6 +715,11 @@ let lock_string s = Ast.quote s
 let lock_string_list name values =
   lock_item name (List.map lock_string (List.sort String.compare values))
 
+let lock_pair_list name values =
+  values
+  |> List.map (fun (k, v) -> k ^ "=" ^ v)
+  |> lock_string_list name
+
 let unit_lock manifest (unit : unit_load) =
   let rel_import import =
     normalize_path (Filename.dirname unit.path) import |> relative_to_root manifest
@@ -735,6 +749,7 @@ let lock_content manifest prepared =
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_pair_list "package-interfaces" manifest.package_interfaces;
       "  "
       ^ lock_item "defs"
           (prepared.checked.defs
@@ -844,6 +859,18 @@ let package_interface_items manifest prepared =
 let package_interface_hash manifest prepared =
   Kernel.hash_string (lock_item "interface" (package_interface_items manifest prepared))
 
+let validate_package_interface_constraints manifest interface_hash =
+  List.iter
+    (fun (name, expected) ->
+      if String.equal name manifest.name then
+        if not (String.equal expected interface_hash) then
+          fail
+            ("package interface mismatch for " ^ name ^ ": expected " ^ expected ^ ", got "
+           ^ interface_hash)
+        else ()
+      else fail ("unknown package interface constraint: " ^ name))
+    manifest.package_interfaces
+
 let package_content manifest prepared lock_hash =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
   let interface_items = package_interface_items manifest prepared in
@@ -863,6 +890,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_pair_list "package-interfaces" manifest.package_interfaces;
       "  " ^ lock_item "interface" interface_items;
       "  " ^ lock_item "types" (List.map package_type_item prepared.checked.program.type_aliases);
       "  " ^ lock_item "defs" (List.map package_def_item prepared.checked.defs);
@@ -873,6 +901,8 @@ let package_content manifest prepared lock_hash =
 
 let write_package ?(locked = false) manifest =
   let prepared = prepare_build manifest in
+  let interface_hash = package_interface_hash manifest prepared in
+  validate_package_interface_constraints manifest interface_hash;
   let lock_hash =
     if locked then check_lock_prepared manifest prepared
     else snd (write_lock_prepared manifest prepared)
@@ -960,7 +990,9 @@ let check_package manifest =
   expect_atom "program-hash" prepared.build_id;
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (Kernel.hash_string prepared.program_graph);
-  expect_atom "interface-hash" (package_interface_hash manifest prepared);
+  let interface_hash = package_interface_hash manifest prepared in
+  expect_atom "interface-hash" interface_hash;
+  validate_package_interface_constraints manifest interface_hash;
   { package_ref; package_path; lock_hash; build_id = prepared.build_id; store = store_root manifest }
 
 let stats_to_string stats =

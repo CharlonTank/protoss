@@ -25,6 +25,16 @@ let replace_once haystack needle replacement =
   in
   loop 0
 
+let sexp_atom_field name content =
+  let rec field = function
+    | Sexp.List (Sexp.Atom n :: Sexp.Atom value :: _) when String.equal n name -> Some value
+    | Sexp.List xs -> List.find_map field xs
+    | _ -> None
+  in
+  match Sexp.parse content |> List.find_map field with
+  | Some value -> value
+  | None -> fail ("missing sexp atom field: " ^ name)
+
 let json_field name obj =
   match Json.field name obj with
   | Some v -> v
@@ -1614,6 +1624,7 @@ let () =
     (contains_substring package_content "(interface-hash p1:");
   assert_true "project package records public interface"
     (contains_substring package_content "(interface ");
+  let interface_hash = sexp_atom_field "interface-hash" package_content in
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
   let package_checked = Workspace.check_package manifest_a in
@@ -1627,6 +1638,30 @@ let () =
     (Store.read_file package_again.package_path);
   let package_locked = Workspace.write_package ~locked:true manifest_a in
   assert_equal "project package locked ref" package_a.package_ref package_locked.package_ref;
+  let interface_ws = temp_dir "workspace-interface-constraint" in
+  copy_tree ws_a interface_ws;
+  let manifest_path_interface = Filename.concat interface_ws "protoss.toml" in
+  let manifest_without_interface = Store.read_file manifest_path_interface in
+  write_file manifest_path_interface
+    (manifest_without_interface ^ "package_interfaces = [\"workspace-a=" ^ interface_hash ^ "\"]\n");
+  let manifest_with_interface = Workspace.parse_manifest interface_ws in
+  let package_with_interface = Workspace.write_package manifest_with_interface in
+  assert_equal "package interface constraint accepts current package" package_with_interface.package_ref
+    (Workspace.check_package manifest_with_interface).Workspace.package_ref;
+  write_file manifest_path_interface
+    (manifest_without_interface ^ "package_interfaces = [\"workspace-a=p1:bad\"]\n");
+  let manifest_bad_interface = Workspace.parse_manifest interface_ws in
+  let package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss") in
+  (try
+     ignore (Workspace.check_package manifest_bad_interface);
+     fail "package interface constraint should reject mismatch"
+   with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.write_package manifest_bad_interface);
+     fail "invalid package interface write should reject without mutation"
+   with Workspace.Error _ -> ());
+  assert_true "invalid package interface write leaves package store untouched"
+    (package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss"));
   let dot_before_drift = snapshot (Filename.concat ws_a ".protoss") in
   let math_path = Filename.concat ws_a "src/math.protoss" in
   let math_before = Store.read_file math_path in
