@@ -1915,6 +1915,14 @@ let () =
      ignore (Loader.check_file module_bad);
      fail "private module definition should not be importable"
    with Loader.Error msg -> assert_true "private module export error" (String.contains msg 'e'));
+  let module_bad_type = Filename.concat module_root "bad_type.protoss" in
+  write_file module_bad_type "(module Demo.Bad)\n(def hidden Nat\n  true)\n";
+  (try
+     ignore (Loader.check_file module_bad_type);
+     fail "qualified module type error should point at source definition body"
+   with Loader.Error msg ->
+     assert_true "qualified module type error has expression line"
+       (contains_substring msg (module_bad_type ^ ":3:3: definition Demo.Bad.hidden")));
   let cycle_a = Filename.concat import_root "cycle_a.protoss" in
   let cycle_b = Filename.concat import_root "cycle_b.protoss" in
   write_file cycle_a "(import \"cycle_b.protoss\")\n(def a Nat 1)\n";
@@ -1933,6 +1941,22 @@ let () =
      ignore (Loader.check_file bad_file);
      fail "loader error should be localized"
    with Loader.Error msg -> assert_true "loader error has file-ish location" (String.contains msg ':'));
+  let bad_nested_type_file = Filename.concat import_root "bad_nested_type.protoss" in
+  write_file bad_nested_type_file "(def bad Nat\n  (succ true))\n";
+  (try
+     ignore (Loader.check_file bad_nested_type_file);
+     fail "loader nested type error should point at bad argument"
+   with Loader.Error msg ->
+     assert_true "loader nested type error has expression line"
+       (contains_substring msg (bad_nested_type_file ^ ":2:9: definition bad")));
+  let bad_unknown_file = Filename.concat import_root "bad_unknown.protoss" in
+  write_file bad_unknown_file "(def bad Nat\n  (let (x 1)\n    miss))\n";
+  (try
+     ignore (Loader.check_file bad_unknown_file);
+     fail "loader unknown name should point at missing name"
+   with Loader.Error msg ->
+     assert_true "loader unknown name has expression line"
+       (contains_substring msg (bad_unknown_file ^ ":3:5: definition bad")));
   let bad_syntax_file = Filename.concat import_root "bad_syntax.protoss" in
   write_file bad_syntax_file "(def bad Nat\n  (succ 1)\n";
   (try
@@ -1960,7 +1984,7 @@ let () =
      fail "loader defrec error should be localized"
    with Loader.Error msg ->
      assert_true "loader defrec error has exact line"
-       (contains_substring msg (bad_defrec_file ^ ":2:1: definition count")));
+       (contains_substring msg (bad_defrec_file ^ ":2:55: definition count")));
   let bad_alias_file = Filename.concat import_root "bad_alias.protoss" in
   write_file bad_alias_file
     "; ignored comment mentioning (type Loop Nat)\n\n(type Loop Loop)\n(def bad Loop 0)\n";

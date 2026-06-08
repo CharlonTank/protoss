@@ -123,9 +123,29 @@ let find_named_form_last_offset keywords source name =
   | offset :: _ -> Some offset
   | [] -> None
 
-let find_def_offset source name = find_named_form_offset def_keywords source name
+let local_name name =
+  try
+    let i = String.rindex name '.' in
+    String.sub name (i + 1) (String.length name - i - 1)
+  with Not_found -> name
 
-let find_type_alias_offset source name = find_named_form_offset type_keywords source name
+let find_named_form_offset_for_name keywords source name =
+  match find_named_form_offset keywords source name with
+  | Some _ as offset -> offset
+  | None ->
+      let local = local_name name in
+      if String.equal local name then None else find_named_form_offset keywords source local
+
+let find_named_form_last_offset_for_name keywords source name =
+  match find_named_form_last_offset keywords source name with
+  | Some _ as offset -> offset
+  | None ->
+      let local = local_name name in
+      if String.equal local name then None else find_named_form_last_offset keywords source local
+
+let find_def_offset source name = find_named_form_offset_for_name def_keywords source name
+
+let find_type_alias_offset source name = find_named_form_offset_for_name type_keywords source name
 
 let location_for_offset path source offset =
   let line, col = line_col source offset in
@@ -140,32 +160,264 @@ let symbol_location path source name =
       | None -> None)
 
 let symbol_location_last path source name =
-  match find_named_form_last_offset def_keywords source name with
+  match find_named_form_last_offset_for_name def_keywords source name with
   | Some offset -> Some (location_for_offset path source offset)
   | None -> (
-      match find_named_form_last_offset type_keywords source name with
+      match find_named_form_last_offset_for_name type_keywords source name with
       | Some offset -> Some (location_for_offset path source offset)
       | None -> None)
+
+type location_kind = Def_location | Type_location
+
+type source_location = {
+  symbol : string;
+  loc : string;
+  path : string;
+  source : string;
+  offset : int;
+  kind : location_kind;
+}
 
 let def_locations path source defs =
   List.map
     (fun d ->
-      let loc =
-        match symbol_location path source d.name with Some loc -> loc | None -> path ^ ":1:1"
-      in
-      (d.name, loc))
+      let offset = Option.value (find_def_offset source d.name) ~default:0 in
+      let loc = location_for_offset path source offset in
+      {
+        symbol = d.name;
+        loc;
+        path;
+        source;
+        offset;
+        kind = Def_location;
+      })
     defs
 
 let type_alias_locations path source aliases =
   List.map
     (fun a ->
-      let loc =
-        match symbol_location path source a.type_name with
-        | Some loc -> loc
-        | None -> path ^ ":1:1"
-      in
-      (a.type_name, loc))
+      let offset = Option.value (find_type_alias_offset source a.type_name) ~default:0 in
+      let loc = location_for_offset path source offset in
+      {
+        symbol = a.type_name;
+        loc;
+        path;
+        source;
+        offset;
+        kind = Type_location;
+      })
     aliases
+
+let source_location_by_symbol locations name =
+  List.find_opt (fun l -> String.equal l.symbol name) locations
+
+let form_end_offset source start =
+  let len = String.length source in
+  if start >= len || source.[start] <> '(' then None
+  else
+    let rec loop depth i =
+      if i >= len then None
+      else
+        match source.[i] with
+        | '"' -> loop depth (skip_string source i)
+        | ';' -> loop depth (skip_comment source i)
+        | '(' -> loop (depth + 1) (i + 1)
+        | ')' ->
+            if depth = 1 then Some (i + 1) else loop (max 0 (depth - 1)) (i + 1)
+        | _ -> loop depth (i + 1)
+      in
+    loop 0 start
+
+let find_substring_in_range source start stop needle =
+  let len = String.length source in
+  let stop = min stop len in
+  let needle_len = String.length needle in
+  if needle_len = 0 then None
+  else
+    let rec loop i =
+      if i + needle_len > stop then None
+      else if String.sub source i needle_len = needle then Some i
+      else loop (i + 1)
+    in
+    loop (max 0 start)
+
+let offset_is_code source offset =
+  let len = String.length source in
+  let stop = min (max 0 offset) len in
+  let rec loop i state =
+    if i >= stop then state = `Code
+    else
+      match (state, source.[i]) with
+      | `Code, '"' -> loop (i + 1) `String
+      | `Code, ';' -> loop (i + 1) `Comment
+      | `String, '\\' when i + 1 < stop -> loop (i + 2) `String
+      | `String, '"' -> loop (i + 1) `Code
+      | `Comment, '\n' -> loop (i + 1) `Code
+      | _ -> loop (i + 1) state
+  in
+  loop 0 `Code
+
+let find_code_substring_in_range source start stop needle =
+  let rec loop from =
+    match find_substring_in_range source from stop needle with
+    | None -> None
+    | Some offset -> if offset_is_code source offset then Some offset else loop (offset + 1)
+  in
+  loop start
+
+let atom_boundary source index =
+  index < 0 || index >= String.length source || is_delim source.[index]
+
+let is_source_atom s =
+  String.length s > 0
+  && String.for_all (fun c -> not (is_delim c) && c <> '(' && c <> ')') s
+
+let find_atom_in_range source start stop atom =
+  let atom_len = String.length atom in
+  let rec loop from =
+    match find_substring_in_range source from stop atom with
+    | None -> None
+    | Some offset ->
+        if
+          offset_is_code source offset
+          && atom_boundary source (offset - 1)
+          && atom_boundary source (offset + atom_len)
+        then Some offset
+        else loop (offset + 1)
+  in
+  if atom_len = 0 then None else loop start
+
+let source_range loc =
+  match loc.kind with
+  | Type_location -> (loc.offset, Option.value (form_end_offset loc.source loc.offset) ~default:(String.length loc.source))
+  | Def_location ->
+      (loc.offset, Option.value (form_end_offset loc.source loc.offset) ~default:(String.length loc.source))
+
+let expression_offset loc expr =
+  let expr = String.trim expr in
+  if String.equal expr "" then None
+  else
+    let start, stop = source_range loc in
+    if is_source_atom expr then find_atom_in_range loc.source start stop expr
+    else find_code_substring_in_range loc.source start stop expr
+
+let location_for_source_offset loc offset = location_for_offset loc.path loc.source offset
+
+let find_all_substrings haystack needle =
+  let haystack_len = String.length haystack and needle_len = String.length needle in
+  if needle_len = 0 then []
+  else
+    let rec loop i acc =
+      if i + needle_len > haystack_len then List.rev acc
+      else if String.sub haystack i needle_len = needle then loop (i + 1) (i :: acc)
+      else loop (i + 1) acc
+    in
+    loop 0 []
+
+let expression_candidates msg =
+  let marker = ", expression " in
+  let marker_len = String.length marker in
+  match find_all_substrings msg marker with
+  | [] -> []
+  | offsets ->
+      offsets
+      |> List.mapi (fun index offset ->
+             let start = offset + marker_len in
+             let stop =
+               match List.nth_opt offsets (index + 1) with
+               | Some next -> next
+               | None -> String.length msg
+             in
+             String.sub msg start (stop - start) |> String.trim)
+      |> List.filter (fun s -> not (String.equal s ""))
+
+let find_marker marker msg =
+  let marker_len = String.length marker and msg_len = String.length msg in
+  let rec loop i =
+    if i + marker_len > msg_len then None
+    else if String.sub msg i marker_len = marker then Some (i + marker_len)
+    else loop (i + 1)
+  in
+  loop 0
+
+let first_substring_index s needles =
+  needles
+  |> List.filter_map (fun needle -> find_marker needle s |> Option.map (fun i -> i - String.length needle))
+  |> List.sort Int.compare |> List.find_opt (fun _ -> true)
+
+let clean_candidate_token s =
+  let s =
+    match first_substring_index s [ ". Did you mean"; ", expression "; "\n" ] with
+    | Some i -> String.sub s 0 i
+    | None -> s
+  in
+  let s = String.trim s in
+  let len = String.length s in
+  if len > 0 && s.[len - 1] = '.' then String.sub s 0 (len - 1) else s
+
+let token_after_marker marker msg =
+  match find_marker marker msg with
+  | None -> None
+  | Some start ->
+      let token = String.sub msg start (String.length msg - start) |> clean_candidate_token in
+      if String.equal token "" then None else Some token
+
+let token_between prefix suffix msg =
+  match find_marker prefix msg with
+  | None -> None
+  | Some start -> (
+      let rest = String.sub msg start (String.length msg - start) in
+      match first_substring_index rest [ suffix ] with
+      | Some stop ->
+          let token = String.sub rest 0 stop |> clean_candidate_token in
+          if String.equal token "" then None else Some token
+      | None -> None)
+
+let source_symbol_candidates msg =
+  [
+    token_after_marker "unknown name: " msg;
+    token_after_marker "unknown record field: " msg;
+    token_after_marker "record missing field: " msg;
+    token_after_marker "unknown variant constructor: " msg;
+    token_after_marker "definition is not polymorphic: " msg;
+    token_after_marker "unknown polymorphic definition: " msg;
+    token_after_marker "missing capability: " msg;
+    token_after_marker "declares undeclared capability: " msg;
+    token_between "variant constructor " " requires" msg;
+  ]
+  |> List.filter_map (fun x -> x)
+  |> List.sort_uniq String.compare
+
+let prefer_symbol_location msg =
+  List.exists
+    (fun marker -> Option.is_some (find_marker marker msg))
+    [
+      "unknown name: ";
+      "unknown record field: ";
+      "record missing field: ";
+      "unknown variant constructor: ";
+      "definition is not polymorphic: ";
+      "unknown polymorphic definition: ";
+      "missing capability: ";
+      "declares undeclared capability: ";
+    ]
+
+let locate_in_definition loc msg =
+  let locate_expr () =
+    expression_candidates msg
+    |> List.find_map (fun expr -> expression_offset loc expr)
+    |> Option.map (location_for_source_offset loc)
+  in
+  let locate_symbol () =
+    source_symbol_candidates msg
+    |> List.find_map (fun symbol ->
+           let start, stop = source_range loc in
+           find_atom_in_range loc.source start stop symbol)
+    |> Option.map (location_for_source_offset loc)
+  in
+  if prefer_symbol_location msg then
+    match locate_symbol () with Some loc -> loc | None -> Option.value (locate_expr ()) ~default:loc.loc
+  else match locate_expr () with Some loc -> loc | None -> Option.value (locate_symbol ()) ~default:loc.loc
 
 let has_prefix prefix s =
   let lp = String.length prefix in
@@ -243,13 +495,28 @@ let locate_source_error path source msg =
       match loc with Some loc -> loc ^ ": " ^ msg | None -> locate path msg)
   | None -> locate path msg
 
+let extract_definition_name msg =
+  match drop_prefix "definition " msg with Some rest -> take_until_colon rest | None -> None
+
 let locate_kernel_error locations fallback_path msg =
-  match extract_error_symbol_name msg with
+  match extract_definition_name msg with
   | Some name -> (
-      match List.find_opt (fun (n, _) -> String.equal n name) locations with
-      | Some (_, loc) -> loc ^ ": " ^ msg
+      match source_location_by_symbol locations name with
+      | Some loc -> locate_in_definition loc msg ^ ": " ^ msg
+      | None -> (
+          match extract_error_symbol_name msg with
+          | Some name -> (
+              match source_location_by_symbol locations name with
+              | Some loc -> loc.loc ^ ": " ^ msg
+              | None -> locate fallback_path msg)
+          | None -> locate fallback_path msg))
+  | None -> (
+      match extract_error_symbol_name msg with
+      | Some name -> (
+          match source_location_by_symbol locations name with
+          | Some loc -> loc.loc ^ ": " ^ msg
+          | None -> locate fallback_path msg)
       | None -> locate fallback_path msg)
-  | None -> locate fallback_path msg
 
 let normalize_path base path =
   let raw = if Filename.is_relative path then Filename.concat base path else path in
@@ -259,7 +526,7 @@ let dirname path = Filename.dirname path
 
 type loaded = {
   program : program;
-  locations : (string * string) list;
+  locations : source_location list;
   public_symbols : string list;
   all_symbols : string list;
 }

@@ -894,6 +894,12 @@ let require_type expected actual where =
     fail
       (where ^ ": expected " ^ string_of_typ expected ^ ", got " ^ string_of_typ actual)
 
+let require_type_expr expected actual where expr =
+  if not (equal_typ expected actual) then
+    fail
+      (where ^ ": expected " ^ string_of_typ expected ^ ", got " ^ string_of_typ actual
+     ^ ", expression " ^ string_of_expr expr)
+
 let has_capability ctx cap = List.exists (String.equal cap) ctx.capabilities
 
 let rec contains_process_type = function
@@ -952,7 +958,7 @@ let rec infer ctx = function
       match infer ctx f with
       | TFun (a, b) ->
           let at = infer ctx arg in
-          require_type a at "application";
+          require_type_expr a at "application" arg;
           b
       | t -> fail ("application of non-function: " ^ string_of_typ t))
   | ELet (x, e, body) ->
@@ -1516,7 +1522,7 @@ and check_elab ctx expected expr =
       | Some (_, expr) -> (expected, expr)
       | None ->
           let actual, expr = infer_elab ctx expr in
-          require_type expected actual "expected context";
+          require_type_expr expected actual "expected context" expr;
           (expected, expr))
   | _, ECase (scrut, branches) ->
       let scrut_ty, scrut = infer_elab ctx scrut in
@@ -1529,7 +1535,7 @@ and check_elab ctx expected expr =
       (expected, ECase (scrut, branches))
   | _ ->
       let actual, expr = infer_elab ctx expr in
-      require_type expected actual "expected context";
+      require_type_expr expected actual "expected context" expr;
       (expected, expr)
 
 and check_fold_list_step_elab ctx xs item_ty result_ty step =
