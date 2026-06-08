@@ -1017,6 +1017,11 @@ let () =
   assert_equal "stdlib generic List.all" "false" (Runtime.value_to_string all_two);
   let member_three, _ = Runtime.normalize_def stdlib_generics "memberThree" in
   assert_equal "stdlib generic List.member" "true" (Runtime.value_to_string member_three);
+  let found_three, _ = Runtime.normalize_def stdlib_generics "foundThree" in
+  assert_equal "stdlib generic List.find hit" "Some 3" (Runtime.value_to_string found_three);
+  let found_missing, _ = Runtime.normalize_def stdlib_generics "foundMissing" in
+  assert_equal "stdlib generic List.find miss" "None unit"
+    (Runtime.value_to_string found_missing);
   let label, _ = Runtime.normalize_def stdlib_generics "label" in
   assert_equal "stdlib generic Maybe.map/default" "\"known\"" (Runtime.value_to_string label);
   let maybe_has_age, _ = Runtime.normalize_def stdlib_generics "maybeHasAge" in
@@ -1026,6 +1031,10 @@ let () =
     (Runtime.value_to_string maybe_missing_age);
   let maybe_next, _ = Runtime.normalize_def stdlib_generics "maybeNext" in
   assert_equal "stdlib generic Maybe.andThen" "Some 42" (Runtime.value_to_string maybe_next);
+  let maybe_pair, _ = Runtime.normalize_def stdlib_generics "maybePair" in
+  assert_equal "stdlib generic Maybe.map2" "Some 42" (Runtime.value_to_string maybe_pair);
+  let maybe_result, _ = Runtime.normalize_def stdlib_generics "maybeResult" in
+  assert_equal "stdlib generic Maybe.toResult" "Ok 41" (Runtime.value_to_string maybe_result);
   let result_label, _ = Runtime.normalize_def stdlib_generics "resultLabel" in
   assert_equal "stdlib generic Result.map" "Ok \"ok\"" (Runtime.value_to_string result_label);
   let result_default, _ = Runtime.normalize_def stdlib_generics "resultDefault" in
@@ -1036,6 +1045,11 @@ let () =
     (Runtime.value_to_string result_mapped_err);
   let result_next, _ = Runtime.normalize_def stdlib_generics "resultNext" in
   assert_equal "stdlib generic Result.andThen" "Ok 8" (Runtime.value_to_string result_next);
+  let result_sum, _ = Runtime.normalize_def stdlib_generics "resultSum" in
+  assert_equal "stdlib generic Result.map2" "Ok 12" (Runtime.value_to_string result_sum);
+  let result_maybe, _ = Runtime.normalize_def stdlib_generics "resultMaybe" in
+  assert_equal "stdlib generic Result.toMaybe" "Some 7"
+    (Runtime.value_to_string result_maybe);
   let result_is_ok, _ = Runtime.normalize_def stdlib_generics "resultIsOk" in
   assert_equal "stdlib generic Result.isOk" "true" (Runtime.value_to_string result_is_ok);
   let result_is_err, _ = Runtime.normalize_def stdlib_generics "resultIsErr" in
@@ -1083,6 +1097,17 @@ let () =
   assert_equal "stdlib Json.expectObject"
     "Ok [{first = \"name\", second = JString \"Ada\"}, {first = \"age\", second = JNat 41}]"
     (Runtime.value_to_string json_profile_object);
+  let json_name_field, _ = Runtime.normalize_def stdlib_generics "jsonNameField" in
+  assert_equal "stdlib Json.expectField" "Ok JString \"Ada\""
+    (Runtime.value_to_string json_name_field);
+  let json_name_via_decoder, _ =
+    Runtime.normalize_def stdlib_generics "jsonNameViaDecoder"
+  in
+  assert_equal "stdlib Json.expectFieldAs" "Ok \"Ada\""
+    (Runtime.value_to_string json_name_via_decoder);
+  let json_missing_field, _ = Runtime.normalize_def stdlib_generics "jsonMissingField" in
+  assert_equal "stdlib Json.expectField missing" "Err \"missing field\""
+    (Runtime.value_to_string json_missing_field);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in

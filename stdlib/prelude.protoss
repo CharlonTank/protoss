@@ -130,6 +130,17 @@
           (lambda (x A)
             ((eq x) value)))))))
 
+(defpoly List.find (params A)
+  (-> (List A) (-> (-> A Bool) (Maybe A)))
+  (lambda (xs (List A))
+    (lambda (pred (-> A Bool))
+      (foldList xs (variant (Maybe A) None unit)
+        (lambda (x A)
+          (lambda (acc (Maybe A))
+            (case (pred x)
+              (true (variant Some x))
+              (false acc))))))))
+
 (def List.mapNat (-> (List Nat) (-> (-> Nat Nat) (List Nat)))
   (lambda (xs (List Nat))
     (lambda (f (-> Nat Nat))
@@ -168,6 +179,18 @@
         (None _ (variant None unit))
         (Some value (variant Some (f value)))))))
 
+(defpoly Maybe.map2 (params A B C)
+  (-> (-> A (-> B C)) (-> (Maybe A) (-> (Maybe B) (Maybe C))))
+  (lambda (f (-> A (-> B C)))
+    (lambda (left (Maybe A))
+      (lambda (right (Maybe B))
+        (case left
+          (None (variant None unit))
+          (Some leftValue
+            (case right
+              (None (variant None unit))
+              (Some rightValue (variant Some ((f leftValue) rightValue))))))))))
+
 (defpoly Maybe.andThen (params A B)
   (-> (Maybe A) (-> (-> A (Maybe B)) (Maybe B)))
   (lambda (m (Maybe A))
@@ -176,6 +199,14 @@
         (None (variant None unit))
         (Some value (f value))))))
 
+(defpoly Maybe.toResult (params E A)
+  (-> E (-> (Maybe A) (Result E A)))
+  (lambda (err E)
+    (lambda (m (Maybe A))
+      (case m
+        (None (variant Err err))
+        (Some value (variant Ok value))))))
+
 (defpoly Result.map (params E A B)
   (-> (-> A B) (-> (Result E A) (Result E B)))
   (lambda (f (-> A B))
@@ -183,6 +214,18 @@
       (case r
         (Err err (variant Err err))
         (Ok value (variant Ok (f value)))))))
+
+(defpoly Result.map2 (params E A B C)
+  (-> (-> A (-> B C)) (-> (Result E A) (-> (Result E B) (Result E C))))
+  (lambda (f (-> A (-> B C)))
+    (lambda (left (Result E A))
+      (lambda (right (Result E B))
+        (case left
+          (Err err (variant Err err))
+          (Ok leftValue
+            (case right
+              (Err err (variant Err err))
+              (Ok rightValue (variant Ok ((f leftValue) rightValue))))))))))
 
 (defpoly Result.withDefault (params E A)
   (-> A (-> (Result E A) A))
@@ -207,6 +250,13 @@
       (case r
         (Err err (variant Err err))
         (Ok value (f value))))))
+
+(defpoly Result.toMaybe (params E A)
+  (-> (Result E A) (Maybe A))
+  (lambda (r (Result E A))
+    (case r
+      (Err err (variant None unit))
+      (Ok value (variant Some value)))))
 
 (defpoly Result.isOk (params E A)
   (-> (Result E A) Bool)
@@ -438,3 +488,26 @@
       (JNull (variant Err "expected Object"))
       (JObject fields (variant Ok fields))
       (JString value (variant Err "expected Object")))))
+
+(def Json.expectField (-> String (-> Json (Result String Json)))
+  (lambda (key String)
+    (lambda (json Json)
+      (case json
+        (JArray items (variant Err "expected Object"))
+        (JBool value (variant Err "expected Object"))
+        (JNat value (variant Err "expected Object"))
+        (JNull (variant Err "expected Object"))
+        (JObject fields
+          (case ((((inst Assoc.get String Json) String.eqString) key) fields)
+            (None (variant Err "missing field"))
+            (Some value (variant Ok value))))
+        (JString value (variant Err "expected Object"))))))
+
+(defpoly Json.expectFieldAs (params A)
+  (-> (-> Json (Result String A)) (-> String (-> Json (Result String A))))
+  (lambda (decode (-> Json (Result String A)))
+    (lambda (key String)
+      (lambda (json Json)
+        (case ((Json.expectField key) json)
+          (Err err (variant Err err))
+          (Ok value (decode value)))))))

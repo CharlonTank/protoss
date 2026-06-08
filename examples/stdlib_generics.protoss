@@ -38,6 +38,14 @@
 (def memberThree Bool
   ((((inst List.member Nat) Nat.eqNat) 3) appended))
 
+(def foundThree (Maybe Nat)
+  (((inst List.find Nat) appended)
+    (lambda (x Nat) ((Nat.eqNat x) 3))))
+
+(def foundMissing (Maybe Nat)
+  (((inst List.find Nat) appended)
+    (lambda (x Nat) ((Nat.eqNat x) 9))))
+
 (def maybeAge (Maybe Nat)
   (variant Some 41))
 
@@ -58,6 +66,15 @@
 (def maybeNext (Maybe Nat)
   (((inst Maybe.andThen Nat Nat) maybeAge)
     (lambda (age Nat) (variant Some (succ age)))))
+
+(def maybePair (Maybe Nat)
+  ((((inst Maybe.map2 Nat Nat Nat)
+    (lambda (a Nat) (lambda (b Nat) ((Nat.add a) b))))
+    maybeAge)
+    (variant Some 1)))
+
+(def maybeResult (Result String Nat)
+  (((inst Maybe.toResult String Nat) "missing age") maybeAge))
 
 (def resultAge (Result String Nat)
   (variant Ok 7))
@@ -81,6 +98,15 @@
 (def resultNext (Result String Nat)
   (((inst Result.andThen String Nat Nat) resultAge)
     (lambda (age Nat) (variant Ok (succ age)))))
+
+(def resultSum (Result String Nat)
+  ((((inst Result.map2 String Nat Nat Nat)
+    (lambda (a Nat) (lambda (b Nat) ((Nat.add a) b))))
+    resultAge)
+    (variant Ok 5)))
+
+(def resultMaybe (Maybe Nat)
+  ((inst Result.toMaybe String Nat) resultAge))
 
 (def resultIsOk Bool
   ((inst Result.isOk String Nat) resultAge))
@@ -161,6 +187,15 @@
 
 (def jsonProfileObject (Result String (Assoc String Json))
   (Json.expectObject jsonProfile))
+
+(def jsonNameField (Result String Json)
+  ((Json.expectField "name") jsonProfile))
+
+(def jsonNameViaDecoder (Result String String)
+  (((inst Json.expectFieldAs String) Json.expectString) "name" jsonProfile))
+
+(def jsonMissingField (Result String Json)
+  ((Json.expectField "missing") jsonProfile))
 
 (def total Nat
   (foldList bumped 0
