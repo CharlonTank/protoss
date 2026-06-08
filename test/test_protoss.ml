@@ -1586,6 +1586,7 @@ let () =
      ^ ")\n(def total Nat ((Nat.add base) 40))\n");
 	    write_file (Filename.concat root "src/app.protoss")
 	      ("(import \"math.protoss\")\n\
+	        (record PublicBox (value Nat))\n\
 	        (def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
 	        (def bumped (List Nat) ((List.mapNat numbers) (lambda ("
 	      ^ bound ^ " Nat) (succ " ^ bound
@@ -1670,6 +1671,8 @@ let () =
   let interface_hash = sexp_atom_field "interface-hash" package_content in
   assert_true "project package public interface records capability scope"
     (contains_substring package_content "(capability-scope \"Human.ask\")");
+  assert_true "project package public interface records canonical types"
+    (contains_substring package_content "(type-canonical ");
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
   let package_checked = Workspace.check_package manifest_a in
@@ -1683,6 +1686,10 @@ let () =
   assert_true "project package interface prints capability scope"
     (contains_substring package_interface_text "export def askName"
     && contains_substring package_interface_text "capabilities=Human.ask");
+  assert_true "project package interface prints canonical def type"
+    (contains_substring package_interface_text "export def askName type=(Process String)");
+  assert_true "project package interface prints public type export"
+    (contains_substring package_interface_text "export type PublicBox");
   let package_interface_json = Workspace.package_interface_json manifest_a in
   let package_interface_obj = Json.parse package_interface_json in
   assert_equal "project package interface json format" "protoss-package-interface-v1"
@@ -1702,6 +1709,26 @@ let () =
   in
   assert_equal "project package interface json capability scope" "Human.ask"
     (String.concat "," (json_string_array_field "capabilities" ask_export));
+  assert_equal "project package interface json canonical def type" "(Process String)"
+    (json_string_field "typeCanonical" ask_export);
+  assert_equal "project package interface json def type hash matches canonical"
+    (Kernel.hash_string (json_string_field "typeCanonical" ask_export))
+    (json_string_field "typeHash" ask_export);
+  let public_box_export =
+    match
+      package_interface_exports
+      |> List.find_opt (fun item -> String.equal "PublicBox" (json_string_field "name" item))
+    with
+    | Some item -> item
+    | None -> fail "missing PublicBox interface export"
+  in
+  assert_equal "project package interface json type export kind" "type"
+    (json_string_field "kind" public_box_export);
+  assert_equal "project package interface json canonical type body" "(Record (value Nat))"
+    (json_string_field "typeCanonical" public_box_export);
+  assert_equal "project package interface json type hash matches canonical"
+    (Kernel.hash_string (json_string_field "typeCanonical" public_box_export))
+    (json_string_field "typeHash" public_box_export);
   assert_equal "project package interface json deterministic" package_interface_json
     (Workspace.package_interface_json manifest_a);
   assert_equal "project package audit" "Audit OK\n" (Workspace.audit manifest_a);

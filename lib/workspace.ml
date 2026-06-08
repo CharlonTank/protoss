@@ -796,10 +796,12 @@ let package_public_symbols manifest prepared =
 let package_interface_item checked symbol =
   match checked_def_by_name checked symbol with
   | Some d ->
+      let type_canonical = Kernel.type_to_canonical d.def.typ in
       lock_item "def"
         [
           lock_item "name" [ lock_string d.def.name ];
-          lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+          lock_item "type-canonical" [ lock_string type_canonical ];
+          lock_item "type-hash" [ Kernel.hash_string type_canonical ];
           lock_string_list "capability-scope" d.capabilities;
         ]
   | None -> (
@@ -809,11 +811,13 @@ let package_interface_item checked symbol =
           checked.Kernel.program.type_aliases
       with
       | Some alias ->
+          let type_canonical = Kernel.type_to_canonical alias.type_body in
           lock_item "type"
             [
               lock_item "name" [ lock_string alias.type_name ];
               lock_string_list "params" alias.type_params;
-              lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical alias.type_body) ];
+              lock_item "type-canonical" [ lock_string type_canonical ];
+              lock_item "type-hash" [ Kernel.hash_string type_canonical ];
             ]
       | None -> fail ("package public symbol is not a definition or type: " ^ symbol))
 
@@ -1132,8 +1136,18 @@ let assoc_value name pairs =
   |> Option.value ~default:"-"
 
 type package_interface_export =
-  | PackageDefExport of { export_name : string; export_type_hash : string; export_capabilities : string list }
-  | PackageTypeExport of { export_name : string; export_params : string list; export_type_hash : string }
+  | PackageDefExport of {
+      export_name : string;
+      export_type_canonical : string;
+      export_type_hash : string;
+      export_capabilities : string list;
+    }
+  | PackageTypeExport of {
+      export_name : string;
+      export_params : string list;
+      export_type_canonical : string;
+      export_type_hash : string;
+    }
 
 type package_interface = {
   interface_project : string;
@@ -1150,15 +1164,32 @@ type package_interface = {
 let package_interface_export_of_sexp = function
   | Sexp.List (Sexp.Atom "def" :: fields) ->
       let name = package_string_field "name" fields in
+      let type_canonical = package_string_field "type-canonical" fields in
       let type_hash = package_atom_field "type-hash" fields in
       let caps = package_string_list_field "capability-scope" fields in
+      if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
+        fail ("package interface type hash mismatch: " ^ name);
       PackageDefExport
-        { export_name = name; export_type_hash = type_hash; export_capabilities = caps }
+        {
+          export_name = name;
+          export_type_canonical = type_canonical;
+          export_type_hash = type_hash;
+          export_capabilities = caps;
+        }
   | Sexp.List (Sexp.Atom "type" :: fields) ->
       let name = package_string_field "name" fields in
       let params = package_string_list_field "params" fields in
+      let type_canonical = package_string_field "type-canonical" fields in
       let type_hash = package_atom_field "type-hash" fields in
-      PackageTypeExport { export_name = name; export_params = params; export_type_hash = type_hash }
+      if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
+        fail ("package interface type hash mismatch: " ^ name);
+      PackageTypeExport
+        {
+          export_name = name;
+          export_params = params;
+          export_type_canonical = type_canonical;
+          export_type_hash = type_hash;
+        }
   | item -> fail ("invalid package interface item: " ^ Sexp.to_string item)
 
 let read_package_interface manifest =
@@ -1190,13 +1221,15 @@ let read_package_interface manifest =
   }
 
 let package_interface_export_text = function
-  | PackageDefExport { export_name; export_type_hash; export_capabilities } ->
-      "export def " ^ export_name ^ " type_hash=" ^ export_type_hash ^ " capabilities="
+  | PackageDefExport
+      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
+      "export def " ^ export_name ^ " type=" ^ export_type_canonical ^ " type_hash="
+      ^ export_type_hash ^ " capabilities="
       ^ (match export_capabilities with [] -> "-" | _ -> String.concat "," export_capabilities)
-  | PackageTypeExport { export_name; export_params; export_type_hash } ->
+  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
       "export type " ^ export_name ^ " params="
       ^ (match export_params with [] -> "-" | _ -> String.concat "," export_params)
-      ^ " type_hash=" ^ export_type_hash
+      ^ " type=" ^ export_type_canonical ^ " type_hash=" ^ export_type_hash
 
 let package_json_string = Ast.quote
 
@@ -1207,21 +1240,24 @@ let package_json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
 let package_json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
 
 let package_interface_export_json = function
-  | PackageDefExport { export_name; export_type_hash; export_capabilities } ->
+  | PackageDefExport
+      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
       package_json_obj
         [
           package_json_field "kind" (package_json_string "def");
           package_json_field "name" (package_json_string export_name);
+          package_json_field "typeCanonical" (package_json_string export_type_canonical);
           package_json_field "typeHash" (package_json_string export_type_hash);
           package_json_field "capabilities"
             (package_json_array package_json_string export_capabilities);
         ]
-  | PackageTypeExport { export_name; export_params; export_type_hash } ->
+  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
       package_json_obj
         [
           package_json_field "kind" (package_json_string "type");
           package_json_field "name" (package_json_string export_name);
           package_json_field "params" (package_json_array package_json_string export_params);
+          package_json_field "typeCanonical" (package_json_string export_type_canonical);
           package_json_field "typeHash" (package_json_string export_type_hash);
         ]
 
