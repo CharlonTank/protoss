@@ -694,6 +694,17 @@ let () =
   let dep_checked = check "(def two Nat (succ 1))\n(def three Nat (succ two))" in
   let dep_graph_json = Canonical_ir.serialize_graph dep_checked in
   ignore (Canonical_ir.parse_graph dep_graph_json);
+  let dep_graph_edges = Canonical_ir.graph_dependencies dep_graph_json in
+  assert_equal "canonical graph dependency edge count" "1"
+    (string_of_int (List.length dep_graph_edges));
+  assert_true "canonical graph dependency describes def"
+    (contains_substring (Canonical_ir.describe_graph_dependencies dep_graph_edges) "def=three");
+  assert_true "canonical graph dependency describes dep"
+    (contains_substring (Canonical_ir.describe_graph_dependencies dep_graph_edges) "depends_on=two");
+  assert_equal "canonical graph dependency filtered edge count" "1"
+    (string_of_int (List.length (Canonical_ir.graph_dependencies_for dep_graph_json "three")));
+  assert_equal "canonical graph dependency leaf edge count" "0"
+    (string_of_int (List.length (Canonical_ir.graph_dependencies_for dep_graph_json "two")));
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -2398,6 +2409,13 @@ let () =
   let store_graph_roots = Workspace.store_graph_definitions build_a.store store_graph_hash in
   assert_true "project store graph roots include appMain"
     (contains_substring (Canonical_ir.describe_graph_definitions store_graph_roots) "name=appMain");
+  let store_graph_deps = Workspace.store_graph_dependencies_for build_a.store store_graph_hash "appMain" in
+  assert_true "project store graph deps include base"
+    (contains_substring (Canonical_ir.describe_graph_dependencies store_graph_deps)
+       "depends_on=base");
+  assert_true "project store graph deps include total"
+    (contains_substring (Canonical_ir.describe_graph_dependencies store_graph_deps)
+       "depends_on=total");
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;

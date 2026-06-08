@@ -622,17 +622,19 @@ let graph_definitions input =
   let graph = Json.parse input in
   json_array_field "defs" graph |> List.map graph_definition_of_json
 
-let graph_definition input id =
+let graph_definition_in defs id =
   match
     List.find_opt
       (fun def ->
         String.equal id def.graph_def_name
         || String.equal id def.graph_def_id
         || String.equal id def.graph_def_hash)
-      (graph_definitions input)
+      defs
   with
   | None -> fail ("canonical graph definition not found: " ^ id)
   | Some def -> def
+
+let graph_definition input id = graph_definition_in (graph_definitions input) id
 
 let describe_graph_definition def =
   "Graph def\nname=" ^ def.graph_def_name ^ "\ndef_id=" ^ def.graph_def_id
@@ -659,6 +661,59 @@ let describe_graph_definitions defs =
   "Graph roots\ncount=" ^ string_of_int (List.length defs) ^ "\n"
   ^ String.concat "\n" (List.map line defs)
   ^ (if defs = [] then "" else "\n")
+
+type graph_dependency = {
+  graph_dep_def_name : string;
+  graph_dep_def_id : string;
+  graph_dep_def_hash : string;
+  graph_dep_name : string;
+  graph_dep_id : string;
+  graph_dep_hash : string;
+}
+
+let graph_definition_by_name defs name =
+  match List.find_opt (fun def -> String.equal name def.graph_def_name) defs with
+  | Some def -> def
+  | None -> fail ("canonical graph dependency target not found: " ^ name)
+
+let graph_dependencies_for_def defs def =
+  def.graph_def_deps
+  |> List.map (fun dep_name ->
+         let dep = graph_definition_by_name defs dep_name in
+         {
+           graph_dep_def_name = def.graph_def_name;
+           graph_dep_def_id = def.graph_def_id;
+           graph_dep_def_hash = def.graph_def_hash;
+           graph_dep_name = dep.graph_def_name;
+           graph_dep_id = dep.graph_def_id;
+           graph_dep_hash = dep.graph_def_hash;
+         })
+
+let sort_graph_dependencies deps =
+  List.sort
+    (fun a b ->
+      match String.compare a.graph_dep_def_name b.graph_dep_def_name with
+      | 0 -> String.compare a.graph_dep_name b.graph_dep_name
+      | n -> n)
+    deps
+
+let graph_dependencies input =
+  let defs = graph_definitions input in
+  defs |> List.concat_map (graph_dependencies_for_def defs) |> sort_graph_dependencies
+
+let graph_dependencies_for input id =
+  let defs = graph_definitions input in
+  graph_definition_in defs id |> graph_dependencies_for_def defs |> sort_graph_dependencies
+
+let describe_graph_dependencies deps =
+  let line dep =
+    "def=" ^ dep.graph_dep_def_name ^ " def_id=" ^ dep.graph_dep_def_id ^ " def_hash="
+    ^ dep.graph_dep_def_hash ^ " depends_on=" ^ dep.graph_dep_name ^ " dep_id="
+    ^ dep.graph_dep_id ^ " dep_hash=" ^ dep.graph_dep_hash
+  in
+  "Graph deps\ncount=" ^ string_of_int (List.length deps) ^ "\n"
+  ^ String.concat "\n" (List.map line deps)
+  ^ (if deps = [] then "" else "\n")
 
 let parse_def = Kernel.parse_serialized_def
 
