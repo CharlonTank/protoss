@@ -145,6 +145,50 @@ and parse_branch = function
   | Sexp.List [ Sexp.Atom con; Sexp.Atom x; e ] -> BVariant (con, x, parse_expr e)
   | x -> fail ("invalid case branch: " ^ Sexp.to_string x)
 
+let defrec_error name =
+  fail
+    ("defrec " ^ name
+   ^ " must be structural Nat or List recursion: \
+      (defrec name (-> Nat R) (nat n) (zero z) (step acc body)) or \
+      (defrec name (-> (List A) R) (list xs) (nil z) (cons x acc body))")
+
+let parse_structural_defrec name typ clauses =
+  match (typ, clauses) with
+  | ( TFun (TNat, result_ty),
+      [
+        Sexp.List [ Sexp.Atom "nat"; Sexp.Atom param ];
+        Sexp.List [ Sexp.Atom "zero"; zero ];
+        Sexp.List [ Sexp.Atom "step"; Sexp.Atom acc; step ];
+      ] ) ->
+      {
+        name;
+        typ;
+        body =
+          ELambda
+            ( param,
+              TNat,
+              EFoldNat (EName param, parse_expr zero, ELambda (acc, result_ty, parse_expr step)) );
+      }
+  | ( TFun (TList item_ty, result_ty),
+      [
+        Sexp.List [ Sexp.Atom "list"; Sexp.Atom param ];
+        Sexp.List [ Sexp.Atom "nil"; nil ];
+        Sexp.List [ Sexp.Atom "cons"; Sexp.Atom item; Sexp.Atom acc; step ];
+      ] ) ->
+      {
+        name;
+        typ;
+        body =
+          ELambda
+            ( param,
+              TList item_ty,
+              EFoldList
+                ( EName param,
+                  parse_expr nil,
+                  ELambda (item, item_ty, ELambda (acc, result_ty, parse_expr step)) ) );
+      }
+  | _ -> defrec_error name
+
 let has_dot s = String.contains s '.'
 
 let qualify module_name name =
@@ -318,8 +362,9 @@ let parse_toplevel = function
         }
   | Sexp.List [ Sexp.Atom "def"; Sexp.Atom n; ty; body ] ->
       `Def { name = n; typ = parse_type ty; body = parse_expr body }
-  | Sexp.List (Sexp.Atom "defrec" :: _) ->
-      fail "defrec is not supported: general recursion is rejected"
+  | Sexp.List (Sexp.Atom "defrec" :: Sexp.Atom n :: ty :: clauses) ->
+      `Def (parse_structural_defrec n (parse_type ty) clauses)
+  | Sexp.List (Sexp.Atom "defrec" :: _) -> fail "invalid defrec form"
   | x -> fail ("invalid top-level form: " ^ Sexp.to_string x)
 
 let parse_string input =

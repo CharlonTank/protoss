@@ -216,6 +216,47 @@ let () =
   let v, _ = Runtime.normalize_def norm "two" in
   assert_equal "normalization" "2" (Runtime.value_to_string v);
 
+  let defrec_nat =
+    check
+      "(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))\n\
+       (def four Nat (count 4))"
+  in
+  let defrec_nat_explicit =
+    check
+      "(def count (-> Nat Nat) \
+       (lambda (n Nat) (foldNat n 0 (lambda (acc Nat) (succ acc)))))\n\
+       (def four Nat (count 4))"
+  in
+  assert_equal "defrec Nat desugars to foldNat" (Kernel.hash_program defrec_nat_explicit)
+    (Kernel.hash_program defrec_nat);
+  let four, _ = Runtime.normalize_def defrec_nat "four" in
+  assert_equal "defrec Nat normalization" "4" (Runtime.value_to_string four);
+
+  let defrec_list =
+    check
+      "(defrec bump (-> (List Nat) (List Nat)) \
+       (list xs) (nil (Nil Nat)) (cons x acc (Cons Nat (succ x) acc)))\n\
+       (def input (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
+       (def out (List Nat) (bump input))"
+  in
+  let defrec_list_explicit =
+    check
+      "(def bump (-> (List Nat) (List Nat)) \
+       (lambda (xs (List Nat)) \
+       (foldList xs (Nil Nat) \
+       (lambda (x Nat) (lambda (acc (List Nat)) (Cons Nat (succ x) acc))))))\n\
+       (def input (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
+       (def out (List Nat) (bump input))"
+  in
+  assert_equal "defrec List desugars to foldList" (Kernel.hash_program defrec_list_explicit)
+    (Kernel.hash_program defrec_list);
+  let bumped, _ = Runtime.normalize_def defrec_list "out" in
+  assert_equal "defrec List normalization" "[2, 3]" (Runtime.value_to_string bumped);
+  expect_parse_error "(defrec bad Nat (nat n) (zero 0) (step acc acc))";
+  expect_parse_error "(defrec bad (-> Nat Nat) (zero 0) (step acc acc))";
+  expect_check_error
+    "(defrec bad (-> Nat Nat) (nat n) (zero 0) (step acc (bad acc)))";
+
   let image_view =
     check
       "(def hero (View (Variant (Open Unit))) \

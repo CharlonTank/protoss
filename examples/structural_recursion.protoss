@@ -1,0 +1,18 @@
+(defrec count (-> Nat Nat)
+  (nat n)
+  (zero 0)
+  (step acc (succ acc)))
+
+(def four Nat
+  (count 4))
+
+(defrec bump (-> (List Nat) (List Nat))
+  (list xs)
+  (nil (Nil Nat))
+  (cons x acc (Cons Nat (succ x) acc)))
+
+(def input (List Nat)
+  (Cons Nat 1 (Cons Nat 2 (Nil Nat))))
+
+(def output (List Nat)
+  (bump input))
