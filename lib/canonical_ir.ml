@@ -831,6 +831,24 @@ let describe_graph_capability_scopes scopes =
   ^ String.concat "\n" (List.map line scopes)
   ^ (if scopes = [] then "" else "\n")
 
+let host_codec_version = "protoss-host-json-codec-v1"
+
+let host_codec_ref typ =
+  Kernel.hash_string
+    ("protoss-host-codec-v1\nformat=" ^ host_codec_version ^ "\ntype="
+   ^ Kernel.type_to_canonical typ ^ "\n")
+
+let graph_host_codec_to_json typ =
+  let type_canonical = Kernel.type_to_canonical typ in
+  Kernel.json_obj
+    [
+      Kernel.json_field "format" (Kernel.json_string host_codec_version);
+      Kernel.json_field "typeHash" (Kernel.json_string (Kernel.hash_string type_canonical));
+      Kernel.json_field "codecRef" (Kernel.json_string (host_codec_ref typ));
+      Kernel.json_field "typeCanonical" (Kernel.json_string type_canonical);
+      Kernel.json_field "type" (Kernel.type_to_graph_json typ);
+    ]
+
 let graph_capability_request_to_contract_json req =
   Kernel.json_obj
     [
@@ -839,9 +857,13 @@ let graph_capability_request_to_contract_json req =
       Kernel.json_field "payloadType" (Kernel.type_to_graph_json req.graph_cap_req_payload_type);
       Kernel.json_field "payloadTypeCanonical"
         (Kernel.json_string (Kernel.type_to_canonical req.graph_cap_req_payload_type));
+      Kernel.json_field "requestCodec"
+        (graph_host_codec_to_json req.graph_cap_req_payload_type);
       Kernel.json_field "responseType" (Kernel.type_to_graph_json req.graph_cap_req_response_type);
       Kernel.json_field "responseTypeCanonical"
         (Kernel.json_string (Kernel.type_to_canonical req.graph_cap_req_response_type));
+      Kernel.json_field "responseCodec"
+        (graph_host_codec_to_json req.graph_cap_req_response_type);
     ]
 
 let graph_capability_to_contract_json cap =
@@ -875,6 +897,7 @@ let graph_host_contract input =
       Kernel.json_field "programHash" (Kernel.json_string (json_string_field "programHash" graph));
       Kernel.json_field "hashAlgorithm" (Kernel.json_string Kernel.hash_algorithm);
       Kernel.json_field "hashPrefix" (Kernel.json_string Kernel.hash_prefix);
+      Kernel.json_field "hostCodecVersion" (Kernel.json_string host_codec_version);
       Kernel.json_field "capabilities"
         (Kernel.json_array graph_capability_to_contract_json capabilities);
       Kernel.json_field "capabilityScopes"

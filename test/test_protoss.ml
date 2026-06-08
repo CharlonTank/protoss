@@ -1505,6 +1505,8 @@ let () =
   let process_host_contract = Json.parse process_host_contract_json in
   assert_equal "process host contract format" "protoss-host-contract-v1"
     (json_string_field "format" process_host_contract);
+  assert_equal "process host contract codec version" Canonical_ir.host_codec_version
+    (json_string_field "hostCodecVersion" process_host_contract);
   assert_equal "process host contract graph hash" (json_string_field "graphHash" process_graph)
     (json_string_field "graphHash" process_host_contract);
   assert_true "process host contract hash"
@@ -1525,8 +1527,33 @@ let () =
     (json_string_field "requestSignatureRef" process_host_request);
   assert_equal "process host contract payload type" "(Record (prompt String))"
     (json_string_field "payloadTypeCanonical" process_host_request);
+  let process_host_request_codec = json_field "requestCodec" process_host_request in
+  let process_payload_type = Ast.TRecord [ ("prompt", Ast.TString) ] in
+  let process_payload_type_canonical = Kernel.type_to_canonical process_payload_type in
+  assert_equal "process host contract request codec format" Canonical_ir.host_codec_version
+    (json_string_field "format" process_host_request_codec);
+  assert_equal "process host contract request codec type" process_payload_type_canonical
+    (json_string_field "typeCanonical" process_host_request_codec);
+  assert_equal "process host contract request codec type hash"
+    (Kernel.hash_string process_payload_type_canonical)
+    (json_string_field "typeHash" process_host_request_codec);
+  assert_equal "process host contract request codec ref"
+    (Canonical_ir.host_codec_ref process_payload_type)
+    (json_string_field "codecRef" process_host_request_codec);
   assert_equal "process host contract response type" "String"
     (json_string_field "responseTypeCanonical" process_host_request);
+  let process_host_response_codec = json_field "responseCodec" process_host_request in
+  let process_response_type_canonical = Kernel.type_to_canonical Ast.TString in
+  assert_equal "process host contract response codec format" Canonical_ir.host_codec_version
+    (json_string_field "format" process_host_response_codec);
+  assert_equal "process host contract response codec type" process_response_type_canonical
+    (json_string_field "typeCanonical" process_host_response_codec);
+  assert_equal "process host contract response codec type hash"
+    (Kernel.hash_string process_response_type_canonical)
+    (json_string_field "typeHash" process_host_response_codec);
+  assert_equal "process host contract response codec ref"
+    (Canonical_ir.host_codec_ref Ast.TString)
+    (json_string_field "codecRef" process_host_response_codec);
   let process_host_scopes = json_array_field "capabilityScopes" process_host_contract in
   assert_equal "process host contract scope count" "1"
     (string_of_int (List.length process_host_scopes));
@@ -1542,6 +1569,16 @@ let () =
      fail "drifted host contract should be rejected"
    with Kernel.Error msg ->
      assert_true "drifted host contract mismatch"
+       (contains_substring msg "host contract mismatch"));
+  (try
+     ignore
+       (Canonical_ir.check_graph_host_contract process_graph_json
+          (replace_once process_host_contract_json
+             (Canonical_ir.host_codec_ref process_payload_type)
+             "p2:bad-codec"));
+     fail "drifted host contract codec should be rejected"
+   with Kernel.Error msg ->
+     assert_true "drifted host contract codec mismatch"
        (contains_substring msg "host contract mismatch"));
   assert_equal "process graph capability refs" human_capability_ref
     (String.concat "," (json_string_array_field "capabilityRefs" process_graph));
