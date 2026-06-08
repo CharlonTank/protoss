@@ -435,6 +435,20 @@ let () =
    with Kernel.Error msg ->
      assert_true "canonical graph rejects top-level termRef mismatch"
        (contains_substring msg "canonical graph termRef mismatch: main"));
+  (try
+     ignore (Canonical_ir.parse_graph (replace_once graph_json "\"deps\": []" "\"depsMissing\": []"));
+     fail "canonical graph missing deps should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing deps"
+       (contains_substring msg "canonical graph missing field: deps"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json "\"deps\": []" "\"deps\": [\"main\"]"));
+     fail "canonical graph extra deps should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects extra deps"
+       (contains_substring msg "canonical graph deps mismatch: main"));
   assert_true "canonical node graph def refs"
     (match node_defs with
     | def :: _ ->
@@ -587,14 +601,47 @@ let () =
   assert_true "canonical graph omits bound names"
     (not (contains_substring (Canonical_ir.serialize_graph alpha_a) "\"x\"")
     && not (contains_substring (Canonical_ir.serialize_graph alpha_b) "\"y\""));
+  let dep_checked = check "(def two Nat (succ 1))\n(def three Nat (succ two))" in
+  let dep_graph_json = Canonical_ir.serialize_graph dep_checked in
+  ignore (Canonical_ir.parse_graph dep_graph_json);
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once dep_graph_json "\"deps\": [\"two\"]" "\"deps\": []"));
+     fail "canonical graph missing dependency should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing dependency"
+       (contains_substring msg "canonical graph deps mismatch: three"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once dep_graph_json "\"deps\": [\"two\"]" "\"deps\": [\"missing\"]"));
+     fail "canonical graph unknown dependency should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects unknown dependency"
+       (contains_substring msg "canonical graph deps unknown definition in three: missing"));
+  let multi_dep_graph_json =
+    check
+      "(def a Nat 1)\n\
+       (def b Nat 2)\n\
+       (def c Nat (foldNat a b (lambda (x Nat) x)))"
+    |> Canonical_ir.serialize_graph
+  in
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once multi_dep_graph_json "\"deps\": [\"a\", \"b\"]"
+             "\"deps\": [\"b\", \"a\"]"));
+     fail "canonical graph unsorted deps should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects unsorted deps"
+       (contains_substring msg "canonical graph deps not canonical: c"));
   let dep_canon =
-    check "(def two Nat (succ 1))\n(def three Nat (succ two))"
-    |> fun checked ->
-    Kernel.serialize_program checked.program.capabilities
+    Kernel.serialize_program dep_checked.program.capabilities
       (List.map
          (fun (d : Kernel.checked_def) ->
            { Kernel.cname = d.def.name; cdef_id = d.def_id; ctyp = d.def.typ; cbody = d.cterm })
-         checked.defs)
+         dep_checked.defs)
   in
   assert_true "canonical refs use DefId"
     (String.contains dep_canon 'r' && String.contains dep_canon ':');

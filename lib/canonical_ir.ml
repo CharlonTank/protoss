@@ -254,6 +254,38 @@ let def_of_graph_json obj =
     fail ("canonical graph def hash mismatch: " ^ name);
   { Kernel.cname = name; cdef_id = def_id; ctyp = typ; cbody = body }
 
+let validate_definition_deps def_objs defs =
+  let name_to_def_id = Hashtbl.create 32 in
+  let def_ids = Hashtbl.create 32 in
+  List.iter
+    (fun (d : Kernel.canonical_def) ->
+      Hashtbl.add name_to_def_id d.cname d.cdef_id;
+      Hashtbl.replace def_ids d.cdef_id ())
+    defs;
+  List.iter2
+    (fun obj (d : Kernel.canonical_def) ->
+      let declared = json_string_array_field "deps" obj in
+      let canonical_declared = List.sort_uniq String.compare declared in
+      if declared <> canonical_declared then
+        fail ("canonical graph deps not canonical: " ^ d.cname);
+      let declared_refs =
+        declared
+        |> List.map (fun dep ->
+               match Hashtbl.find_opt name_to_def_id dep with
+               | Some def_id -> def_id
+               | None -> fail ("canonical graph deps unknown definition in " ^ d.cname ^ ": " ^ dep))
+        |> List.sort_uniq String.compare
+      in
+      let actual_refs =
+        Kernel.cterm_global_refs d.cbody
+        |> List.map (fun ref ->
+               if Hashtbl.mem def_ids ref then ref
+               else fail ("canonical graph deps reference missing definition in " ^ d.cname ^ ": " ^ ref))
+        |> List.sort_uniq String.compare
+      in
+      if declared_refs <> actual_refs then fail ("canonical graph deps mismatch: " ^ d.cname))
+    def_objs defs
+
 let validate_capability_scopes caps def_objs defs =
   let declared_program_cap cap =
     List.exists (String.equal cap) caps
@@ -417,6 +449,7 @@ let parse_graph input =
   let def_objs = json_array_field "defs" graph in
   let defs = List.map def_of_graph_json def_objs in
   ensure_unique "definition" (List.map (fun d -> d.Kernel.cname) defs);
+  validate_definition_deps def_objs defs;
   validate_capability_scopes caps def_objs defs;
   let canonical = Kernel.serialize_program caps defs in
   let program_hash = json_string_field "programHash" graph in
