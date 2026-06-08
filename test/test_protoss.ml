@@ -159,6 +159,33 @@ let () =
   in
   assert_equal "deep alpha hash" (Kernel.hash_program deep_a) (Kernel.hash_program deep_b);
 
+  let inferred_lambda = check "(def main (-> Nat Nat) (lambda x (succ x)))" in
+  let annotated_lambda = check "(def main (-> Nat Nat) (lambda (x Nat) (succ x)))" in
+  assert_equal "inferred lambda canonical hash" (Kernel.hash_program annotated_lambda)
+    (Kernel.hash_program inferred_lambda);
+  let inferred_lambda_parens = check "(def main (-> Nat Nat) (lambda (x) (succ x)))" in
+  assert_equal "parenthesized inferred lambda canonical hash" (Kernel.hash_program annotated_lambda)
+    (Kernel.hash_program inferred_lambda_parens);
+  let inferred_fold =
+    check "(def two Nat (foldNat 2 0 (lambda acc (succ acc))))"
+  in
+  let inferred_fold_value, _ = Runtime.normalize_def inferred_fold "two" in
+  assert_equal "inferred foldNat lambda normalizes" "2"
+    (Runtime.value_to_string inferred_fold_value);
+  let inferred_foldlist =
+    check
+      "(def xs (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
+       (def total Nat \
+       (foldList xs 0 (lambda x (lambda acc (succ acc)))))"
+  in
+  let inferred_foldlist_value, _ = Runtime.normalize_def inferred_foldlist "total" in
+  assert_equal "inferred nested foldList lambdas normalize" "2"
+    (Runtime.value_to_string inferred_foldlist_value);
+  expect_check_error
+    "(def xs (List Nat) (Cons Nat 1 (Nil Nat)))\n\
+     (def bad Nat (foldList xs 0 (lambda x (lambda acc ((prim.String.eq \"a\") \"a\")))))";
+  expect_check_error "(def bad Nat (lambda x x))";
+
   let formatted_a = check "(def main Nat (succ 1))" in
   let formatted_b = check "  ; formatting is not canonical\n\n(def   main   Nat\n  (succ   1))" in
   assert_equal "formatting independent hash" (Kernel.hash_program formatted_a)
@@ -746,6 +773,14 @@ let () =
        (def askName (Process String) \
        (bind (Human.ask \"Name?\") (lambda (x String) (done x))))"
   in
+  let process_resume_inferred =
+    check
+      "(capabilities Human.ask)\n\
+       (def askName (Process String) \
+       (bind (Human.ask \"Name?\") (lambda x (done x))))"
+  in
+  assert_equal "inferred bind canonical hash" (Kernel.hash_program process_resume)
+    (Kernel.hash_program process_resume_inferred);
   let suspended =
     match fst (Runtime.eval_entry process_resume "askName") with
     | Runtime.VProcessRequest s -> s
@@ -755,6 +790,17 @@ let () =
   let parsed = Runtime.parse_suspended serialized in
   let resumed = Runtime.resume process_resume parsed (Runtime.response_value parsed.req "Ada") in
   assert_equal "process resume" "Done \"Ada\"" (Runtime.value_to_string resumed);
+  let inferred_suspended =
+    match fst (Runtime.eval_entry process_resume_inferred "askName") with
+    | Runtime.VProcessRequest s -> Runtime.parse_suspended (Runtime.serialize_suspended s)
+    | _ -> fail "expected inferred suspended process"
+  in
+  let inferred_resumed =
+    Runtime.resume process_resume_inferred inferred_suspended
+      (Runtime.response_value inferred_suspended.Runtime.req "Ada")
+  in
+  assert_equal "inferred bind process resume" "Done \"Ada\""
+    (Runtime.value_to_string inferred_resumed);
   (try
      ignore (Runtime.response_value parsed.req "Nat:1");
      fail "wrong typed response should be rejected"
@@ -779,6 +825,18 @@ let () =
   in
   let _ = Patch.apply store patch_ok in
   assert_true "valid patch writes object" (count_objects store > 0);
+  let inferred_lambda_patch_store = temp_dir "patch-inferred-lambda" in
+  let inferred_lambda_patch =
+    patch_file "protoss-inferred-lambda-patch.json"
+      "{ \"op\":\"AddDef\", \"name\":\"inc\", \"deps\":[], \
+       \"type\":{\"source\":\"(-> Nat Nat)\"}, \
+       \"expr\":{\"source\":\"(lambda x (succ x))\"} }"
+  in
+  ignore (Patch.apply inferred_lambda_patch_store inferred_lambda_patch);
+  let inferred_patch_checked = Store.load_program inferred_lambda_patch_store |> Kernel.check_program in
+  let inferred_patch_value, _ = Runtime.eval_entry inferred_patch_checked "inc" in
+  let inferred_patch_applied = Runtime.apply inferred_patch_checked inferred_patch_value (Runtime.VNat 1) in
+  assert_equal "patch inferred lambda applies" "2" (Runtime.value_to_string inferred_patch_applied);
   let before = count_objects store in
   let ledger = temp_dir "patch-ledger" in
   let _ =

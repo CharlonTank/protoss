@@ -144,6 +144,7 @@ let rec type_refs = function
 let rec expr_type_refs = function
   | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ -> []
   | ELambda (_, t, body) -> type_refs t @ expr_type_refs body
+  | ELambdaInfer (_, body) -> expr_type_refs body
   | EApp (f, x) -> expr_type_refs f @ expr_type_refs x
   | ELet (_, e, body) -> expr_type_refs e @ expr_type_refs body
   | ERecord fields -> List.concat_map (fun (_, e) -> expr_type_refs e) fields
@@ -165,6 +166,7 @@ let rec expr_type_refs = function
   | EWhenView (src, alt) ->
       expr_type_refs src @ expr_type_refs alt
   | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
+  | EBindInfer (p, _, body) -> expr_type_refs p @ expr_type_refs body
 
 and branch_type_refs = function
   | BBool (_, e) -> expr_type_refs e

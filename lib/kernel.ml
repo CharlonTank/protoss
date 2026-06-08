@@ -306,6 +306,7 @@ let rec expand_expr_types recursive_names aliases vars = function
   | EName n -> EName n
   | ELambda (x, t, body) ->
       ELambda (x, expand_type recursive_names aliases vars [] t, expand_expr_types recursive_names aliases vars body)
+  | ELambdaInfer (x, body) -> ELambdaInfer (x, expand_expr_types recursive_names aliases vars body)
   | EApp (f, x) -> EApp (expand_expr_types recursive_names aliases vars f, expand_expr_types recursive_names aliases vars x)
   | ELet (x, e, body) ->
       ELet (x, expand_expr_types recursive_names aliases vars e, expand_expr_types recursive_names aliases vars body)
@@ -363,6 +364,11 @@ let rec expand_expr_types recursive_names aliases vars = function
           x,
           expand_type recursive_names aliases vars [] t,
           expand_expr_types recursive_names aliases vars body )
+  | EBindInfer (p, x, body) ->
+      EBindInfer
+        ( expand_expr_types recursive_names aliases vars p,
+          x,
+          expand_expr_types recursive_names aliases vars body )
 
 and expand_branch_types recursive_names aliases vars = function
   | BBool (b, e) -> BBool (b, expand_expr_types recursive_names aliases vars e)
@@ -406,7 +412,7 @@ let collect_deps defs =
         if List.exists (String.equal n) bound || is_builtin n then acc
         else if is_global n && not (List.exists (String.equal n) acc) then n :: acc
         else acc
-    | ELambda (x, _, body) -> expr (x :: bound) acc body
+    | ELambda (x, _, body) | ELambdaInfer (x, body) -> expr (x :: bound) acc body
     | EApp (f, x) -> expr bound (expr bound acc f) x
     | ELet (x, e, body) -> expr (x :: bound) (expr bound acc e) body
     | ERecord fields -> List.fold_left (fun a (_, e) -> expr bound a e) acc fields
@@ -435,7 +441,8 @@ let collect_deps defs =
     | EListView (label, msg) | EWhenView (label, msg) ->
         expr bound (expr bound acc label) msg
     | EDone e -> expr bound acc e
-    | EBind (p, x, _, body) -> expr (x :: bound) (expr bound acc p) body
+    | EBind (p, x, _, body) | EBindInfer (p, x, body) ->
+        expr (x :: bound) (expr bound acc p) body
   in
   List.map (fun d -> (d.name, expr [] [] d.body)) defs
 
@@ -679,6 +686,7 @@ let rec infer ctx = function
       | None -> fail ("unknown name: " ^ n ^ "." ^ suggestion ctx n))
   | ELambda (x, t, body) ->
       TFun (t, infer (bind_lambda ctx x t) body)
+  | ELambdaInfer _ -> fail "unannotated lambda requires an expected function type"
   | EApp (f, arg) -> (
       match infer ctx f with
       | TFun (a, b) ->
@@ -831,6 +839,14 @@ let rec infer ctx = function
           | TProcess _ -> body_ty
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
+  | EBindInfer (p, x, body) -> (
+      match infer ctx p with
+      | TProcess a ->
+          let body_ty = infer (bind_local ctx x a) body in
+          (match body_ty with
+          | TProcess _ -> body_ty
+          | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
+      | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
 and infer_bool_case ctx branches =
   let true_branch = ref None and false_branch = ref None in
@@ -885,6 +901,7 @@ let rec infer_elab ctx expr =
   | ELambda (x, t, body) ->
       let body_ty, body = infer_elab (bind_lambda ctx x t) body in
       (TFun (t, body_ty), ELambda (x, t, body))
+  | ELambdaInfer _ -> fail "unannotated lambda requires an expected function type"
   | EApp (f, arg) -> (
       let fn_ty, f = infer_elab ctx f in
       match fn_ty with
@@ -1042,6 +1059,15 @@ let rec infer_elab ctx expr =
           | TProcess _ -> (body_ty, EBind (p, x, annotation, body))
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
+  | EBindInfer (p, x, body) ->
+      let p_ty, p = infer_elab ctx p in
+      (match p_ty with
+      | TProcess a ->
+          let body_ty, body = infer_elab (bind_local ctx x a) body in
+          (match body_ty with
+          | TProcess _ -> (body_ty, EBind (p, x, a, body))
+          | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
+      | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
 and check_elab ctx expected expr =
   match (unfold_type ctx expected, expr) with
@@ -1056,6 +1082,9 @@ and check_elab ctx expected expr =
       require_type expected_arg actual_arg "lambda parameter";
       let _, body = check_elab (bind_lambda ctx x actual_arg) expected_body body in
       (expected, ELambda (x, actual_arg, body))
+  | TFun (expected_arg, expected_body), ELambdaInfer (x, body) ->
+      let _, body = check_elab (bind_lambda ctx x expected_arg) expected_body body in
+      (expected, ELambda (x, expected_arg, body))
   | TRecord expected_fields, ERecord fields ->
       let field_names = List.map fst fields in
       List.iter
@@ -1105,6 +1134,21 @@ and check_elab ctx expected expr =
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ expected ^ ", expression " ^ string_of_expr body);
       (expected, ELet (x, e, body))
+  | TProcess _, EBind (p, x, annotation, body) ->
+      let p_ty, p = infer_elab ctx p in
+      (match p_ty with
+      | TProcess a ->
+          require_type a annotation "bind annotation";
+          let _, body = check_elab (bind_local ctx x a) expected body in
+          (expected, EBind (p, x, annotation, body))
+      | t -> fail ("bind on non-process: " ^ string_of_typ t))
+  | TProcess _, EBindInfer (p, x, body) ->
+      let p_ty, p = infer_elab ctx p in
+      (match p_ty with
+      | TProcess a ->
+          let _, body = check_elab (bind_local ctx x a) expected body in
+          (expected, EBind (p, x, a, body))
+      | t -> fail ("bind on non-process: " ^ string_of_typ t))
   | _, ECase (scrut, branches) ->
       let scrut_ty, scrut = infer_elab ctx scrut in
       let branches =
@@ -1244,6 +1288,7 @@ let rec canonical_expr env = function
   | EName n -> (
       match index_of n env 0 with Some i -> CVar i | None -> CGlobal n)
   | ELambda (x, t, body) -> CLambda (t, canonical_expr (x :: env) body)
+  | ELambdaInfer _ -> fail "unelaborated unannotated lambda in canonicalization"
   | EApp (f, x) -> CApp (canonical_expr env f, canonical_expr env x)
   | ELet (x, e, body) -> CLet (canonical_expr env e, canonical_expr (x :: env) body)
   | ERecord fields ->
@@ -1276,6 +1321,7 @@ let rec canonical_expr env = function
   | EDone e -> CDone (canonical_expr env e)
   | ERequest req -> CRequest req
   | EBind (p, x, t, body) -> CBind (canonical_expr env p, t, canonical_expr (x :: env) body)
+  | EBindInfer _ -> fail "unelaborated unannotated bind in canonicalization"
 
 and canonical_branches env branches =
   let cbs =

@@ -61,6 +61,11 @@ let parse_binding = function
   | Sexp.List [ Sexp.Atom x; ty ] -> (x, parse_type ty)
   | x -> fail ("invalid binding: " ^ Sexp.to_string x)
 
+let parse_lambda_binding = function
+  | Sexp.List [ Sexp.Atom x; ty ] -> `Annotated (x, parse_type ty)
+  | Sexp.List [ Sexp.Atom x ] | Sexp.Atom x -> `Inferred x
+  | x -> fail ("invalid lambda binding: " ^ Sexp.to_string x)
+
 let parse_named_type_params = function
   | Sexp.List (Sexp.Atom "params" :: params) :: rest -> (List.map atom params, rest)
   | rest -> ([], rest)
@@ -84,8 +89,9 @@ let rec parse_expr = function
       match int_atom s with Some n when n >= 0 -> ENat n | _ -> EName s)
   | Sexp.Str s -> EString s
   | Sexp.List [ Sexp.Atom "lambda"; binding; body ] ->
-      let x, ty = parse_binding binding in
-      ELambda (x, ty, parse_expr body)
+      (match parse_lambda_binding binding with
+      | `Annotated (x, ty) -> ELambda (x, ty, parse_expr body)
+      | `Inferred x -> ELambdaInfer (x, parse_expr body))
   | Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom x; e ]; body ] ->
       ELet (x, parse_expr e, parse_expr body)
   | Sexp.List (Sexp.Atom "record" :: fields) ->
@@ -147,8 +153,9 @@ let rec parse_expr = function
       ERequest (ServerRequest (route, payload))
   | Sexp.List [ Sexp.Atom "bind"; p; Sexp.List [ Sexp.Atom "lambda"; binding; body ] ]
     ->
-      let x, ty = parse_binding binding in
-      EBind (parse_expr p, x, ty, parse_expr body)
+      (match parse_lambda_binding binding with
+      | `Annotated (x, ty) -> EBind (parse_expr p, x, ty, parse_expr body)
+      | `Inferred x -> EBindInfer (parse_expr p, x, parse_expr body))
   | Sexp.List [] -> fail "empty expression list"
   | Sexp.List (f :: args) ->
       List.fold_left (fun acc arg -> EApp (acc, parse_expr arg)) (parse_expr f) args
@@ -252,6 +259,8 @@ let rec qualify_expr local_defs local_types type_params bound = function
         ( x,
           qualify_type local_types type_params t,
           qualify_expr local_defs local_types type_params (x :: bound) body )
+  | ELambdaInfer (x, body) ->
+      ELambdaInfer (x, qualify_expr local_defs local_types type_params (x :: bound) body)
   | EApp (f, x) ->
       EApp
         ( qualify_expr local_defs local_types type_params bound f,
@@ -338,6 +347,11 @@ let rec qualify_expr local_defs local_types type_params bound = function
         ( qualify_expr local_defs local_types type_params bound p,
           x,
           qualify_type local_types type_params t,
+          qualify_expr local_defs local_types type_params (x :: bound) body )
+  | EBindInfer (p, x, body) ->
+      EBindInfer
+        ( qualify_expr local_defs local_types type_params bound p,
+          x,
           qualify_expr local_defs local_types type_params (x :: bound) body )
 
 and qualify_branch local_defs local_types type_params bound = function

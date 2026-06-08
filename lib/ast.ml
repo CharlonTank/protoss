@@ -28,6 +28,7 @@ type expr =
   | EString of string
   | EName of string
   | ELambda of string * typ * expr
+  | ELambdaInfer of string * expr
   | EApp of expr * expr
   | ELet of string * expr * expr
   | ERecord of (string * expr) list
@@ -53,6 +54,7 @@ type expr =
   | EDone of expr
   | ERequest of req
   | EBind of expr * string * typ * expr
+  | EBindInfer of expr * string * expr
 
 and branch =
   | BBool of bool * expr
@@ -175,6 +177,8 @@ let rec string_of_expr_with_params params = function
   | ELambda (x, t, body) ->
       "(lambda (" ^ x ^ " " ^ string_of_typ_with_params params t ^ ") "
       ^ string_of_expr_with_params params body ^ ")"
+  | ELambdaInfer (x, body) ->
+      "(lambda " ^ x ^ " " ^ string_of_expr_with_params params body ^ ")"
   | EApp (f, x) ->
       "(" ^ string_of_expr_with_params params f ^ " " ^ string_of_expr_with_params params x ^ ")"
   | ELet (x, e, body) ->
@@ -243,6 +247,9 @@ let rec string_of_expr_with_params params = function
   | EBind (p, x, t, body) ->
       "(bind " ^ string_of_expr_with_params params p ^ " (lambda (" ^ x ^ " "
       ^ string_of_typ_with_params params t ^ ") " ^ string_of_expr_with_params params body ^ "))"
+  | EBindInfer (p, x, body) ->
+      "(bind " ^ string_of_expr_with_params params p ^ " (lambda " ^ x ^ " "
+      ^ string_of_expr_with_params params body ^ "))"
 
 and string_of_branch_with_params params = function
   | BBool (true, e) -> "(true " ^ string_of_expr_with_params params e ^ ")"

@@ -1,0 +1,4 @@
+(capabilities Human.ask)
+(def inc (-> Nat Nat) (lambda x (succ x)))
+(def two Nat (foldNat 2 0 (lambda acc (succ acc))))
+(def askName (Process String) (bind (Human.ask "Name?") (lambda answer (done answer))))
