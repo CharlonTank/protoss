@@ -1029,6 +1029,51 @@ let () =
   in
   assert_equal "match Variant hashes as case" (Kernel.hash_program maybe_unit_branch_shorthand)
     (Kernel.hash_program maybe_match);
+  let variant_record_payload_match =
+    check
+      "(variant LeadEvent (Lead (Record (name String) (status String))))\n\
+       (def event LeadEvent (variant Lead (record (name \"Ada\") (status \"open\"))))\n\
+       (def out String (match event (Lead (record name (status s)) s)))"
+  in
+  let variant_record_payload_explicit =
+    check
+      "(variant LeadEvent (Lead (Record (name String) (status String))))\n\
+       (def event LeadEvent (variant Lead (record (name \"Ada\") (status \"open\"))))\n\
+       (def out String (case event (Lead payload (letRecord payload (name (status s)) s))))"
+  in
+  assert_equal "match Variant record payload hashes as case plus letRecord"
+    (Kernel.hash_program variant_record_payload_explicit)
+    (Kernel.hash_program variant_record_payload_match);
+  let record_payload_out, _ = Runtime.normalize_def variant_record_payload_match "out" in
+  assert_equal "match Variant record payload normalizes" "\"open\""
+    (Runtime.value_to_string record_payload_out);
+  assert_true "match Variant record payload has no canonical match node"
+    (not
+       (contains_substring
+          (Kernel.serialize_checked_program variant_record_payload_match)
+          "match"));
+  let variant_tuple_payload_match =
+    check
+      "(variant PairMsg (Pair (Tuple Nat String)))\n\
+       (def msg PairMsg (variant Pair (tuple 7 \"score\")))\n\
+       (def out Nat (match msg (Pair (tuple n label) n)))"
+  in
+  let variant_tuple_payload_explicit =
+    check
+      "(variant PairMsg (Pair (Record (_1 Nat) (_2 String))))\n\
+       (def msg PairMsg (variant Pair (record (_1 7) (_2 \"score\"))))\n\
+       (def out Nat (case msg (Pair payload (letRecord payload ((_1 n) (_2 label)) n))))"
+  in
+  assert_equal "match Variant tuple payload hashes as canonical record payload"
+    (Kernel.hash_program variant_tuple_payload_explicit)
+    (Kernel.hash_program variant_tuple_payload_match);
+  let tuple_payload_out, _ = Runtime.normalize_def variant_tuple_payload_match "out" in
+  assert_equal "match Variant tuple payload normalizes" "7"
+    (Runtime.value_to_string tuple_payload_out);
+  expect_parse_error
+    "(variant PairMsg (Pair (Tuple Nat Nat)))\n\
+     (def msg PairMsg (variant Pair (tuple 1 2)))\n\
+     (def out Nat (match msg (Pair (tuple a a) a)))";
   let maybe_out, _ = Runtime.normalize_def maybe_alias "out" in
   assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
   let maybe_short_out, _ = Runtime.normalize_def maybe_unit_branch_shorthand "out" in

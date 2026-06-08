@@ -47,6 +47,21 @@ let tuple_fields xs =
   ensure_tuple_arity "tuple" xs;
   List.mapi (fun index value -> (tuple_field_name index, value)) xs
 
+let rec sexp_atoms = function
+  | Sexp.Atom s -> [ s ]
+  | Sexp.Str _ -> []
+  | Sexp.List xs -> List.concat_map sexp_atoms xs
+
+let fresh_match_payload_name binders body =
+  let taken =
+    binders @ sexp_atoms body |> List.sort_uniq String.compare
+  in
+  let rec loop i =
+    let candidate = "__match_payload" ^ string_of_int i in
+    if List.exists (String.equal candidate) taken then loop (i + 1) else candidate
+  in
+  loop 0
+
 let rec parse_type = function
   | Sexp.Atom "Unit" -> TUnit
   | Sexp.Atom "Bool" -> TBool
@@ -309,6 +324,16 @@ and parse_match_list scrut branches =
 and parse_branch = function
   | Sexp.List [ Sexp.Atom "true"; e ] -> BBool (true, parse_expr e)
   | Sexp.List [ Sexp.Atom "false"; e ] -> BBool (false, parse_expr e)
+  | Sexp.List [ Sexp.Atom con; Sexp.List (Sexp.Atom "record" :: fields); body ] ->
+      let fields = parse_record_destructure_bindings (Sexp.List fields) in
+      let payload = fresh_match_payload_name (List.map snd fields) body in
+      BVariant (con, payload, ELetRecord (EName payload, fields, parse_expr body))
+  | Sexp.List [ Sexp.Atom con; Sexp.List (Sexp.Atom "tuple" :: binders); body ] ->
+      ensure_tuple_arity "tuple match" binders;
+      let binders = List.map name binders in
+      ensure_unique "tuple match binder" binders;
+      let payload = fresh_match_payload_name binders body in
+      BVariant (con, payload, ELetRecord (EName payload, tuple_fields binders, parse_expr body))
   | Sexp.List [ Sexp.Atom con; Sexp.Atom x; e ] -> BVariant (con, x, parse_expr e)
   | Sexp.List [ Sexp.Atom con; e ] -> BVariantUnit (con, parse_expr e)
   | x -> fail ("invalid case branch: " ^ Sexp.to_string x)
