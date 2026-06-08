@@ -590,6 +590,60 @@ let describe_graph_node node =
   ^ (match node.node_edge_refs with [] -> "" | refs -> String.concat "," refs)
   ^ "\n"
 
+type graph_definition = {
+  graph_def_name : string;
+  graph_def_id : string;
+  graph_def_hash : string;
+  graph_def_type_ref : string;
+  graph_def_term_ref : string;
+  graph_def_type_canonical : string;
+  graph_def_term_canonical : string;
+  graph_def_deps : string list;
+  graph_def_capability_scope : string list;
+  graph_def_capability_scope_refs : string list;
+}
+
+let graph_definition input id =
+  ignore (checked_of_graph input);
+  let graph = Json.parse input in
+  let defs = json_array_field "defs" graph in
+  match
+    List.find_opt
+      (fun def ->
+        String.equal id (json_string_field "name" def)
+        || String.equal id (json_string_field "defId" def)
+        || String.equal id (json_string_field "hash" def))
+      defs
+  with
+  | None -> fail ("canonical graph definition not found: " ^ id)
+  | Some def ->
+      {
+        graph_def_name = json_string_field "name" def;
+        graph_def_id = json_string_field "defId" def;
+        graph_def_hash = json_string_field "hash" def;
+        graph_def_type_ref = json_string_field "typeRef" def;
+        graph_def_term_ref = json_string_field "termRef" def;
+        graph_def_type_canonical = json_string_field "typeCanonical" def;
+        graph_def_term_canonical = json_string_field "termCanonical" def;
+        graph_def_deps = json_string_array_field "deps" def;
+        graph_def_capability_scope = json_string_array_field "capabilityScope" def;
+        graph_def_capability_scope_refs = json_string_array_field "capabilityScopeRefs" def;
+      }
+
+let describe_graph_definition def =
+  "Graph def\nname=" ^ def.graph_def_name ^ "\ndef_id=" ^ def.graph_def_id
+  ^ "\nhash=" ^ def.graph_def_hash ^ "\ntype_ref=" ^ def.graph_def_type_ref
+  ^ "\nterm_ref=" ^ def.graph_def_term_ref ^ "\ndeps="
+  ^ string_of_int (List.length def.graph_def_deps) ^ "\ndep_names="
+  ^ (match def.graph_def_deps with [] -> "" | deps -> String.concat "," deps)
+  ^ "\ncapabilities=" ^ string_of_int (List.length def.graph_def_capability_scope)
+  ^ "\ncapability_scope="
+  ^ (match def.graph_def_capability_scope with [] -> "" | caps -> String.concat "," caps)
+  ^ "\ncapability_scope_refs="
+  ^ (match def.graph_def_capability_scope_refs with [] -> "" | refs -> String.concat "," refs)
+  ^ "\ntype=" ^ def.graph_def_type_canonical ^ "\nterm="
+  ^ def.graph_def_term_canonical ^ "\n"
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program

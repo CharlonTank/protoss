@@ -1815,6 +1815,9 @@ let store_graph_stats store graph_hash =
 let store_graph_node store graph_hash node_ref =
   Canonical_ir.graph_node (graph_store store graph_hash) node_ref
 
+let store_graph_definition store graph_hash id =
+  Canonical_ir.graph_definition (graph_store store graph_hash) id
+
 let roots_store store =
   let path = Filename.concat store "roots" in
   if Sys.file_exists path then read_file path else ""

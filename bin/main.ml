@@ -33,8 +33,8 @@ let usage () =
      \       protoss invariants package <project>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
-     \       protoss graph --stats <graph.json> | --node <graph.json> <nodeRef>\n\
-     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --node <nodeRef>\n\
+     \       protoss graph --stats <graph.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
+     \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --node <nodeRef> | --def <nameOrDefId>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
@@ -598,6 +598,10 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_node
            (Protoss.Canonical_ir.graph_node (Protoss.Store.read_file file) node_ref))
+  | [ "--def"; file; id ] ->
+      print_string
+        (Protoss.Canonical_ir.describe_graph_definition
+           (Protoss.Canonical_ir.graph_definition (Protoss.Store.read_file file) id))
   | [ "--store-graph"; project_or_store; graph_hash; "--out"; out ] ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       Protoss.Store.write_file_atomic out (Protoss.Workspace.graph_store store graph_hash);
@@ -616,6 +620,11 @@ let command_graph = function
       print_string
         (Protoss.Canonical_ir.describe_graph_node
            (Protoss.Workspace.store_graph_node store graph_hash node_ref))
+  | [ "--store-graph"; project_or_store; graph_hash; "--def"; id ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      print_string
+        (Protoss.Canonical_ir.describe_graph_definition
+           (Protoss.Workspace.store_graph_definition store graph_hash id))
   | [ project; "--out"; out ] ->
       let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root project) in
       let build = Protoss.Workspace.build manifest in

@@ -419,6 +419,19 @@ let () =
   let graph_main_def = graph_def graph "main" in
   let top_type_ref = json_string_field "typeRef" graph_main_def in
   let top_term_ref = json_string_field "termRef" graph_main_def in
+  let main_graph_def = Canonical_ir.graph_definition graph_json "main" in
+  assert_equal "canonical graph def name" "main" main_graph_def.Canonical_ir.graph_def_name;
+  assert_equal "canonical graph def type ref" top_type_ref
+    main_graph_def.Canonical_ir.graph_def_type_ref;
+  assert_equal "canonical graph def term ref" top_term_ref
+    main_graph_def.Canonical_ir.graph_def_term_ref;
+  assert_true "canonical graph def describes"
+    (contains_substring (Canonical_ir.describe_graph_definition main_graph_def) "Graph def");
+  let main_graph_def_by_id =
+    Canonical_ir.graph_definition graph_json main_graph_def.Canonical_ir.graph_def_id
+  in
+  assert_equal "canonical graph def lookup by def id" "main"
+    main_graph_def_by_id.Canonical_ir.graph_def_name;
   let top_type_node = Canonical_ir.graph_node graph_json top_type_ref in
   assert_equal "canonical graph node type kind" "Type" top_type_node.Canonical_ir.node_kind;
   assert_true "canonical graph node type describes"
@@ -432,6 +445,12 @@ let () =
    with Kernel.Error msg ->
      assert_true "canonical graph reports missing node"
        (contains_substring msg "canonical graph node not found"));
+  (try
+     ignore (Canonical_ir.graph_definition graph_json "missing");
+     fail "canonical graph missing definition should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph reports missing definition"
+       (contains_substring msg "canonical graph definition not found"));
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -2371,6 +2390,14 @@ let () =
   assert_equal "project store graph node kind" "Term" store_graph_node.Canonical_ir.node_kind;
   assert_true "project store graph node describes"
     (contains_substring (Canonical_ir.describe_graph_node store_graph_node) "Graph node");
+  let store_graph_def = Workspace.store_graph_definition build_a.store store_graph_hash "appMain" in
+  assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
+  assert_equal "project store graph def term ref" store_graph_app_main_ref
+    store_graph_def.Canonical_ir.graph_def_term_ref;
+  assert_true "project store graph def deps"
+    (List.exists (String.equal "base") store_graph_def.Canonical_ir.graph_def_deps);
+  assert_true "project store graph def describes"
+    (contains_substring (Canonical_ir.describe_graph_definition store_graph_def) "Graph def");
   let graph_hash_mismatch_store = temp_dir "workspace-graph-hash-mismatch-store" in
   copy_tree build_a.store graph_hash_mismatch_store;
   Store.write_file_atomic
