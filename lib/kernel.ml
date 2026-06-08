@@ -63,6 +63,22 @@ let req_capability = function
   | LoadLocal _ -> "Local.storage"
   | ServerRequest _ -> "Server.request"
 
+let req_tag = function
+  | AskHuman _ -> "AskHuman"
+  | HttpGet _ -> "HttpGet"
+  | ReadClock -> "ReadClock"
+  | SaveLocal _ -> "SaveLocal"
+  | LoadLocal _ -> "LoadLocal"
+  | ServerRequest _ -> "ServerRequest"
+
+let req_payload_type = function
+  | ReadClock -> TUnit
+  | AskHuman _ -> TRecord [ ("prompt", TString) ]
+  | HttpGet _ -> TRecord [ ("url", TString) ]
+  | LoadLocal _ -> TRecord [ ("key", TString) ]
+  | SaveLocal _ -> TRecord [ ("key", TString); ("value", TString) ]
+  | ServerRequest _ -> TRecord [ ("payload", TString); ("route", TString) ]
+
 let req_result_type = function
   | AskHuman _ | HttpGet _ | ReadClock | LoadLocal _ | ServerRequest _ -> TString
   | SaveLocal _ -> TUnit

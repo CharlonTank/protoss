@@ -31,17 +31,61 @@ let request_payload = function
   | LoadLocal key -> "LoadLocal:" ^ key
   | ServerRequest (route, payload) -> "ServerRequest:" ^ route ^ ":" ^ payload
 
+type request_signature = {
+  capability : string;
+  tag : string;
+  payload_type : typ;
+  response_type : typ;
+}
+
 let has_prefix prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
-let request_payload_capability = function
-  | "ReadClock" -> Some "Clock.read"
-  | payload when has_prefix "AskHuman:" payload -> Some "Human.ask"
-  | payload when has_prefix "HttpGet:" payload -> Some "Http.get"
-  | payload when has_prefix "SaveLocal:" payload -> Some "Local.storage"
-  | payload when has_prefix "LoadLocal:" payload -> Some "Local.storage"
-  | payload when has_prefix "ServerRequest:" payload -> Some "Server.request"
+let request_payload_signature = function
+  | "ReadClock" ->
+      Some
+        { capability = "Clock.read"; tag = "ReadClock"; payload_type = TUnit; response_type = TString }
+  | payload when has_prefix "AskHuman:" payload ->
+      Some
+        {
+          capability = "Human.ask";
+          tag = "AskHuman";
+          payload_type = TRecord [ ("prompt", TString) ];
+          response_type = TString;
+        }
+  | payload when has_prefix "HttpGet:" payload ->
+      Some
+        {
+          capability = "Http.get";
+          tag = "HttpGet";
+          payload_type = TRecord [ ("url", TString) ];
+          response_type = TString;
+        }
+  | payload when has_prefix "SaveLocal:" payload ->
+      Some
+        {
+          capability = "Local.storage";
+          tag = "SaveLocal";
+          payload_type = TRecord [ ("key", TString); ("value", TString) ];
+          response_type = TUnit;
+        }
+  | payload when has_prefix "LoadLocal:" payload ->
+      Some
+        {
+          capability = "Local.storage";
+          tag = "LoadLocal";
+          payload_type = TRecord [ ("key", TString) ];
+          response_type = TString;
+        }
+  | payload when has_prefix "ServerRequest:" payload ->
+      Some
+        {
+          capability = "Server.request";
+          tag = "ServerRequest";
+          payload_type = TRecord [ ("payload", TString); ("route", TString) ];
+          response_type = TString;
+        }
   | _ -> None
 
 let split_cap_scope s =
@@ -56,13 +100,47 @@ let validate_cap_scope event request cap_scope =
   (try Kernel.validate_capabilities caps
    with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": " ^ msg));
   let required =
-    match request_payload_capability request with
-    | Some cap -> cap
+    match request_payload_signature request with
+    | Some signature -> signature.capability
     | None -> failwith ("maltyped event " ^ event ^ ": unknown request payload " ^ request)
   in
   if not (List.exists (String.equal required) caps) then
     failwith
       ("maltyped event " ^ event ^ ": cap-scope missing required capability " ^ required)
+
+let request_signature_of_req req =
+  {
+    capability = Kernel.req_capability req;
+    tag = Kernel.req_tag req;
+    payload_type = Kernel.req_payload_type req;
+    response_type = Kernel.req_result_type req;
+  }
+
+let type_text typ = Ast.string_of_typ typ
+
+let validate_request_signature_fields event fields request =
+  let signature =
+    match request_payload_signature request with
+    | Some signature -> signature
+    | None -> failwith ("maltyped event " ^ event ^ ": unknown request payload " ^ request)
+  in
+  let require_equal name expected =
+    let actual =
+      List.find_opt (fun (k, _) -> String.equal k name) fields |> Option.map snd
+    in
+    match actual with
+    | Some actual when String.equal actual expected -> ()
+    | Some actual ->
+        failwith
+          ("maltyped event " ^ event ^ ": " ^ name ^ " mismatch: expected " ^ expected
+         ^ ", got " ^ actual)
+    | None -> failwith ("maltyped event " ^ event ^ ": missing " ^ name)
+  in
+  require_equal "capability" signature.capability;
+  require_equal "request-tag" signature.tag;
+  require_equal "request-payload-type" (type_text signature.payload_type);
+  require_equal "response-type" (type_text signature.response_type);
+  signature
 
 let add_event root world payload =
   ensure_dir root;
@@ -89,9 +167,35 @@ let init root =
 
 let record_request root world req suspended request_id continuation_id cap_scope =
   validate_cap_scope "<new>" (request_payload req) (String.concat "," cap_scope);
+  let parsed =
+    try Runtime.parse_suspended suspended with Kernel.Error msg ->
+      failwith ("maltyped event <new>: invalid suspended process: " ^ msg)
+  in
+  let expected_request = request_payload parsed.Runtime.req in
+  if not (String.equal (request_payload req) expected_request) then
+    failwith
+      ("maltyped event <new>: suspended request mismatch: expected " ^ request_payload req
+     ^ ", got " ^ expected_request);
+  let normalized_cap_scope = List.sort_uniq String.compare cap_scope in
+  if normalized_cap_scope <> parsed.Runtime.cap_scope then
+    failwith "maltyped event <new>: suspended cap-scope mismatch";
+  let expected_request_id = Runtime.request_id parsed in
+  if not (String.equal request_id expected_request_id) then
+    failwith
+      ("maltyped event <new>: request-id mismatch: expected " ^ expected_request_id
+     ^ ", got " ^ request_id);
+  let expected_continuation_id = Runtime.continuation_id parsed in
+  if not (String.equal continuation_id expected_continuation_id) then
+    failwith
+      ("maltyped event <new>: continuation-id mismatch: expected " ^ expected_continuation_id
+     ^ ", got " ^ continuation_id);
+  let signature = request_signature_of_req req in
   ignore (init root);
   add_event root world
     ("kind=request\nrequest-id=" ^ request_id ^ "\nrequest=" ^ request_payload req
+   ^ "\ncapability=" ^ signature.capability ^ "\nrequest-tag=" ^ signature.tag
+   ^ "\nrequest-payload-type=" ^ type_text signature.payload_type
+   ^ "\nresponse-type=" ^ type_text signature.response_type
    ^ "\ncontinuation-id=" ^ continuation_id ^ "\ncap-scope="
    ^ String.concat "," (List.sort_uniq String.compare cap_scope)
    ^ "\nsuspended=" ^ String.escaped suspended)
@@ -144,6 +248,7 @@ let validate_resume_response root event resume response =
   ignore (target_need "continuation-id");
   let request = target_need "request" in
   validate_cap_scope event request (target_need "cap-scope");
+  let signature = validate_request_signature_fields event target_fields request in
   let suspended =
     target_need "suspended" |> Scanf.unescaped
   in
@@ -156,9 +261,15 @@ let validate_resume_response root event resume response =
     failwith
       ("maltyped event " ^ event ^ ": suspended request mismatch: expected "
      ^ request ^ ", got " ^ suspended_request);
+  if split_cap_scope (target_need "cap-scope") <> suspended.Runtime.cap_scope then
+    failwith ("maltyped event " ^ event ^ ": suspended cap-scope mismatch");
+  if not (String.equal (Runtime.request_id suspended) (target_need "request-id")) then
+    failwith ("maltyped event " ^ event ^ ": suspended request-id mismatch");
+  if not (String.equal (Runtime.continuation_id suspended) (target_need "continuation-id")) then
+    failwith ("maltyped event " ^ event ^ ": suspended continuation-id mismatch");
   (try ignore (Runtime.response_value suspended.Runtime.req response)
    with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": invalid response: " ^ msg));
-  Ast.string_of_typ (Kernel.req_result_type suspended.Runtime.req)
+  type_text signature.response_type
 
 let record_resume root world event response result =
   let response_type = validate_resume_response root "<new>" event response in
@@ -177,10 +288,50 @@ let validate_event root event content =
   need "kind";
   (match field "kind" fields with
   | Some "request" ->
-      List.iter need [ "request-id"; "request"; "continuation-id"; "cap-scope"; "suspended" ];
-      validate_cap_scope event
-        (Option.value (field "request" fields) ~default:"")
-        (Option.value (field "cap-scope" fields) ~default:"")
+      List.iter need
+        [
+          "request-id";
+          "request";
+          "capability";
+          "request-tag";
+          "request-payload-type";
+          "response-type";
+          "continuation-id";
+          "cap-scope";
+          "suspended";
+        ];
+      let request = Option.value (field "request" fields) ~default:"" in
+      validate_cap_scope event request (Option.value (field "cap-scope" fields) ~default:"");
+      ignore (validate_request_signature_fields event fields request);
+      let suspended =
+        Option.value (field "suspended" fields) ~default:"" |> Scanf.unescaped
+      in
+      let suspended =
+        try Runtime.parse_suspended suspended with Kernel.Error msg ->
+          failwith ("maltyped event " ^ event ^ ": invalid suspended process: " ^ msg)
+      in
+      let suspended_request = request_payload suspended.Runtime.req in
+      if not (String.equal request suspended_request) then
+        failwith
+          ("maltyped event " ^ event ^ ": suspended request mismatch: expected "
+         ^ request ^ ", got " ^ suspended_request);
+      if split_cap_scope (Option.value (field "cap-scope" fields) ~default:"")
+         <> suspended.Runtime.cap_scope
+      then failwith ("maltyped event " ^ event ^ ": suspended cap-scope mismatch");
+      (match field "request-id" fields with
+      | Some request_id when String.equal request_id (Runtime.request_id suspended) -> ()
+      | Some request_id ->
+          failwith
+            ("maltyped event " ^ event ^ ": request-id mismatch: expected "
+           ^ Runtime.request_id suspended ^ ", got " ^ request_id)
+      | None -> assert false);
+      (match field "continuation-id" fields with
+      | Some continuation_id when String.equal continuation_id (Runtime.continuation_id suspended) -> ()
+      | Some continuation_id ->
+          failwith
+            ("maltyped event " ^ event ^ ": continuation-id mismatch: expected "
+           ^ Runtime.continuation_id suspended ^ ", got " ^ continuation_id)
+      | None -> assert false)
   | Some "resume" ->
       List.iter need [ "resume"; "response"; "result" ];
       let resume = Option.value (field "resume" fields) ~default:"" in

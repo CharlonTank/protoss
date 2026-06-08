@@ -121,6 +121,13 @@ let snapshot root =
   in
   files [] root |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
+let ledger_suspension req cap_scope =
+  let suspended = { Runtime.req; cont = Runtime.KDone; cap_scope } in
+  ( suspended,
+    Runtime.serialize_suspended suspended,
+    Runtime.request_id suspended,
+    Runtime.continuation_id suspended )
+
 let rec copy_tree src dst =
   if Sys.is_directory src then (
     ensure_dir dst;
@@ -1270,9 +1277,12 @@ let () =
     (Runtime.value_to_string unit_branch_patch_value);
   let before = count_objects store in
   let ledger = temp_dir "patch-ledger" in
+  let _, patch_suspended, patch_request_id, patch_continuation_id =
+    ledger_suspension (Ast.AskHuman "x") [ "Human.ask" ]
+  in
   let _ =
-    Ledger.record_request ledger Ledger.initial_world (Ast.AskHuman "x") "suspended" "req" "cont"
-      [ "Human.ask" ]
+    Ledger.record_request ledger Ledger.initial_world (Ast.AskHuman "x") patch_suspended
+      patch_request_id patch_continuation_id [ "Human.ask" ]
   in
   let ledger_before = count_files ledger in
   let patch_bad =
@@ -1819,9 +1829,13 @@ let () =
 
   let ledger_web = temp_dir "web-ledger" in
   let world0 = Ledger.init ledger_web in
+  let save_req = Ast.SaveLocal ("todos", "updated") in
+  let _, save_suspended, save_request_id, save_continuation_id =
+    ledger_suspension save_req [ "Local.storage" ]
+  in
   let event, world1 =
-    Ledger.record_request ledger_web world0 (Ast.SaveLocal ("todos", "updated")) "suspended"
-      "req" "cont" [ "Local.storage" ]
+    Ledger.record_request ledger_web world0 save_req save_suspended save_request_id
+      save_continuation_id [ "Local.storage" ]
   in
   assert_true "ledger inspect alias" (String.length (Ledger.inspect ledger_web world1) > 0);
   assert_true "ledger replay" (String.contains (Ledger.replay ledger_web world1) 'E');
@@ -1834,11 +1848,22 @@ let () =
 
   let ledger_root = temp_dir "ledger-inspect" in
   let world = Ledger.init ledger_root in
-  let suspended = Runtime.serialize_suspended { Runtime.req = Ast.AskHuman "x"; cont = Runtime.KDone; cap_scope = [ "Human.ask" ] } in
+  let ask_req = Ast.AskHuman "x" in
+  let _ask_suspended, suspended, request_id, continuation_id =
+    ledger_suspension ask_req [ "Human.ask" ]
+  in
   let event, next_world =
-    Ledger.record_request ledger_root world (Ast.AskHuman "x") suspended "req" "cont" [ "Human.ask" ]
+    Ledger.record_request ledger_root world ask_req suspended request_id continuation_id
+      [ "Human.ask" ]
   in
   assert_true "ledger event inspectable" (String.length (Ledger.inspect_event ledger_root event) > 0);
+  let inspected_request_event = Ledger.inspect_event ledger_root event in
+  assert_true "ledger request records capability signature"
+    (contains_substring inspected_request_event "capability=Human.ask");
+  assert_true "ledger request records request tag"
+    (contains_substring inspected_request_event "request-tag=AskHuman");
+  assert_true "ledger request records response type"
+    (contains_substring inspected_request_event "response-type=String");
   assert_true "ledger world inspectable" (String.length (Ledger.inspect_world ledger_root next_world) > 0);
   let resume_event, resume_world =
     Ledger.record_resume ledger_root next_world event "String:Ada" "Done \"Ada\""
@@ -1860,7 +1885,7 @@ let () =
   (try
      ignore
        (Ledger.record_request invalid_scope_ledger Ledger.initial_world (Ast.AskHuman "x")
-          suspended "req" "cont" []);
+          suspended request_id continuation_id []);
      fail "ledger request missing capability should be rejected"
    with Failure _ -> ());
   assert_true "invalid ledger request must not create files"
@@ -1869,7 +1894,7 @@ let () =
   (try
      ignore
        (Ledger.record_request unknown_scope_ledger Ledger.initial_world (Ast.AskHuman "x")
-          suspended "req" "cont" [ "Human.ask"; "Space.laser" ]);
+          suspended request_id continuation_id [ "Human.ask"; "Space.laser" ]);
      fail "ledger request unknown capability should be rejected"
    with Failure _ -> ());
   assert_true "unknown capability ledger request must not create files"
@@ -1896,6 +1921,13 @@ let () =
      ignore (Ledger.inspect_event ledger_root unknown_scope_event);
      fail "ledger event with unknown cap should be rejected"
    with Failure _ -> ());
+  let bad_signature_event = "p1:bad-signature-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_signature_event)
+    (replace_once inspected_request_event "request-tag=AskHuman" "request-tag=HttpGet");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_signature_event);
+     fail "ledger request event with bad signature should be rejected"
+   with Failure _ -> ());
   let bad_resume_event = "p1:bad-resume-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_event)
     ("world=x\nkind=resume\nresume=" ^ event
@@ -1907,7 +1939,8 @@ let () =
   let mismatched_request_event = "p1:mismatched-request-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root mismatched_request_event)
     ("world=x\nkind=request\nrequest-id=req\nrequest=HttpGet:https://example.invalid\n\
-      continuation-id=cont\ncap-scope=Http.get\nsuspended="
+      capability=Http.get\nrequest-tag=HttpGet\nrequest-payload-type=(Record (url String))\n\
+      response-type=String\ncontinuation-id=cont\ncap-scope=Http.get\nsuspended="
     ^ String.escaped suspended ^ "\n");
   let bad_resume_mismatch_event = "p1:bad-resume-mismatch-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_mismatch_event)
