@@ -292,13 +292,26 @@ let write_program_graph store checked graph_json =
   Store.write_graph store (Kernel.checked_to_graph_content_hash checked) graph_json
 
 let host_contract_hash contract_json =
-  let obj = Json.parse contract_json in
+  let obj =
+    try Json.parse contract_json with Json.Error msg -> fail ("invalid host contract JSON: " ^ msg)
+  in
   match Json.field "contractHash" obj with
   | Some value -> (
       match Json.string value with
       | Some hash -> hash
       | None -> fail "host contract field must be string: contractHash")
   | None -> fail "host contract field must be string: contractHash"
+
+let host_contract_graph_hash contract_json =
+  let obj =
+    try Json.parse contract_json with Json.Error msg -> fail ("invalid host contract JSON: " ^ msg)
+  in
+  match Json.field "graphHash" obj with
+  | Some value -> (
+      match Json.string value with
+      | Some hash -> hash
+      | None -> fail "host contract field must be string: graphHash")
+  | None -> fail "host contract field missing: graphHash"
 
 let write_host_contract store graph_json =
   let contract_json = Canonical_ir.graph_host_contract graph_json in
@@ -1781,6 +1794,20 @@ let graphs_store store =
     |> String.concat "\n"
     |> fun s -> if s = "" then "" else s ^ "\n"
 
+let host_contract_hashes_store store =
+  let dir = host_contracts_dir store in
+  if not (Sys.file_exists dir) then []
+  else
+    Sys.readdir dir |> Array.to_list
+    |> List.filter (fun f -> has_suffix ".host-contract.json" f)
+    |> List.sort String.compare
+    |> List.map (fun f -> host_contract_hash (read_file (Filename.concat dir f)))
+
+let host_contracts_store store =
+  host_contract_hashes_store store
+    |> String.concat "\n"
+    |> fun s -> if s = "" then "" else s ^ "\n"
+
 let validate_store_graph_json context graph_json =
   let checked =
     try Canonical_ir.checked_of_graph graph_json with
@@ -1812,6 +1839,46 @@ let put_store_graph store graph_json =
 let graph_store store graph_hash = fst (read_store_graph store graph_hash)
 
 let checked_store_graph store graph_hash = snd (read_store_graph store graph_hash)
+
+let validate_store_host_contract store context contract_json =
+  let contract_hash = host_contract_hash contract_json in
+  let graph_hash = host_contract_graph_hash contract_json in
+  let graph_json = graph_store store graph_hash in
+  let expected = Canonical_ir.graph_host_contract graph_json in
+  let expected_hash = host_contract_hash expected in
+  if not (String.equal contract_hash expected_hash) then
+    fail
+      ("stored host contract hash mismatch: " ^ context ^ " expected " ^ expected_hash
+     ^ ", got " ^ contract_hash);
+  if not (String.equal contract_json expected) then
+    fail ("stored host contract is not exact canonical JSON: " ^ context);
+  ignore (Canonical_ir.check_graph_host_contract graph_json contract_json);
+  (contract_hash, contract_json)
+
+let host_contract_store store id =
+  if String.equal id "current" then (
+    let path = host_contract_path store in
+    if not (Sys.file_exists path) then fail "host contract not found: current";
+    let contract_hash, contract_json = validate_store_host_contract store "current" (read_file path) in
+    let current_path = host_contract_current_path store in
+    if not (Sys.file_exists current_path) then fail "host contract ref not found: host_contract";
+    let current = trim (read_file current_path) in
+    if not (String.equal current contract_hash) then
+      fail ("host contract ref mismatch: expected " ^ contract_hash ^ ", got " ^ current);
+    let object_path = host_contract_object_path store contract_hash in
+    if not (Sys.file_exists object_path) then
+      fail ("host contract object not found: " ^ contract_hash);
+    if not (String.equal (read_file object_path) contract_json) then
+      fail ("host contract object mismatch: " ^ contract_hash);
+    contract_json)
+  else
+    let path = host_contract_object_path store id in
+    if not (Sys.file_exists path) then fail ("host contract not found: " ^ id);
+    let contract_hash, contract_json = validate_store_host_contract store id (read_file path) in
+    if not (String.equal id contract_hash) then
+      fail
+        ("stored host contract hash mismatch: requested " ^ id ^ ", content " ^ contract_hash);
+    contract_json
 
 let checked_graph_dot (checked : Kernel.checked) =
   let defs =

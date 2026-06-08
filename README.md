@@ -149,6 +149,9 @@ dune exec protoss -- project build examples/workspace --stats
 dune exec protoss -- store graphs examples/workspace
 dune exec protoss -- store graph examples/workspace <graphHash>
 dune exec protoss -- store graph-put target/store graph.json
+dune exec protoss -- store host-contracts examples/workspace
+dune exec protoss -- store host-contract examples/workspace current
+dune exec protoss -- store host-contract examples/workspace <contractHash>
 dune exec protoss -- check --store-graph examples/workspace <graphHash>
 dune exec protoss -- eval --store-graph examples/workspace <graphHash> --entry appMain
 ```

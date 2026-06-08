@@ -2541,6 +2541,12 @@ let () =
     (String.trim (Store.read_file (Workspace.host_contract_current_path build_a.store)));
   assert_equal "project store host contract object" store_graph_host_contract_json
     (Store.read_file (Workspace.host_contract_object_path build_a.store store_host_contract_hash));
+  assert_true "project store host contracts list current hash"
+    (contains_substring (Workspace.host_contracts_store build_a.store) store_host_contract_hash);
+  assert_equal "project store host contract current read" store_graph_host_contract_json
+    (Workspace.host_contract_store build_a.store "current");
+  assert_equal "project store host contract hash read" store_graph_host_contract_json
+    (Workspace.host_contract_store build_a.store store_host_contract_hash);
   assert_equal "project store graph host contract deterministic" store_graph_host_contract_json
     (Workspace.store_graph_host_contract build_a.store store_graph_hash);
   assert_equal "project store graph host contract check" "Host contract OK\n"
