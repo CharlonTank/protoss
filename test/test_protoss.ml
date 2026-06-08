@@ -830,6 +830,52 @@ let () =
     (Kernel.hash_program defrec_list);
   let bumped, _ = Runtime.normalize_def defrec_list "out" in
   assert_equal "defrec List normalization" "[2, 3]" (Runtime.value_to_string bumped);
+  let defrecpoly_list =
+    check
+      "(defrecpoly copy (params A) (-> (List A) (List A)) \
+       (list xs) (nil (Nil A)) (cons x acc (Cons A x acc)))\n\
+       (def ns (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def ss (List String) (Cons \"a\" Nil))\n\
+       (def outN (List Nat) (copy ns))\n\
+       (def outS (List String) (copy ss))"
+  in
+  let defrecpoly_list_explicit =
+    check
+      "(defpoly copy (params A) (-> (List A) (List A)) \
+       (lambda (xs (List A)) \
+       (foldList xs (Nil A) \
+       (lambda (x A) (lambda (acc (List A)) (Cons A x acc))))))\n\
+       (def ns (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def ss (List String) (Cons \"a\" Nil))\n\
+       (def outN (List Nat) (copy ns))\n\
+       (def outS (List String) (copy ss))"
+  in
+  assert_equal "defrecpoly List desugars to polymorphic foldList"
+    (Kernel.hash_program defrecpoly_list_explicit)
+    (Kernel.hash_program defrecpoly_list);
+  let copied_ns, _ = Runtime.normalize_def defrecpoly_list "outN" in
+  assert_equal "defrecpoly List Nat normalization" "[1, 2]"
+    (Runtime.value_to_string copied_ns);
+  let copied_ss, _ = Runtime.normalize_def defrecpoly_list "outS" in
+  assert_equal "defrecpoly List String normalization" "[\"a\"]"
+    (Runtime.value_to_string copied_ss);
+  let defrecpoly_alpha_a =
+    check
+      "(defrecpoly copy (params A) (-> (List A) (List A)) \
+       (list xs) (nil (Nil A)) (cons x acc (Cons A x acc)))"
+  in
+  let defrecpoly_alpha_b =
+    check
+      "(defrecpoly copy (params B) (-> (List B) (List B)) \
+       (list xs) (nil (Nil B)) (cons x acc (Cons B x acc)))"
+  in
+  assert_equal "defrecpoly type parameter alpha-stable hash"
+    (Kernel.hash_program defrecpoly_alpha_a)
+    (Kernel.hash_program defrecpoly_alpha_b);
+  expect_parse_error "(defrecpoly bad (params) (-> Nat Nat) (nat n) (zero 0) (step acc acc))";
+  expect_check_error
+    "(defrecpoly bad (params A) (-> (List A) Nat) \
+     (list xs) (nil 0) (cons x acc (bad xs)))";
   let tree_rec_base =
     "(variant Tree (params A) \
      (Leaf A) \
@@ -864,6 +910,31 @@ let () =
     (Kernel.hash_program defrec_variant);
   let tree_size, _ = Runtime.normalize_def defrec_variant "out" in
   assert_equal "defrec Variant normalization" "2" (Runtime.value_to_string tree_size);
+  let defrecpoly_variant =
+    check
+      (tree_rec_base
+     ^ "(defrecpoly sizeGeneric (params A) (-> (Tree A) Nat) \
+          (variant t) \
+          (Leaf value 1) \
+          (Node pair ((add (recur (get pair left))) (recur (get pair right)))))\n\
+        (def outGeneric Nat (sizeGeneric tree))")
+  in
+  let defrecpoly_variant_explicit =
+    check
+      (tree_rec_base
+     ^ "(defpoly sizeGeneric (params A) (-> (Tree A) Nat) \
+          (lambda (t (Tree A)) \
+            (foldVariant (Tree A) Nat t \
+              (Leaf value 1) \
+              (Node pair ((add (recur (get pair left))) (recur (get pair right)))))))\n\
+        (def outGeneric Nat (sizeGeneric tree))")
+  in
+  assert_equal "defrecpoly Variant desugars to polymorphic foldVariant"
+    (Kernel.hash_program defrecpoly_variant_explicit)
+    (Kernel.hash_program defrecpoly_variant);
+  let generic_tree_size, _ = Runtime.normalize_def defrecpoly_variant "outGeneric" in
+  assert_equal "defrecpoly Variant normalization" "2"
+    (Runtime.value_to_string generic_tree_size);
   expect_parse_error
     (tree_rec_base ^ "(defrec bad (-> (Tree Nat) Nat) (variant t))");
   expect_check_error

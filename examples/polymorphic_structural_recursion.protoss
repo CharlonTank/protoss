@@ -1,0 +1,29 @@
+(defrecpoly copy (params A) (-> (List A) (List A))
+  (list xs)
+  (nil (Nil A))
+  (cons item acc (Cons A item acc)))
+
+(variant Tree (params A)
+  (Leaf A)
+  (Node (Record (left (Tree A)) (right (Tree A)))))
+
+(def add (-> Nat (-> Nat Nat))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      (foldNat a b (lambda (x Nat) (succ x))))))
+
+(defrecpoly size (params A) (-> (Tree A) Nat)
+  (variant tree)
+  (Leaf value 1)
+  (Node pair ((add (recur (get pair left))) (recur (get pair right)))))
+
+(def numbers (List Nat) (Cons 1 (Cons 2 Nil)))
+(def copied (List Nat) (copy numbers))
+
+(def tree (Tree String)
+  (variant Node
+    (record
+      (left (variant Leaf "left"))
+      (right (variant Leaf "right")))))
+
+(def treeSize Nat (size tree))

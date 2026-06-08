@@ -338,15 +338,15 @@ and parse_branch = function
   | Sexp.List [ Sexp.Atom con; e ] -> BVariantUnit (con, parse_expr e)
   | x -> fail ("invalid case branch: " ^ Sexp.to_string x)
 
-let defrec_error name =
+let defrec_error keyword name =
   fail
-    ("defrec " ^ name
+    (keyword ^ " " ^ name
    ^ " must be structural Nat, List, or Variant recursion: \
       (defrec name (-> Nat R) (nat n) (zero z) (step acc body)) or \
       (defrec name (-> (List A) R) (list xs) (nil z) (cons x acc body)) or \
       (defrec name (-> VariantType R) (variant x) (Ctor payload body) ...)")
 
-let parse_structural_defrec name typ clauses =
+let parse_structural_defrec keyword name type_params typ clauses =
   match (typ, clauses) with
   | ( TFun (TNat, result_ty),
       [
@@ -356,7 +356,7 @@ let parse_structural_defrec name typ clauses =
       ] ) ->
       {
         name;
-        type_params = [];
+        type_params;
         declared_capabilities = None;
         typ;
         body =
@@ -373,7 +373,7 @@ let parse_structural_defrec name typ clauses =
       ] ) ->
       {
         name;
-        type_params = [];
+        type_params;
         declared_capabilities = None;
         typ;
         body =
@@ -389,7 +389,7 @@ let parse_structural_defrec name typ clauses =
     when branches <> [] ->
       {
         name;
-        type_params = [];
+        type_params;
         declared_capabilities = None;
         typ;
         body =
@@ -398,7 +398,7 @@ let parse_structural_defrec name typ clauses =
               target_ty,
               EFoldVariant (target_ty, result_ty, EName param, List.map parse_branch branches) );
       }
-  | _ -> defrec_error name
+  | _ -> defrec_error keyword name
 
 let has_dot s = String.contains s '.'
 
@@ -689,8 +689,16 @@ let parse_toplevel = function
           body = parse_expr body;
         }
   | Sexp.List (Sexp.Atom "defrec" :: Sexp.Atom n :: ty :: clauses) ->
-      `Def (parse_structural_defrec n (parse_type ty) clauses)
+      `Def (parse_structural_defrec "defrec" n [] (parse_type ty) clauses)
   | Sexp.List (Sexp.Atom "defrec" :: _) -> fail "invalid defrec form"
+  | Sexp.List
+      (Sexp.Atom "defrecpoly" :: Sexp.Atom n :: Sexp.List (Sexp.Atom "params" :: params)
+       :: ty :: clauses) ->
+      let type_params = List.map atom params in
+      ensure_unique "type parameter" type_params;
+      if type_params = [] then fail ("defrecpoly requires at least one type parameter: " ^ n);
+      `Def (parse_structural_defrec "defrecpoly" n type_params (parse_type ty) clauses)
+  | Sexp.List (Sexp.Atom "defrecpoly" :: _) -> fail "invalid defrecpoly form"
   | x -> fail ("invalid top-level form: " ^ Sexp.to_string x)
 
 let parse_string input =

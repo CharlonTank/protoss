@@ -33,7 +33,7 @@ let is_space = function ' ' | '\t' | '\r' | '\n' -> true | _ -> false
 
 let is_delim c = is_space c || c = '(' || c = ')' || c = ';' || c = '"'
 
-let def_keywords = [ "def"; "defcap"; "defpoly"; "defpolycap"; "defrec" ]
+let def_keywords = [ "def"; "defcap"; "defpoly"; "defpolycap"; "defrec"; "defrecpoly" ]
 
 let type_keywords = [ "type"; "alias"; "record"; "variant" ]
 
