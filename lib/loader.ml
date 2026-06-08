@@ -142,7 +142,7 @@ let rec type_refs = function
   | TNamed (n, args) -> n :: List.concat_map type_refs args
 
 let rec expr_type_refs = function
-  | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ -> []
+  | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ | ENilInfer -> []
   | ELambda (_, t, body) -> type_refs t @ expr_type_refs body
   | ELambdaInfer (_, body) -> expr_type_refs body
   | EApp (f, x) -> expr_type_refs f @ expr_type_refs x
@@ -161,6 +161,7 @@ let rec expr_type_refs = function
   | ERecur e -> expr_type_refs e
   | ENil t -> type_refs t
   | ECons (t, head, tail) -> type_refs t @ expr_type_refs head @ expr_type_refs tail
+  | EConsInfer (head, tail) -> expr_type_refs head @ expr_type_refs tail
   | EFoldList (xs, z, step) -> expr_type_refs xs @ expr_type_refs z @ expr_type_refs step
   | EText e | EColumn e | ERow e | EDone e -> expr_type_refs e
   | EImage (src, alt) | EButton (src, alt) | EInput (src, alt) | EListView (src, alt)

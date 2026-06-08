@@ -1,5 +1,7 @@
 (capabilities Human.ask)
 (def inc (-> Nat Nat) (lambda x (succ x)))
 (def two Nat (foldNat 2 0 (lambda acc (succ acc))))
+(def numbers (List Nat) (Cons 1 (Cons 2 Nil)))
+(def listCount Nat (foldList numbers 0 (lambda x (lambda acc (succ acc)))))
 (def localFive Nat (let (localInc (-> Nat Nat) (lambda x (succ x))) (localInc 4)))
 (def askName (Process String) (bind (Human.ask "Name?") (lambda answer (done answer))))

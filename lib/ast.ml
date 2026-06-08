@@ -42,7 +42,9 @@ type expr =
   | EFoldVariant of typ * typ * expr * branch list
   | ERecur of expr
   | ENil of typ
+  | ENilInfer
   | ECons of typ * expr * expr
+  | EConsInfer of expr * expr
   | EFoldList of expr * expr * expr
   | EText of expr
   | EImage of expr * expr
@@ -223,9 +225,13 @@ let rec string_of_expr_with_params params = function
       ^ ")"
   | ERecur e -> "(recur " ^ string_of_expr_with_params params e ^ ")"
   | ENil t -> "(Nil " ^ string_of_typ_with_params params t ^ ")"
+  | ENilInfer -> "Nil"
   | ECons (t, head, tail) ->
       "(Cons " ^ string_of_typ_with_params params t ^ " "
       ^ string_of_expr_with_params params head ^ " " ^ string_of_expr_with_params params tail ^ ")"
+  | EConsInfer (head, tail) ->
+      "(Cons " ^ string_of_expr_with_params params head ^ " "
+      ^ string_of_expr_with_params params tail ^ ")"
   | EFoldList (xs, zero, step) ->
       "(foldList " ^ string_of_expr_with_params params xs ^ " "
       ^ string_of_expr_with_params params zero ^ " " ^ string_of_expr_with_params params step ^ ")"

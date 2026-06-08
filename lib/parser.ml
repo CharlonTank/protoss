@@ -85,6 +85,7 @@ let rec parse_expr = function
   | Sexp.Atom "unit" -> EUnit
   | Sexp.Atom "true" -> EBool true
   | Sexp.Atom "false" -> EBool false
+  | Sexp.Atom "Nil" -> ENilInfer
   | Sexp.Atom s -> (
       match int_atom s with Some n when n >= 0 -> ENat n | _ -> EName s)
   | Sexp.Str s -> EString s
@@ -126,8 +127,10 @@ let rec parse_expr = function
           List.map parse_branch branches )
   | Sexp.List [ Sexp.Atom "recur"; e ] -> ERecur (parse_expr e)
   | Sexp.List [ Sexp.Atom "Nil"; ty ] -> ENil (parse_type ty)
+  | Sexp.List [ Sexp.Atom "Nil" ] -> ENilInfer
   | Sexp.List [ Sexp.Atom "Cons"; ty; head; tail ] ->
       ECons (parse_type ty, parse_expr head, parse_expr tail)
+  | Sexp.List [ Sexp.Atom "Cons"; head; tail ] -> EConsInfer (parse_expr head, parse_expr tail)
   | Sexp.List [ Sexp.Atom "foldList"; xs; z; step ] ->
       EFoldList (parse_expr xs, parse_expr z, parse_expr step)
   | Sexp.List [ Sexp.Atom "text"; e ] -> EText (parse_expr e)
@@ -315,10 +318,15 @@ let rec qualify_expr local_defs local_types type_params bound = function
           List.map (qualify_branch local_defs local_types type_params bound) branches )
   | ERecur e -> ERecur (qualify_expr local_defs local_types type_params bound e)
   | ENil t -> ENil (qualify_type local_types type_params t)
+  | ENilInfer -> ENilInfer
   | ECons (t, head, tail) ->
       ECons
         ( qualify_type local_types type_params t,
           qualify_expr local_defs local_types type_params bound head,
+          qualify_expr local_defs local_types type_params bound tail )
+  | EConsInfer (head, tail) ->
+      EConsInfer
+        ( qualify_expr local_defs local_types type_params bound head,
           qualify_expr local_defs local_types type_params bound tail )
   | EFoldList (xs, z, step) ->
       EFoldList

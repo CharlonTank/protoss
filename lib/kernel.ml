@@ -339,10 +339,15 @@ let rec expand_expr_types recursive_names aliases vars = function
           List.map (expand_branch_types recursive_names aliases vars) branches )
   | ERecur e -> ERecur (expand_expr_types recursive_names aliases vars e)
   | ENil t -> ENil (expand_type recursive_names aliases vars [] t)
+  | ENilInfer -> ENilInfer
   | ECons (t, head, tail) ->
       ECons
         ( expand_type recursive_names aliases vars [] t,
           expand_expr_types recursive_names aliases vars head,
+          expand_expr_types recursive_names aliases vars tail )
+  | EConsInfer (head, tail) ->
+      EConsInfer
+        ( expand_expr_types recursive_names aliases vars head,
           expand_expr_types recursive_names aliases vars tail )
   | EFoldList (xs, z, step) ->
       EFoldList
@@ -413,7 +418,7 @@ let collect_deps defs =
   let def_names = List.map (fun d -> d.name) defs in
   let is_global n = List.exists (String.equal n) def_names in
   let rec expr bound acc = function
-    | EUnit | EBool _ | ENat _ | EString _ | ERequest _ | ENil _ -> acc
+    | EUnit | EBool _ | ENat _ | EString _ | ERequest _ | ENil _ | ENilInfer -> acc
     | EName n ->
         if List.exists (String.equal n) bound || is_builtin n then acc
         else if is_global n && not (List.exists (String.equal n) acc) then n :: acc
@@ -441,7 +446,8 @@ let collect_deps defs =
             | BVariant (_, x, b) -> expr (x :: bound) a b)
           (expr bound acc scrut) branches
     | ERecur e -> expr bound acc e
-    | ECons (_, head, tail) -> expr bound (expr bound acc head) tail
+    | ECons (_, head, tail) | EConsInfer (head, tail) ->
+        expr bound (expr bound acc head) tail
     | EFoldList (xs, z, step) -> expr bound (expr bound (expr bound acc xs) z) step
     | EText e | EColumn e | ERow e -> expr bound acc e
     | EButton (label, msg) | EInput (label, msg) | EImage (label, msg)
@@ -792,10 +798,17 @@ let rec infer ctx = function
       require_type scope.fold_target actual "recur argument";
       scope.fold_result
   | ENil t -> TList t
+  | ENilInfer -> fail "Nil requires an expected List type"
   | ECons (t, head, tail) ->
       require_type t (infer ctx head) "Cons head";
       require_type (TList t) (infer ctx tail) "Cons tail";
       TList t
+  | EConsInfer (head, tail) -> (
+      match infer ctx tail with
+      | TList item_ty ->
+          require_type item_ty (infer ctx head) "Cons head";
+          TList item_ty
+      | t -> fail ("Cons tail must be List, got " ^ string_of_typ t))
   | EFoldList (xs, zero, step) -> (
       match infer ctx xs with
       | TList item_ty ->
@@ -914,6 +927,7 @@ let rec infer_elab ctx expr =
   match expr with
   | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ | ENil _ ->
       (infer ctx expr, expr)
+  | ENilInfer -> fail "Nil requires an expected List type"
   | ELambda (x, t, body) ->
       let body_ty, body = infer_elab (bind_lambda ctx x t) body in
       (TFun (t, body_ty), ELambda (x, t, body))
@@ -1018,6 +1032,13 @@ let rec infer_elab ctx expr =
       let _, head = check_elab ctx t head in
       let _, tail = check_elab ctx (TList t) tail in
       (TList t, ECons (t, head, tail))
+  | EConsInfer (head, tail) -> (
+      let tail_ty, tail = infer_elab ctx tail in
+      match tail_ty with
+      | TList item_ty ->
+          let _, head = check_elab ctx item_ty head in
+          (tail_ty, ECons (item_ty, head, tail))
+      | t -> fail ("Cons tail must be List, got " ^ string_of_typ t))
   | EFoldList (xs, zero, step) -> (
       let xs_ty, xs = infer_elab ctx xs in
       match xs_ty with
@@ -1137,6 +1158,11 @@ and check_elab ctx expected expr =
       let _, head = check_elab ctx item_ty head in
       let _, tail = check_elab ctx expected tail in
       (expected, ECons (actual_item_ty, head, tail))
+  | TList item_ty, ENilInfer -> (expected, ENil item_ty)
+  | TList item_ty, EConsInfer (head, tail) ->
+      let _, head = check_elab ctx item_ty head in
+      let _, tail = check_elab ctx expected tail in
+      (expected, ECons (item_ty, head, tail))
   | _, EFoldNat (n, zero, step) ->
       let _, n = check_elab ctx TNat n in
       let _, zero = check_elab ctx expected zero in
@@ -1340,7 +1366,9 @@ let rec canonical_expr env = function
         (target, result, canonical_expr env scrut, canonical_branches env branches)
   | ERecur e -> CRecur (canonical_expr env e)
   | ENil t -> CNil t
+  | ENilInfer -> fail "unelaborated inferred Nil in canonicalization"
   | ECons (t, head, tail) -> CCons (t, canonical_expr env head, canonical_expr env tail)
+  | EConsInfer _ -> fail "unelaborated inferred Cons in canonicalization"
   | EFoldList (xs, z, step) ->
       CFoldList (canonical_expr env xs, canonical_expr env z, canonical_expr env step)
   | EText e -> CText (canonical_expr env e)

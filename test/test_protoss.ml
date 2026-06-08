@@ -201,6 +201,26 @@ let () =
   expect_check_error
     "(capabilities Human.ask)\n\
      (def bad Nat (let (p (Process String) (Human.ask \"x\")) 0))";
+  let inferred_list =
+    check "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))"
+  in
+  let annotated_list =
+    check "(def xs (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))"
+  in
+  assert_equal "inferred list constructors canonical hash"
+    (Kernel.hash_program annotated_list) (Kernel.hash_program inferred_list);
+  let inferred_list_value, _ = Runtime.normalize_def inferred_list "xs" in
+  assert_equal "inferred list constructors normalize" "[1, 2]"
+    (Runtime.value_to_string inferred_list_value);
+  let inferred_list_tail =
+    check "(def xs (List Nat) (Cons 1 (Nil Nat)))"
+  in
+  let inferred_list_tail_value, _ = Runtime.normalize_def inferred_list_tail "xs" in
+  assert_equal "inferred Cons can use typed tail" "[1]"
+    (Runtime.value_to_string inferred_list_tail_value);
+  expect_check_error "(def bad Nat Nil)";
+  expect_check_error "(def bad (List Nat) (Cons true Nil))";
+  expect_check_error "(def bad (List Nat) (Cons 1 true))";
 
   let formatted_a = check "(def main Nat (succ 1))" in
   let formatted_b = check "  ; formatting is not canonical\n\n(def   main   Nat\n  (succ   1))" in
@@ -865,6 +885,18 @@ let () =
   let inferred_let_patch_value, _ = Runtime.normalize_def inferred_let_patch_checked "five" in
   assert_equal "patch inferred let normalizes" "5"
     (Runtime.value_to_string inferred_let_patch_value);
+  let inferred_list_patch_store = temp_dir "patch-inferred-list" in
+  let inferred_list_patch =
+    patch_file "protoss-inferred-list-patch.json"
+      "{ \"op\":\"AddDef\", \"name\":\"xs\", \"deps\":[], \
+       \"type\":{\"source\":\"(List Nat)\"}, \
+       \"expr\":{\"source\":\"(Cons 1 (Cons 2 Nil))\"} }"
+  in
+  ignore (Patch.apply inferred_list_patch_store inferred_list_patch);
+  let inferred_list_patch_checked = Store.load_program inferred_list_patch_store |> Kernel.check_program in
+  let inferred_list_patch_value, _ = Runtime.normalize_def inferred_list_patch_checked "xs" in
+  assert_equal "patch inferred list normalizes" "[1, 2]"
+    (Runtime.value_to_string inferred_list_patch_value);
   let before = count_objects store in
   let ledger = temp_dir "patch-ledger" in
   let _ =
