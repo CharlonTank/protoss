@@ -3149,12 +3149,29 @@ let hash_program checked =
 let checked_to_graph_json_fields ?(version = canonical_graph_version)
     ?(include_capability_scope_ref = true) checked =
   let defs = checked.defs |> List.sort (fun a b -> String.compare a.def.name b.def.name) in
+  let name_to_def_id = Hashtbl.create (List.length defs) in
+  let preferred_name_by_def_id = Hashtbl.create (List.length defs) in
+  List.iter
+    (fun d ->
+      Hashtbl.replace name_to_def_id d.def.name d.def_id;
+      if not (Hashtbl.mem preferred_name_by_def_id d.def_id) then
+        Hashtbl.add preferred_name_by_def_id d.def_id d.def.name)
+    defs;
   let def_id_of name =
     if is_builtin name then "builtin:" ^ name
     else
       match List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name) defs with
       | Some d -> d.def_id
       | None -> name
+  in
+  let canonical_dependency_names term =
+    cterm_global_refs term
+    |> List.map (fun ref ->
+           let def_id = Option.value (Hashtbl.find_opt name_to_def_id ref) ~default:ref in
+           match Hashtbl.find_opt preferred_name_by_def_id def_id with
+           | Some name -> name
+           | None -> ref)
+    |> List.sort_uniq String.compare
   in
   let def_json d =
     let canonical_payload = cterm_to_canonical_v2 def_id_of d.cterm in
@@ -3186,9 +3203,7 @@ let checked_to_graph_json_fields ?(version = canonical_graph_version)
       @ [
           json_field "type" (type_to_graph_json d.def.typ);
           json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
-          json_field "deps"
-            (json_array json_string
-               (dependencies_of_defs checked.program.defs d.def.name |> List.sort_uniq String.compare));
+          json_field "deps" (json_array json_string (canonical_dependency_names d.cterm));
           json_field "term" (cterm_to_graph_json def_id_of d.cterm);
           json_field "termCanonical" (json_string canonical_payload);
         ])

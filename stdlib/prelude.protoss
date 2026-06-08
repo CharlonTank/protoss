@@ -1,4 +1,4 @@
-; Protoss stdlib v0.24. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.25. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -37,11 +37,27 @@
   (PTName String)
   (PTFun (Pair ProtossType ProtossType))
   (PTApply (Record (name String) (args (List ProtossType)))))
+(record ProtossParam
+  (name String)
+  (typ ProtossType))
+(record ProtossLambdaExpr
+  (param ProtossParam)
+  (body ProtossExpr))
+(record ProtossRecordFieldExpr
+  (name String)
+  (expr ProtossExpr))
+(record ProtossVariantExpr
+  (typeHint (Maybe ProtossType))
+  (constructor String)
+  (payload ProtossExpr))
 (variant ProtossExpr
   (PEApply (Record (fn ProtossExpr) (args (List ProtossExpr))))
   (PEBool Bool)
+  (PELambda ProtossLambdaExpr)
+  (PERecord (List ProtossRecordFieldExpr))
   (PEString String)
   (PEUnit Unit)
+  (PEVariant ProtossVariantExpr)
   (PEVar String))
 (record ProtossDef
   (name String)
@@ -81,7 +97,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.24")
+(def Stdlib.version String "v0.25")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -1082,6 +1098,234 @@
               (true (variant PEBool false))
               (false (variant PEVar name)))))))))
 
+(defrec Protoss.exprToType (-> ProtossExpr (Result String ProtossType))
+  (variant expr)
+  (PEVar name (Protoss.typeOk (variant PTName name)))
+  (PEApply call
+    (case (get call fn)
+      (PEVar name
+        (case
+          (foldList (get call args) (Protoss.typeListOk (Nil ProtossType))
+            (lambda (arg ProtossExpr)
+              (lambda (acc (Result String (List ProtossType)))
+                (case (recur arg)
+                  (Err err (Protoss.typeListErr err))
+                  (Ok parsedArg
+                    (case acc
+                      (Err err (Protoss.typeListErr err))
+                      (Ok parsedArgs
+                        (Protoss.typeListOk
+                          (Cons ProtossType parsedArg parsedArgs)))))))))
+          (Err err (Protoss.typeErr err))
+          (Ok parsedArgs
+            (case ((String.eqString name) "->")
+              (true
+                (caseList parsedArgs
+                  (Nil (Protoss.typeErr "expected function type arguments"))
+                  (Cons fromType rest
+                    (caseList rest
+                      (Nil (Protoss.typeErr "expected function result type"))
+                      (Cons toType extra
+                        (caseList extra
+                          (Nil
+                            (Protoss.typeOk
+                              (variant PTFun
+                                (record (first fromType) (second toType)))))
+                          (Cons extraHead extraTail
+                            (Protoss.typeErr "too many function type arguments"))))))))
+              (false
+                (Protoss.typeOk
+                  (variant PTApply
+                    (record (name name) (args parsedArgs)))))))))
+      (_ (Protoss.typeErr "expected type constructor"))))
+  (PEBool value (Protoss.typeErr "expected type"))
+  (PELambda value (Protoss.typeErr "expected type"))
+  (PERecord value (Protoss.typeErr "expected type"))
+  (PEString value (Protoss.typeErr "expected type"))
+  (PEUnit value (Protoss.typeErr "expected type"))
+  (PEVariant value (Protoss.typeErr "expected type")))
+
+(def Protoss.paramOk (-> ProtossParam (Result String ProtossParam))
+  (lambda (param ProtossParam)
+    (variant Ok param)))
+
+(def Protoss.paramErr (-> String (Result String ProtossParam))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.parseLambdaParam (-> ProtossExpr (Result String ProtossParam))
+  (lambda (expr ProtossExpr)
+    (case expr
+      (PEApply call
+        (case (get call fn)
+          (PEVar name
+            (caseList (get call args)
+              (Nil (Protoss.paramErr "expected lambda parameter type"))
+              (Cons typeExpr extra
+                (caseList extra
+                  (Nil
+                    (case (Protoss.exprToType typeExpr)
+                      (Err err (Protoss.paramErr err))
+                      (Ok typ
+                        (Protoss.paramOk (record (name name) (typ typ))))))
+                  (Cons extraHead extraTail
+                    (Protoss.paramErr "too many lambda parameter items"))))))
+          (_ (Protoss.paramErr "expected lambda parameter name"))))
+      (_ (Protoss.paramErr "expected lambda parameter")))))
+
+(def Protoss.recordFieldExprOk
+  (-> ProtossRecordFieldExpr (Result String ProtossRecordFieldExpr))
+  (lambda (field ProtossRecordFieldExpr)
+    (variant Ok field)))
+
+(def Protoss.recordFieldExprErr (-> String (Result String ProtossRecordFieldExpr))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.recordFieldExprListOk
+  (-> (List ProtossRecordFieldExpr) (Result String (List ProtossRecordFieldExpr)))
+  (lambda (fields (List ProtossRecordFieldExpr))
+    (variant Ok fields)))
+
+(def Protoss.recordFieldExprListErr
+  (-> String (Result String (List ProtossRecordFieldExpr)))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.parseRecordFieldExpr (-> ProtossExpr (Result String ProtossRecordFieldExpr))
+  (lambda (expr ProtossExpr)
+    (case expr
+      (PEApply call
+        (case (get call fn)
+          (PEVar name
+            (caseList (get call args)
+              (Nil (Protoss.recordFieldExprErr "expected record field value"))
+              (Cons value extra
+                (caseList extra
+                  (Nil (Protoss.recordFieldExprOk (record (name name) (expr value))))
+                  (Cons extraHead extraTail
+                    (Protoss.recordFieldExprErr "too many record field items"))))))
+          (_ (Protoss.recordFieldExprErr "expected record field name"))))
+      (_ (Protoss.recordFieldExprErr "expected record field form")))))
+
+(def Protoss.parseRecordFieldExprs
+  (-> (List ProtossExpr) (Result String (List ProtossRecordFieldExpr)))
+  (lambda (fields (List ProtossExpr))
+    (foldList fields (Protoss.recordFieldExprListOk (Nil ProtossRecordFieldExpr))
+      (lambda (field ProtossExpr)
+        (lambda (acc (Result String (List ProtossRecordFieldExpr)))
+          (case (Protoss.parseRecordFieldExpr field)
+            (Err err (Protoss.recordFieldExprListErr err))
+            (Ok parsedField
+              (case acc
+                (Err err (Protoss.recordFieldExprListErr err))
+                (Ok parsedFields
+                  (Protoss.recordFieldExprListOk
+                    (Cons ProtossRecordFieldExpr parsedField parsedFields)))))))))))
+
+(def Protoss.stringOk (-> String (Result String String))
+  (lambda (value String)
+    (variant Ok value)))
+
+(def Protoss.stringErr (-> String (Result String String))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.constructorName (-> ProtossExpr (Result String String))
+  (lambda (expr ProtossExpr)
+    (case expr
+      (PEVar name (Protoss.stringOk name))
+      (_ (Protoss.stringErr "expected variant constructor")))))
+
+(def Protoss.variantExprOk (-> ProtossExpr (Result String ProtossExpr))
+  (lambda (expr ProtossExpr)
+    (Protoss.exprOk expr)))
+
+(def Protoss.finishVariantExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil (Protoss.exprErr "expected variant constructor"))
+      (Cons first rest
+        (caseList rest
+          (Nil (Protoss.exprErr "expected variant payload"))
+          (Cons second more
+            (caseList more
+              (Nil
+                (case (Protoss.constructorName first)
+                  (Err err (Protoss.exprErr err))
+                  (Ok constructor
+                    (Protoss.exprOk
+                      (variant PEVariant
+                        (record
+                          (typeHint (variant None unit))
+                          (constructor constructor)
+                          (payload second)))))))
+              (Cons third extra
+                (caseList extra
+                  (Nil
+                    (case (Protoss.exprToType first)
+                      (Err err (Protoss.exprErr err))
+                      (Ok typ
+                        (case (Protoss.constructorName second)
+                          (Err err (Protoss.exprErr err))
+                          (Ok constructor
+                            (Protoss.exprOk
+                              (variant PEVariant
+                                (record
+                                  (typeHint (variant Some typ))
+                                  (constructor constructor)
+                                  (payload third)))))))))
+                  (Cons extraHead extraTail
+                    (Protoss.exprErr "too many variant arguments")))))))))))
+
+(def Protoss.finishLambdaExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil (Protoss.exprErr "expected lambda parameter"))
+      (Cons paramExpr rest
+        (caseList rest
+          (Nil (Protoss.exprErr "expected lambda body"))
+          (Cons body extra
+            (caseList extra
+              (Nil
+                (case (Protoss.parseLambdaParam paramExpr)
+                  (Err err (Protoss.exprErr err))
+                  (Ok param
+                    (Protoss.exprOk
+                      (variant PELambda (record (param param) (body body)))))))
+              (Cons extraHead extraTail
+                (Protoss.exprErr "too many lambda arguments")))))))))
+
+(def Protoss.finishRecordExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (case (Protoss.parseRecordFieldExprs args)
+      (Err err (Protoss.exprErr err))
+      (Ok fields (Protoss.exprOk (variant PERecord fields))))))
+
+(def Protoss.finishApplyExpr
+  (-> ProtossExpr (-> (List ProtossExpr) (Result String ProtossExpr)))
+  (lambda (fn ProtossExpr)
+    (lambda (args (List ProtossExpr))
+      (Protoss.exprOk (variant PEApply (record (fn fn) (args args)))))))
+
+(def Protoss.finishExprList (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (items (List ProtossExpr))
+    (caseList items
+      (Nil (Protoss.exprErr "expected expression"))
+      (Cons fn args
+        (case fn
+          (PEVar name
+            (case ((String.eqString name) "lambda")
+              (true (Protoss.finishLambdaExpr args))
+              (false
+                (case ((String.eqString name) "record")
+                  (true (Protoss.finishRecordExpr args))
+                  (false
+                    (case ((String.eqString name) "variant")
+                      (true (Protoss.finishVariantExpr args))
+                      (false ((Protoss.finishApplyExpr fn) args))))))))
+          (_ ((Protoss.finishApplyExpr fn) args)))))))
+
 (defrec Protoss.parseExpr (-> Sexp (Result String ProtossExpr))
   (variant value)
   (SAtom name (Protoss.exprOk (Protoss.atomExpr name)))
@@ -1100,13 +1344,7 @@
                     (Protoss.exprListOk
                       (Cons ProtossExpr parsedItem parsedItems)))))))))
       (Err err (Protoss.exprErr err))
-      (Ok parsedItems
-        (caseList parsedItems
-          (Nil (Protoss.exprErr "expected expression"))
-          (Cons fn args
-            (Protoss.exprOk
-              (variant PEApply
-                (record (fn fn) (args args))))))))))
+      (Ok parsedItems (Protoss.finishExprList parsedItems)))))
 
 (def Protoss.stringListOk (-> (List String) (Result String (List String)))
   (lambda (items (List String))

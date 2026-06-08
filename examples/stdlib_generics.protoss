@@ -428,8 +428,17 @@
 (def protossParsedBoolDef (Result String (List ProtossDecl))
   (Protoss.parseText "(def ok Bool true)"))
 
+(def protossParsedRecordExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def person Person (record (name \"Ada\") (active true)))"))
+
+(def protossParsedVariantExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def value (Maybe Nat) (variant (Maybe Nat) Some 4))"))
+
 (def protossParsedBadExpression (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Unit ())"))
+
+(def protossParsedBadRecordExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Person (record name))"))
 
 (def protossParsedBadTag (Result String (List ProtossDecl))
   (Protoss.parseText "(let x String \"Ada\")"))

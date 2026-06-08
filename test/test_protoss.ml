@@ -843,6 +843,16 @@ let () =
     (string_of_int (List.length (Canonical_ir.graph_dependencies_for dep_graph_json "three")));
   assert_equal "canonical graph dependency leaf edge count" "0"
     (string_of_int (List.length (Canonical_ir.graph_dependencies_for dep_graph_json "two")));
+  let duplicate_ref_checked = check "(def a Nat 1)\n(def b Nat 1)\n(def c Nat b)" in
+  let duplicate_ref_graph_json = Canonical_ir.serialize_graph duplicate_ref_checked in
+  let duplicate_ref_roundtrip =
+    Canonical_ir.serialize_graph (Canonical_ir.checked_of_graph duplicate_ref_graph_json)
+  in
+  assert_equal "canonical graph duplicate DefId deps roundtrip" duplicate_ref_graph_json
+    duplicate_ref_roundtrip;
+  assert_equal "canonical graph duplicate DefId deps representative" "a"
+    (String.concat ","
+       (Canonical_ir.graph_definition duplicate_ref_graph_json "c").Canonical_ir.graph_def_deps);
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -1978,7 +1988,7 @@ let () =
     Runtime.normalize_def stdlib_generics "protossParsedFunctionDef"
   in
   assert_equal "stdlib Protoss.parseText function def"
-    "Ok [PDDef {expr = PEApply {args = [PEApply {args = [PEVar \"Nat\"], fn = PEVar \"x\"}, PEApply {args = [PEVar \"x\"], fn = PEVar \"succ\"}], fn = PEVar \"lambda\"}, name = \"inc\", typ = PTFun {first = PTName \"Nat\", second = PTName \"Nat\"}}]"
+    "Ok [PDDef {expr = PELambda {body = PEApply {args = [PEVar \"x\"], fn = PEVar \"succ\"}, param = {name = \"x\", typ = PTName \"Nat\"}}, name = \"inc\", typ = PTFun {first = PTName \"Nat\", second = PTName \"Nat\"}}]"
     (Runtime.value_to_string protoss_parsed_function_def);
   let protoss_parsed_type_apply, _ =
     Runtime.normalize_def stdlib_generics "protossParsedTypeApply"
@@ -1998,11 +2008,29 @@ let () =
   assert_equal "stdlib Protoss.parseText bool def"
     "Ok [PDDef {expr = PEBool true, name = \"ok\", typ = PTName \"Bool\"}]"
     (Runtime.value_to_string protoss_parsed_bool_def);
+  let protoss_parsed_record_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedRecordExpr"
+  in
+  assert_equal "stdlib Protoss.parseText record expr"
+    "Ok [PDDef {expr = PERecord [{expr = PEString \"Ada\", name = \"name\"}, {expr = PEBool true, name = \"active\"}], name = \"person\", typ = PTName \"Person\"}]"
+    (Runtime.value_to_string protoss_parsed_record_expr);
+  let protoss_parsed_variant_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedVariantExpr"
+  in
+  assert_equal "stdlib Protoss.parseText variant expr"
+    "Ok [PDDef {expr = PEVariant {constructor = \"Some\", payload = PEVar \"4\", typeHint = Some PTApply {args = [PTName \"Nat\"], name = \"Maybe\"}}, name = \"value\", typ = PTApply {args = [PTName \"Nat\"], name = \"Maybe\"}}]"
+    (Runtime.value_to_string protoss_parsed_variant_expr);
   let protoss_parsed_bad_expression, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadExpression"
   in
   assert_equal "stdlib Protoss.parseText bad expression" "Err \"expected expression\""
     (Runtime.value_to_string protoss_parsed_bad_expression);
+  let protoss_parsed_bad_record_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadRecordExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad record expr"
+    "Err \"expected record field form\""
+    (Runtime.value_to_string protoss_parsed_bad_record_expr);
   let protoss_parsed_bad_tag, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadTag"
   in
