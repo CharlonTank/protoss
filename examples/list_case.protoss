@@ -1,0 +1,17 @@
+(def xs (List Nat)
+  (Cons 1 (Cons 2 Nil)))
+
+(def first Nat
+  (caseList xs
+    (Nil 0)
+    (Cons head tail head)))
+
+(def rest (List Nat)
+  (caseList xs
+    (Nil Nil)
+    (Cons head tail tail)))
+
+(def emptyFirst Nat
+  (caseList (Nil Nat)
+    (Nil 0)
+    (Cons head tail head)))

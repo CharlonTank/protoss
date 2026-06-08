@@ -218,6 +218,51 @@ let () =
   let inferred_list_tail_value, _ = Runtime.normalize_def inferred_list_tail "xs" in
   assert_equal "inferred Cons can use typed tail" "[1]"
     (Runtime.value_to_string inferred_list_tail_value);
+  let list_case =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def first Nat (caseList xs (Nil 0) (Cons head tail head)))\n\
+       (def rest (List Nat) (caseList xs (Nil Nil) (Cons head tail tail)))\n\
+       (def emptyFirst Nat (caseList (Nil Nat) (Nil 0) (Cons head tail head)))"
+  in
+  let first, _ = Runtime.normalize_def list_case "first" in
+  assert_equal "caseList cons head normalizes" "1" (Runtime.value_to_string first);
+  let rest, _ = Runtime.normalize_def list_case "rest" in
+  assert_equal "caseList cons tail normalizes" "[2]" (Runtime.value_to_string rest);
+  let empty_first, _ = Runtime.normalize_def list_case "emptyFirst" in
+  assert_equal "caseList nil normalizes" "0" (Runtime.value_to_string empty_first);
+  let list_case_capture =
+    check
+      "(def out Nat \
+       (let (outer 7) \
+       (let (xs (List Nat) (Cons outer Nil)) \
+       (caseList xs (Nil 0) (Cons head tail head)))))"
+  in
+  let captured_head, _ = Runtime.normalize_def list_case_capture "out" in
+  assert_equal "caseList substitution preserves outer refs" "7"
+    (Runtime.value_to_string captured_head);
+  let list_case_alpha_a =
+    check
+      "(def xs (List Nat) (Cons 1 Nil))\n\
+       (def out Nat (caseList xs (Nil 0) (Cons head tail head)))"
+  in
+  let list_case_alpha_b =
+    check
+      "(def xs (List Nat) (Cons 1 Nil))\n\
+       (def out Nat (caseList xs (Nil 0) (Cons value rest value)))"
+  in
+  assert_equal "caseList binder alpha-stable hash"
+    (Kernel.hash_program list_case_alpha_a)
+    (Kernel.hash_program list_case_alpha_b);
+  assert_equal "caseList graph roundtrip" (Kernel.serialize_checked_program list_case)
+    (Canonical_ir.graph_to_program (Canonical_ir.serialize_graph list_case));
+  assert_true "caseList canonical graph tag"
+    (contains_substring (Canonical_ir.serialize_graph list_case) "\"CaseList\"");
+  expect_parse_error "(def bad Nat (caseList xs (Nil 0) (Cons x x x)))";
+  expect_check_error "(def bad Nat (caseList 1 (Nil 0) (Cons head tail head)))";
+  expect_check_error
+    "(def xs (List Nat) (Cons 1 Nil))\n\
+     (def bad Nat (caseList xs (Nil 0) (Cons head tail true)))";
   expect_check_error "(def bad Nat Nil)";
   expect_check_error "(def bad (List Nat) (Cons true Nil))";
   expect_check_error "(def bad (List Nat) (Cons 1 true))";

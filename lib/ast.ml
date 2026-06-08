@@ -46,6 +46,7 @@ type expr =
   | ECons of typ * expr * expr
   | EConsInfer of expr * expr
   | EFoldList of expr * expr * expr
+  | ECaseList of expr * expr * string * string * expr
   | EText of expr
   | EImage of expr * expr
   | EButton of expr * expr
@@ -236,6 +237,10 @@ let rec string_of_expr_with_params params = function
   | EFoldList (xs, zero, step) ->
       "(foldList " ^ string_of_expr_with_params params xs ^ " "
       ^ string_of_expr_with_params params zero ^ " " ^ string_of_expr_with_params params step ^ ")"
+  | ECaseList (xs, nil_body, head, tail, cons_body) ->
+      "(caseList " ^ string_of_expr_with_params params xs ^ " (Nil "
+      ^ string_of_expr_with_params params nil_body ^ ") (Cons " ^ head ^ " " ^ tail ^ " "
+      ^ string_of_expr_with_params params cons_body ^ "))"
   | EText e -> "(text " ^ string_of_expr_with_params params e ^ ")"
   | EImage (src, alt) ->
       "(image " ^ string_of_expr_with_params params src ^ " "

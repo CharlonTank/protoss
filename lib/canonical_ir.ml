@@ -185,6 +185,11 @@ let rec term_of_graph_json obj =
         ( term_of_graph_json (json_field "list" obj),
           term_of_graph_json (json_field "zero" obj),
           term_of_graph_json (json_field "step" obj) )
+  | "CaseList" ->
+      Kernel.CCaseList
+        ( term_of_graph_json (json_field "list" obj),
+          term_of_graph_json (json_field "nil" obj),
+          term_of_graph_json (json_field "cons" obj) )
   | "Text" -> Kernel.CText (term_of_graph_json (json_field "value" obj))
   | "Image" ->
       Kernel.CImage (term_of_graph_json (json_field "src" obj), term_of_graph_json (json_field "alt" obj))

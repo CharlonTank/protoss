@@ -325,6 +325,12 @@ let rec eval_cterm st env = function
             (fun item acc -> eval_app st (eval_app st step_value item) acc)
             items (eval_cterm st env zero)
       | v -> fail ("foldList on non-List runtime value: " ^ value_to_string v))
+  | Kernel.CCaseList (xs, nil_body, cons_body) -> (
+      match eval_cterm st env xs with
+      | VList (_, []) -> eval_cterm st env nil_body
+      | VList (item_ty, head :: tail) ->
+          eval_cterm st (head :: VList (item_ty, tail) :: env) cons_body
+      | v -> fail ("caseList on non-List runtime value: " ^ value_to_string v))
   | Kernel.CText e -> (
       match eval_cterm st env e with
       | VString s -> VView (VText s)

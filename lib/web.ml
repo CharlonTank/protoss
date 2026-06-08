@@ -413,6 +413,13 @@ let runtime_js =
           for (var j = items.length - 1; j >= 0; j--) zero = apply(apply(stepFn, items[j]), zero);
           return zero;
         }
+        case "CaseList": {
+          var list = evalTerm(term.list, env);
+          if (!list || list.tag !== "List") throw new Error("caseList expects List");
+          var caseItems = list.items || [];
+          if (!caseItems.length) return evalTerm(term.nil, env);
+          return evalTerm(term.cons, [caseItems[0], listValue(caseItems.slice(1))].concat(env));
+        }
         case "Text": return viewValue({ kind: "text", text: evalTerm(term.value, env).value || "" });
         case "Image": return viewValue({
           kind: "image",

@@ -133,6 +133,17 @@ let rec parse_expr = function
   | Sexp.List [ Sexp.Atom "Cons"; head; tail ] -> EConsInfer (parse_expr head, parse_expr tail)
   | Sexp.List [ Sexp.Atom "foldList"; xs; z; step ] ->
       EFoldList (parse_expr xs, parse_expr z, parse_expr step)
+  | Sexp.List
+      [
+        Sexp.Atom "caseList";
+        xs;
+        Sexp.List [ Sexp.Atom "Nil"; nil_body ];
+        Sexp.List [ Sexp.Atom "Cons"; Sexp.Atom head; Sexp.Atom tail; cons_body ];
+      ] ->
+      if String.equal head tail then fail ("duplicate caseList binder: " ^ head);
+      ECaseList (parse_expr xs, parse_expr nil_body, head, tail, parse_expr cons_body)
+  | Sexp.List (Sexp.Atom "caseList" :: _) ->
+      fail "caseList syntax is (caseList xs (Nil nilExpr) (Cons head tail consExpr))"
   | Sexp.List [ Sexp.Atom "text"; e ] -> EText (parse_expr e)
   | Sexp.List [ Sexp.Atom "image"; src; alt ] ->
       EImage (parse_expr src, parse_expr alt)
@@ -334,6 +345,13 @@ let rec qualify_expr local_defs local_types type_params bound = function
         ( qualify_expr local_defs local_types type_params bound xs,
           qualify_expr local_defs local_types type_params bound z,
           qualify_expr local_defs local_types type_params bound step )
+  | ECaseList (xs, nil_body, head, tail, cons_body) ->
+      ECaseList
+        ( qualify_expr local_defs local_types type_params bound xs,
+          qualify_expr local_defs local_types type_params bound nil_body,
+          head,
+          tail,
+          qualify_expr local_defs local_types type_params (head :: tail :: bound) cons_body )
   | EText e -> EText (qualify_expr local_defs local_types type_params bound e)
   | EImage (src, alt) ->
       EImage

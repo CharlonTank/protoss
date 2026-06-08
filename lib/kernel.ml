@@ -354,6 +354,13 @@ let rec expand_expr_types recursive_names aliases vars = function
         ( expand_expr_types recursive_names aliases vars xs,
           expand_expr_types recursive_names aliases vars z,
           expand_expr_types recursive_names aliases vars step )
+  | ECaseList (xs, nil_body, head, tail, cons_body) ->
+      ECaseList
+        ( expand_expr_types recursive_names aliases vars xs,
+          expand_expr_types recursive_names aliases vars nil_body,
+          head,
+          tail,
+          expand_expr_types recursive_names aliases vars cons_body )
   | EText e -> EText (expand_expr_types recursive_names aliases vars e)
   | EImage (src, alt) ->
       EImage (expand_expr_types recursive_names aliases vars src, expand_expr_types recursive_names aliases vars alt)
@@ -452,6 +459,8 @@ let collect_deps defs =
     | ECons (_, head, tail) | EConsInfer (head, tail) ->
         expr bound (expr bound acc head) tail
     | EFoldList (xs, z, step) -> expr bound (expr bound (expr bound acc xs) z) step
+    | ECaseList (xs, nil_body, head, tail, cons_body) ->
+        expr (head :: tail :: bound) (expr bound (expr bound acc xs) nil_body) cons_body
     | EText e | EColumn e | ERow e -> expr bound acc e
     | EButton (label, msg) | EInput (label, msg) | EImage (label, msg)
     | EListView (label, msg) | EWhenView (label, msg) ->
@@ -834,6 +843,14 @@ let rec infer ctx = function
             "foldList step";
           result_ty
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
+  | ECaseList (xs, nil_body, head, tail, cons_body) -> (
+      match infer ctx xs with
+      | TList item_ty ->
+          let result_ty = infer ctx nil_body in
+          let branch_ctx = bind_local (bind_local ctx tail (TList item_ty)) head item_ty in
+          require_type result_ty (infer branch_ctx cons_body) "caseList branches";
+          result_ty
+      | t -> fail ("caseList target must be List, got " ^ string_of_typ t))
   | EText e ->
       require_type TString (infer ctx e) "text";
       TView TUnit
@@ -1086,6 +1103,15 @@ let rec infer_elab ctx expr =
           let _, step = check_elab ctx (TFun (item_ty, TFun (result_ty, result_ty))) step in
           (result_ty, EFoldList (xs, zero, step))
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
+  | ECaseList (xs, nil_body, head, tail, cons_body) -> (
+      let xs_ty, xs = infer_elab ctx xs in
+      match xs_ty with
+      | TList item_ty ->
+          let result_ty, nil_body = infer_elab ctx nil_body in
+          let branch_ctx = bind_local (bind_local ctx tail (TList item_ty)) head item_ty in
+          let _, cons_body = check_elab branch_ctx result_ty cons_body in
+          (result_ty, ECaseList (xs, nil_body, head, tail, cons_body))
+      | t -> fail ("caseList target must be List, got " ^ string_of_typ t))
   | EText e ->
       let _, e = check_elab ctx TString e in
       (TView TUnit, EText e)
@@ -1215,6 +1241,15 @@ and check_elab ctx expected expr =
           let _, step = check_elab ctx (TFun (item_ty, TFun (expected, expected))) step in
           (expected, EFoldList (xs, zero, step))
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
+  | _, ECaseList (xs, nil_body, head, tail, cons_body) -> (
+      let xs_ty, xs = infer_elab ctx xs in
+      match xs_ty with
+      | TList item_ty ->
+          let _, nil_body = check_elab ctx expected nil_body in
+          let branch_ctx = bind_local (bind_local ctx tail (TList item_ty)) head item_ty in
+          let _, cons_body = check_elab branch_ctx expected cons_body in
+          (expected, ECaseList (xs, nil_body, head, tail, cons_body))
+      | t -> fail ("caseList target must be List, got " ^ string_of_typ t))
   | _, ELet (x, e, body) ->
       let t, e = infer_elab ctx e in
       let _, body = check_elab (bind_local ctx x t) expected body in
@@ -1488,6 +1523,7 @@ type cterm =
   | CNil of typ
   | CCons of typ * cterm * cterm
   | CFoldList of cterm * cterm * cterm
+  | CCaseList of cterm * cterm * cterm
   | CText of cterm
   | CImage of cterm * cterm
   | CButton of cterm * cterm
@@ -1542,6 +1578,11 @@ let rec canonical_expr env = function
   | EConsInfer _ -> fail "unelaborated inferred Cons in canonicalization"
   | EFoldList (xs, z, step) ->
       CFoldList (canonical_expr env xs, canonical_expr env z, canonical_expr env step)
+  | ECaseList (xs, nil_body, head, tail, cons_body) ->
+      CCaseList
+        ( canonical_expr env xs,
+          canonical_expr env nil_body,
+          canonical_expr (head :: tail :: env) cons_body )
   | EText e -> CText (canonical_expr env e)
   | EImage (src, alt) -> CImage (canonical_expr env src, canonical_expr env alt)
   | EButton (label, msg) -> CButton (canonical_expr env label, canonical_expr env msg)
@@ -1587,6 +1628,9 @@ let rec cterm_direct_capabilities = function
   | CFoldNat (n, zero, step) | CFoldList (n, zero, step) ->
       cterm_direct_capabilities n @ cterm_direct_capabilities zero
       @ cterm_direct_capabilities step
+  | CCaseList (xs, nil_body, cons_body) ->
+      cterm_direct_capabilities xs @ cterm_direct_capabilities nil_body
+      @ cterm_direct_capabilities cons_body
   | CFoldVariant (_, _, scrut, branches) ->
       cterm_direct_capabilities scrut @ List.concat_map cbranch_direct_capabilities branches
   | CCons (_, head, tail) -> cterm_direct_capabilities head @ cterm_direct_capabilities tail
@@ -1610,6 +1654,8 @@ let rec cterm_global_refs = function
   | CCase (e, branches) -> cterm_global_refs e @ List.concat_map cbranch_global_refs branches
   | CFoldNat (n, zero, step) | CFoldList (n, zero, step) ->
       cterm_global_refs n @ cterm_global_refs zero @ cterm_global_refs step
+  | CCaseList (xs, nil_body, cons_body) ->
+      cterm_global_refs xs @ cterm_global_refs nil_body @ cterm_global_refs cons_body
   | CFoldVariant (_, _, scrut, branches) ->
       cterm_global_refs scrut @ List.concat_map cbranch_global_refs branches
   | CCons (_, head, tail) -> cterm_global_refs head @ cterm_global_refs tail
@@ -1661,6 +1707,9 @@ let rec cterm_to_string = function
   | CFoldList (xs, z, step) ->
       "(foldList " ^ cterm_to_string xs ^ " " ^ cterm_to_string z ^ " "
       ^ cterm_to_string step ^ ")"
+  | CCaseList (xs, nil_body, cons_body) ->
+      "(caseList " ^ cterm_to_string xs ^ " (Nil " ^ cterm_to_string nil_body
+      ^ ") (Cons " ^ cterm_to_string cons_body ^ "))"
   | CText e -> "(text " ^ cterm_to_string e ^ ")"
   | CImage (src, alt) -> "(image " ^ cterm_to_string src ^ " " ^ cterm_to_string alt ^ ")"
   | CButton (label, msg) -> "(button " ^ cterm_to_string label ^ " " ^ cterm_to_string msg ^ ")"
@@ -1742,6 +1791,10 @@ let rec cterm_to_canonical_v2 def_id_of = function
   | CFoldList (xs, z, step) ->
       "(foldList " ^ cterm_to_canonical_v2 def_id_of xs ^ " "
       ^ cterm_to_canonical_v2 def_id_of z ^ " " ^ cterm_to_canonical_v2 def_id_of step ^ ")"
+  | CCaseList (xs, nil_body, cons_body) ->
+      "(caseList " ^ cterm_to_canonical_v2 def_id_of xs ^ " (Nil "
+      ^ cterm_to_canonical_v2 def_id_of nil_body ^ ") (Cons "
+      ^ cterm_to_canonical_v2 def_id_of cons_body ^ "))"
   | CText e -> "(text " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
   | CImage (src, alt) ->
       "(image " ^ cterm_to_canonical_v2 def_id_of src ^ " "
@@ -2034,6 +2087,14 @@ let rec cterm_to_graph_json def_id_of = function
           json_field "zero" (cterm_to_graph_json def_id_of zero);
           json_field "step" (cterm_to_graph_json def_id_of step);
         ]
+  | CCaseList (xs, nil_body, cons_body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "CaseList");
+          json_field "list" (cterm_to_graph_json def_id_of xs);
+          json_field "nil" (cterm_to_graph_json def_id_of nil_body);
+          json_field "cons" (cterm_to_graph_json def_id_of cons_body);
+        ]
   | CText e ->
       json_obj [ json_field "tag" (json_string "Text"); json_field "value" (cterm_to_graph_json def_id_of e) ]
   | CImage (src, alt) ->
@@ -2143,6 +2204,7 @@ let cterm_node_tag = function
   | CNil _ -> "Nil"
   | CCons _ -> "Cons"
   | CFoldList _ -> "FoldList"
+  | CCaseList _ -> "CaseList"
   | CText _ -> "Text"
   | CImage _ -> "Image"
   | CButton _ -> "Button"
@@ -2188,6 +2250,8 @@ let cterm_node_edges def_id_of = function
       [ type_node_id typ; term_node_id def_id_of head; term_node_id def_id_of tail ]
   | CFoldList (list, zero, step) ->
       [ term_node_id def_id_of list; term_node_id def_id_of zero; term_node_id def_id_of step ]
+  | CCaseList (list, nil_body, cons_body) ->
+      [ term_node_id def_id_of list; term_node_id def_id_of nil_body; term_node_id def_id_of cons_body ]
   | CText value | CColumn value | CRow value | CDone value ->
       [ term_node_id def_id_of value ]
   | CImage (src, alt) | CButton (src, alt) | CInput (src, alt)
@@ -2276,6 +2340,10 @@ let canonical_node_graph_json program_hash def_id_of defs =
         add_term list;
         add_term zero;
         add_term step
+    | CCaseList (list, nil_body, cons_body) ->
+        add_term list;
+        add_term nil_body;
+        add_term cons_body
     | CText value | CColumn value | CRow value | CDone value -> add_term value
     | CBind (process, typ, body) ->
         add_term process;
@@ -2427,6 +2495,17 @@ let rec cterm_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "foldList"; xs; zero; step ] ->
       CFoldList
         (cterm_of_canonical_sexp xs, cterm_of_canonical_sexp zero, cterm_of_canonical_sexp step)
+  | Sexp.List
+      [
+        Sexp.Atom "caseList";
+        xs;
+        Sexp.List [ Sexp.Atom "Nil"; nil_body ];
+        Sexp.List [ Sexp.Atom "Cons"; cons_body ];
+      ] ->
+      CCaseList
+        ( cterm_of_canonical_sexp xs,
+          cterm_of_canonical_sexp nil_body,
+          cterm_of_canonical_sexp cons_body )
   | Sexp.List [ Sexp.Atom "text"; e ] -> CText (cterm_of_canonical_sexp e)
   | Sexp.List [ Sexp.Atom "image"; src; alt ] ->
       CImage (cterm_of_canonical_sexp src, cterm_of_canonical_sexp alt)
@@ -2678,6 +2757,9 @@ let rec shift amount cutoff = function
   | CCons (t, head, tail) -> CCons (t, shift amount cutoff head, shift amount cutoff tail)
   | CFoldList (xs, zero, step) ->
       CFoldList (shift amount cutoff xs, shift amount cutoff zero, shift amount cutoff step)
+  | CCaseList (xs, nil_body, cons_body) ->
+      CCaseList
+        (shift amount cutoff xs, shift amount cutoff nil_body, shift amount (cutoff + 2) cons_body)
   | CText e -> CText (shift amount cutoff e)
   | CImage (src, alt) -> CImage (shift amount cutoff src, shift amount cutoff alt)
   | CButton (label, msg) -> CButton (shift amount cutoff label, shift amount cutoff msg)
@@ -2724,6 +2806,11 @@ let rec subst index replacement = function
   | CFoldList (xs, zero, step) ->
       CFoldList
         (subst index replacement xs, subst index replacement zero, subst index replacement step)
+  | CCaseList (xs, nil_body, cons_body) ->
+      CCaseList
+        ( subst index replacement xs,
+          subst index replacement nil_body,
+          subst (index + 2) (shift 2 0 replacement) cons_body )
   | CText e -> CText (subst index replacement e)
   | CImage (src, alt) -> CImage (subst index replacement src, subst index replacement alt)
   | CButton (label, msg) -> CButton (subst index replacement label, subst index replacement msg)
@@ -2743,6 +2830,9 @@ and subst_branch index replacement = function
   | CBVariant (con, e) -> CBVariant (con, subst (index + 1) (shift 1 0 replacement) e)
 
 let subst_top replacement body = shift (-1) 0 (subst 0 (shift 1 0 replacement) body)
+
+let subst_top2 first second body =
+  shift (-2) 0 (subst 0 (shift 2 0 first) (subst 1 (shift 2 0 second) body))
 
 let rec subst_type_in_cterm args = function
   | CUnit -> CUnit
@@ -2775,6 +2865,11 @@ let rec subst_type_in_cterm args = function
   | CFoldList (xs, zero, step) ->
       CFoldList
         (subst_type_in_cterm args xs, subst_type_in_cterm args zero, subst_type_in_cterm args step)
+  | CCaseList (xs, nil_body, cons_body) ->
+      CCaseList
+        ( subst_type_in_cterm args xs,
+          subst_type_in_cterm args nil_body,
+          subst_type_in_cterm args cons_body )
   | CText e -> CText (subst_type_in_cterm args e)
   | CImage (src, alt) -> CImage (subst_type_in_cterm args src, subst_type_in_cterm args alt)
   | CButton (label, msg) -> CButton (subst_type_in_cterm args label, subst_type_in_cterm args msg)
@@ -2892,6 +2987,8 @@ let rec normalize_cterm checked = function
         | CCons (t, head, tail) -> CCons (t, rewrite_recur head, rewrite_recur tail)
         | CFoldList (xs, zero, step) ->
             CFoldList (rewrite_recur xs, rewrite_recur zero, rewrite_recur step)
+        | CCaseList (xs, nil_body, cons_body) ->
+            CCaseList (rewrite_recur xs, rewrite_recur nil_body, rewrite_recur cons_body)
         | CText e -> CText (rewrite_recur e)
         | CImage (src, alt) -> CImage (rewrite_recur src, rewrite_recur alt)
         | CButton (label, msg) -> CButton (rewrite_recur label, rewrite_recur msg)
@@ -2922,6 +3019,17 @@ let rec normalize_cterm checked = function
         | other -> CFoldList (other, acc, step)
       in
       loop (normalize_cterm checked xs))
+  | CCaseList (xs, nil_body, cons_body) -> (
+      match normalize_cterm checked xs with
+      | CNil _ -> normalize_cterm checked nil_body
+      | CCons (_, head, tail) ->
+          normalize_cterm checked
+            (subst_top2 (normalize_cterm checked head) (normalize_cterm checked tail) cons_body)
+      | xs ->
+          CCaseList
+            ( xs,
+              normalize_cterm checked nil_body,
+              normalize_cterm checked cons_body ))
   | CText e -> CText (normalize_cterm checked e)
   | CImage (src, alt) ->
       CImage (normalize_cterm checked src, normalize_cterm checked alt)

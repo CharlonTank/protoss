@@ -163,6 +163,8 @@ let rec expr_type_refs = function
   | ECons (t, head, tail) -> type_refs t @ expr_type_refs head @ expr_type_refs tail
   | EConsInfer (head, tail) -> expr_type_refs head @ expr_type_refs tail
   | EFoldList (xs, z, step) -> expr_type_refs xs @ expr_type_refs z @ expr_type_refs step
+  | ECaseList (xs, nil_body, _, _, cons_body) ->
+      expr_type_refs xs @ expr_type_refs nil_body @ expr_type_refs cons_body
   | EText e | EColumn e | ERow e | EDone e -> expr_type_refs e
   | EImage (src, alt) | EButton (src, alt) | EInput (src, alt) | EListView (src, alt)
   | EWhenView (src, alt) ->

@@ -15,6 +15,7 @@ What works now:
 - Polymorphic value definitions work with explicit type application, for example `(defpoly id (params A) (-> A A) (lambda (x A) x))` and `((inst id Nat) 4)`. Calls such as `(id 4)`, `(some 9)`, and `((List.map xs) (lambda x (succ x)))` infer type arguments when arguments or the expected result type make them unambiguous. The elaborated canonical graph still uses explicit `inst`, so inferred and explicit sources hash the same.
 - Lambdas can omit parameter annotations when an expected function type is available, for example `(def inc (-> Nat Nat) (lambda x (succ x)))`, `foldNat`/`foldList` steps, `bind` continuations, and annotated local lets like `(let (inc (-> Nat Nat) (lambda x (succ x))) (inc 1))`. They elaborate to the same canonical graph as annotated lambdas.
 - List constructors can omit their item type under an expected `List A`, for example `(def xs (List Nat) (Cons 1 (Cons 2 Nil)))`. They elaborate to the same canonical graph as `(Cons Nat 1 (Cons Nat 2 (Nil Nat)))`.
+- Lists support non-recursive pattern matching with `(caseList xs (Nil nilExpr) (Cons head tail consExpr))`; `head` and `tail` are alpha-stable binders in the `Cons` branch, and the form is represented in the canonical graph.
 - The shipped prelude includes polymorphic `List.map`, `List.length`, `Maybe.map`, `Maybe.withDefault`, and `Result.map`, plus monomorphic Nat/Bool/String helpers.
 - Variant constructors can infer their variant type from an expected context, for example `(def value (Maybe Nat) (variant Some 4))`; the inferred form hashes like the explicit `(variant (Maybe Nat) Some 4)`.
 - Variant `case`/`foldVariant` branches whose payload type is `Unit` can omit the payload binder, for example `(case maybe (None 0) (Some n n))`; non-`Unit` constructors still require a binder.
@@ -75,6 +76,7 @@ dune exec protoss -- check examples/inferred_variants.protoss
 dune exec protoss -- check examples/polymorphic_defs.protoss
 dune exec protoss -- check examples/polymorphic_inference.protoss
 dune exec protoss -- check examples/inferred_lambdas.protoss
+dune exec protoss -- check examples/list_case.protoss
 dune exec protoss -- check examples/recursive_tree.protoss
 dune exec protoss -- nf examples/recursive_tree.protoss
 dune exec protoss -- check examples/stdlib_generics.protoss
