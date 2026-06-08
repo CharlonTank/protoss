@@ -1657,6 +1657,14 @@ let () =
   assert_equal "stdlib generic List.length" "2" (Runtime.value_to_string len);
   let appended, _ = Runtime.normalize_def stdlib_generics "appended" in
   assert_equal "stdlib generic List.append" "[1, 2, 3]" (Runtime.value_to_string appended);
+  let concatenated, _ = Runtime.normalize_def stdlib_generics "concatenated" in
+  assert_equal "stdlib generic List.concat" "[1, 2, 3]"
+    (Runtime.value_to_string concatenated);
+  let folded, _ = Runtime.normalize_def stdlib_generics "folded" in
+  assert_equal "stdlib generic List.fold" "6" (Runtime.value_to_string folded);
+  let flat_mapped, _ = Runtime.normalize_def stdlib_generics "flatMapped" in
+  assert_equal "stdlib generic List.flatMap" "[1, 2, 2, 3]"
+    (Runtime.value_to_string flat_mapped);
   let filtered, _ = Runtime.normalize_def stdlib_generics "filtered" in
   assert_equal "stdlib generic List.filter" "[2]" (Runtime.value_to_string filtered);
   let reversed, _ = Runtime.normalize_def stdlib_generics "reversed" in

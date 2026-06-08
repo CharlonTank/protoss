@@ -20,6 +20,23 @@
 (def appended (List Nat)
   (((inst List.append Nat) xs) ys))
 
+(def nested (List (List Nat))
+  (Cons (List Nat) xs (Cons (List Nat) ys (Nil (List Nat)))))
+
+(def concatenated (List Nat)
+  ((inst List.concat Nat) nested))
+
+(def folded Nat
+  ((((inst List.fold Nat Nat) appended) 0)
+    (lambda (x Nat)
+      (lambda (acc Nat)
+        ((Nat.add x) acc)))))
+
+(def flatMapped (List Nat)
+  (((inst List.flatMap Nat Nat) xs)
+    (lambda (x Nat)
+      (Cons Nat x (Cons Nat (succ x) (Nil Nat))))))
+
 (def filtered (List Nat)
   (((inst List.filter Nat) appended)
     (lambda (x Nat) ((Nat.eqNat x) 2))))

@@ -1,4 +1,4 @@
-; Protoss stdlib v0.10. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.11. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -15,7 +15,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.10")
+(def Stdlib.version String "v0.11")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -81,6 +81,30 @@
         (lambda (x A)
           (lambda (acc (List A))
             (Cons A x acc)))))))
+
+(defpoly List.fold (params A B)
+  (-> (List A) (-> B (-> (-> A (-> B B)) B)))
+  (lambda (xs (List A))
+    (lambda (seed B)
+      (lambda (step (-> A (-> B B)))
+        (foldList xs seed step)))))
+
+(defpoly List.concat (params A)
+  (-> (List (List A)) (List A))
+  (lambda (xss (List (List A)))
+    (foldList xss (Nil A)
+      (lambda (xs (List A))
+        (lambda (acc (List A))
+          (((inst List.append A) xs) acc))))))
+
+(defpoly List.flatMap (params A B)
+  (-> (List A) (-> (-> A (List B)) (List B)))
+  (lambda (xs (List A))
+    (lambda (f (-> A (List B)))
+      (foldList xs (Nil B)
+        (lambda (x A)
+          (lambda (acc (List B))
+            (((inst List.append B) (f x)) acc)))))))
 
 (defpoly List.filter (params A)
   (-> (List A) (-> (-> A Bool) (List A)))
