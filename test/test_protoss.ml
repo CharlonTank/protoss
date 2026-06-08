@@ -364,6 +364,42 @@ let () =
   expect_check_error
     "(variant Maybe (params A) (None Unit) (Some A))\n\
      (def bad (Maybe Nat) (variant (Variant (None Unit) (Some Bool)) Some true))";
+  let poly_a =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+       (defpoly some (params A) (-> A (Maybe A)) (lambda (x A) (variant Some x)))\n\
+       (def n Nat ((inst id Nat) 4))\n\
+       (def s String ((inst id String) \"ok\"))\n\
+       (def m (Maybe Nat) ((inst some Nat) 9))\n\
+       (def out Nat (case m (None _ 0) (Some value value)))"
+  in
+  let poly_b =
+    check
+      "(type Maybe (X) (Variant (None Unit) (Some X)))\n\
+       (defpoly id (params B) (-> B B) (lambda (y B) y))\n\
+       (defpoly some (params B) (-> B (Maybe B)) (lambda (y B) (variant Some y)))\n\
+       (def n Nat ((inst id Nat) 4))\n\
+       (def s String ((inst id String) \"ok\"))\n\
+       (def m (Maybe Nat) ((inst some Nat) 9))\n\
+       (def out Nat (case m (None _ 0) (Some value value)))"
+  in
+  assert_equal "defpoly type parameter alpha-stable hash" (Kernel.hash_program poly_a)
+    (Kernel.hash_program poly_b);
+  let poly_n, _ = Runtime.normalize_def poly_a "n" in
+  assert_equal "defpoly Nat instantiation" "4" (Runtime.value_to_string poly_n);
+  let poly_s, _ = Runtime.normalize_def poly_a "s" in
+  assert_equal "defpoly String instantiation" "\"ok\"" (Runtime.value_to_string poly_s);
+  let poly_out, _ = Runtime.normalize_def poly_a "out" in
+  assert_equal "defpoly variant instantiation" "9" (Runtime.value_to_string poly_out);
+  expect_check_error
+    "(defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+     (def bad (-> Nat Nat) id)";
+  expect_check_error
+    "(defpoly id (params A) (-> A A) (lambda (x A) x))\n(def bad Nat ((inst id) 1))";
+  expect_check_error
+    "(defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+     (def bad Nat ((inst id Nat String) 1))";
   let result_pair =
     check
       "(variant Result (params E A) (Err E) (Ok A))\n\

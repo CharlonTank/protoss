@@ -29,6 +29,8 @@ let rec parse_type = function
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (parse_type t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (parse_type t)
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (parse_type t)
+  | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> TVar (int_of_string n)
+  | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom n; t ] -> TForall (int_of_string n, parse_type t)
   | Sexp.List [ Sexp.Atom "->"; a; b ] -> TFun (parse_type a, parse_type b)
   | Sexp.List (Sexp.Atom "Record" :: fields) ->
       let fields =
@@ -101,6 +103,8 @@ let rec parse_expr = function
       EVariant (parse_type ty, con, parse_expr e)
   | Sexp.List [ Sexp.Atom "variant"; Sexp.Atom con; e ] ->
       EVariantInferred (con, parse_expr e)
+  | Sexp.List (Sexp.Atom "inst" :: Sexp.Atom n :: args) ->
+      EInst (n, List.map parse_type args)
   | Sexp.List (Sexp.Atom "case" :: scrut :: branches) ->
       ECase (parse_expr scrut, List.map parse_branch branches)
   | Sexp.List [ Sexp.Atom "foldNat"; n; z; step ] ->
@@ -164,6 +168,7 @@ let parse_structural_defrec name typ clauses =
       ] ) ->
       {
         name;
+        type_params = [];
         typ;
         body =
           ELambda
@@ -179,6 +184,7 @@ let parse_structural_defrec name typ clauses =
       ] ) ->
       {
         name;
+        type_params = [];
         typ;
         body =
           ELambda
@@ -214,6 +220,8 @@ let rec qualify_type local_types params = function
   | TList t -> TList (qualify_type local_types params t)
   | TView t -> TView (qualify_type local_types params t)
   | TProcess t -> TProcess (qualify_type local_types params t)
+  | TVar i -> TVar i
+  | TForall (arity, body) -> TForall (arity, qualify_type local_types params body)
   | TNamed (n, args) ->
       let args = List.map (qualify_type local_types params) args in
       if List.exists (String.equal n) params then TNamed (n, args)
@@ -222,7 +230,7 @@ let rec qualify_type local_types params = function
         | Some q -> TNamed (q, args)
         | None -> TNamed (n, args))
 
-let rec qualify_expr local_defs local_types bound = function
+let rec qualify_expr local_defs local_types type_params bound = function
   | EUnit -> EUnit
   | EBool b -> EBool b
   | ENat n -> ENat n
@@ -232,73 +240,95 @@ let rec qualify_expr local_defs local_types bound = function
       else (
         match assoc_opt n local_defs with Some q -> EName q | None -> EName n)
   | ELambda (x, t, body) ->
-      ELambda (x, qualify_type local_types [] t, qualify_expr local_defs local_types (x :: bound) body)
+      ELambda
+        ( x,
+          qualify_type local_types type_params t,
+          qualify_expr local_defs local_types type_params (x :: bound) body )
   | EApp (f, x) ->
-      EApp (qualify_expr local_defs local_types bound f, qualify_expr local_defs local_types bound x)
+      EApp
+        ( qualify_expr local_defs local_types type_params bound f,
+          qualify_expr local_defs local_types type_params bound x )
   | ELet (x, e, body) ->
       ELet
         ( x,
-          qualify_expr local_defs local_types bound e,
-          qualify_expr local_defs local_types (x :: bound) body )
+          qualify_expr local_defs local_types type_params bound e,
+          qualify_expr local_defs local_types type_params (x :: bound) body )
   | ERecord fields ->
-      ERecord (sort_fields (List.map (fun (n, e) -> (n, qualify_expr local_defs local_types bound e)) fields))
-  | EField (e, field) -> EField (qualify_expr local_defs local_types bound e, field)
+      ERecord
+        (sort_fields
+           (List.map
+              (fun (n, e) -> (n, qualify_expr local_defs local_types type_params bound e))
+              fields))
+  | EField (e, field) -> EField (qualify_expr local_defs local_types type_params bound e, field)
   | EVariant (t, con, e) ->
-      EVariant (qualify_type local_types [] t, con, qualify_expr local_defs local_types bound e)
-  | EVariantInferred (con, e) -> EVariantInferred (con, qualify_expr local_defs local_types bound e)
+      EVariant
+        ( qualify_type local_types type_params t,
+          con,
+          qualify_expr local_defs local_types type_params bound e )
+  | EVariantInferred (con, e) ->
+      EVariantInferred (con, qualify_expr local_defs local_types type_params bound e)
+  | EInst (n, args) ->
+      let n =
+        if List.exists (String.equal n) bound then n
+        else match assoc_opt n local_defs with Some q -> q | None -> n
+      in
+      EInst (n, List.map (qualify_type local_types type_params) args)
   | ECase (e, branches) ->
       ECase
-        ( qualify_expr local_defs local_types bound e,
-          List.map (qualify_branch local_defs local_types bound) branches )
+        ( qualify_expr local_defs local_types type_params bound e,
+          List.map (qualify_branch local_defs local_types type_params bound) branches )
   | EFoldNat (n, z, step) ->
       EFoldNat
-        ( qualify_expr local_defs local_types bound n,
-          qualify_expr local_defs local_types bound z,
-          qualify_expr local_defs local_types bound step )
-  | ENil t -> ENil (qualify_type local_types [] t)
+        ( qualify_expr local_defs local_types type_params bound n,
+          qualify_expr local_defs local_types type_params bound z,
+          qualify_expr local_defs local_types type_params bound step )
+  | ENil t -> ENil (qualify_type local_types type_params t)
   | ECons (t, head, tail) ->
       ECons
-        ( qualify_type local_types [] t,
-          qualify_expr local_defs local_types bound head,
-          qualify_expr local_defs local_types bound tail )
+        ( qualify_type local_types type_params t,
+          qualify_expr local_defs local_types type_params bound head,
+          qualify_expr local_defs local_types type_params bound tail )
   | EFoldList (xs, z, step) ->
       EFoldList
-        ( qualify_expr local_defs local_types bound xs,
-          qualify_expr local_defs local_types bound z,
-          qualify_expr local_defs local_types bound step )
-  | EText e -> EText (qualify_expr local_defs local_types bound e)
+        ( qualify_expr local_defs local_types type_params bound xs,
+          qualify_expr local_defs local_types type_params bound z,
+          qualify_expr local_defs local_types type_params bound step )
+  | EText e -> EText (qualify_expr local_defs local_types type_params bound e)
   | EImage (src, alt) ->
       EImage
-        (qualify_expr local_defs local_types bound src, qualify_expr local_defs local_types bound alt)
+        ( qualify_expr local_defs local_types type_params bound src,
+          qualify_expr local_defs local_types type_params bound alt )
   | EButton (label, msg) ->
       EButton
-        ( qualify_expr local_defs local_types bound label,
-          qualify_expr local_defs local_types bound msg )
+        ( qualify_expr local_defs local_types type_params bound label,
+          qualify_expr local_defs local_types type_params bound msg )
   | EInput (value, handler) ->
       EInput
-        ( qualify_expr local_defs local_types bound value,
-          qualify_expr local_defs local_types bound handler )
-  | EColumn children -> EColumn (qualify_expr local_defs local_types bound children)
-  | ERow children -> ERow (qualify_expr local_defs local_types bound children)
+        ( qualify_expr local_defs local_types type_params bound value,
+          qualify_expr local_defs local_types type_params bound handler )
+  | EColumn children -> EColumn (qualify_expr local_defs local_types type_params bound children)
+  | ERow children -> ERow (qualify_expr local_defs local_types type_params bound children)
   | EListView (items, render) ->
       EListView
-        ( qualify_expr local_defs local_types bound items,
-          qualify_expr local_defs local_types bound render )
+        ( qualify_expr local_defs local_types type_params bound items,
+          qualify_expr local_defs local_types type_params bound render )
   | EWhenView (cond, view) ->
       EWhenView
-        (qualify_expr local_defs local_types bound cond, qualify_expr local_defs local_types bound view)
-  | EDone e -> EDone (qualify_expr local_defs local_types bound e)
+        ( qualify_expr local_defs local_types type_params bound cond,
+          qualify_expr local_defs local_types type_params bound view )
+  | EDone e -> EDone (qualify_expr local_defs local_types type_params bound e)
   | ERequest req -> ERequest req
   | EBind (p, x, t, body) ->
       EBind
-        ( qualify_expr local_defs local_types bound p,
+        ( qualify_expr local_defs local_types type_params bound p,
           x,
-          qualify_type local_types [] t,
-          qualify_expr local_defs local_types (x :: bound) body )
+          qualify_type local_types type_params t,
+          qualify_expr local_defs local_types type_params (x :: bound) body )
 
-and qualify_branch local_defs local_types bound = function
-  | BBool (b, e) -> BBool (b, qualify_expr local_defs local_types bound e)
-  | BVariant (con, x, e) -> BVariant (con, x, qualify_expr local_defs local_types (x :: bound) e)
+and qualify_branch local_defs local_types type_params bound = function
+  | BBool (b, e) -> BBool (b, qualify_expr local_defs local_types type_params bound e)
+  | BVariant (con, x, e) ->
+      BVariant (con, x, qualify_expr local_defs local_types type_params (x :: bound) e)
 
 let qualify_program module_name exports aliases defs =
   let local_defs = List.map (fun d -> (d.name, qualify module_name d.name)) defs in
@@ -318,8 +348,9 @@ let qualify_program module_name exports aliases defs =
       (fun d ->
         {
           name = qualify module_name d.name;
-          typ = qualify_type local_types [] d.typ;
-          body = qualify_expr local_defs local_types [] d.body;
+          type_params = d.type_params;
+          typ = qualify_type local_types d.type_params d.typ;
+          body = qualify_expr local_defs local_types d.type_params [] d.body;
         })
       defs
   in
@@ -364,7 +395,12 @@ let parse_toplevel = function
           type_body = TVariant (parse_named_type_fields "variant constructor" cases);
         }
   | Sexp.List [ Sexp.Atom "def"; Sexp.Atom n; ty; body ] ->
-      `Def { name = n; typ = parse_type ty; body = parse_expr body }
+      `Def { name = n; type_params = []; typ = parse_type ty; body = parse_expr body }
+  | Sexp.List [ Sexp.Atom "defpoly"; Sexp.Atom n; Sexp.List (Sexp.Atom "params" :: params); ty; body ] ->
+      let type_params = List.map atom params in
+      ensure_unique "type parameter" type_params;
+      if type_params = [] then fail ("defpoly requires at least one type parameter: " ^ n);
+      `Def { name = n; type_params; typ = parse_type ty; body = parse_expr body }
   | Sexp.List (Sexp.Atom "defrec" :: Sexp.Atom n :: ty :: clauses) ->
       `Def (parse_structural_defrec n (parse_type ty) clauses)
   | Sexp.List (Sexp.Atom "defrec" :: _) -> fail "invalid defrec form"

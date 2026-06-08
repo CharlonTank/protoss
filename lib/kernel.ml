@@ -47,6 +47,9 @@ let rec type_to_canonical = function
   | TList t -> "(List " ^ type_to_canonical t ^ ")"
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
   | TProcess t -> "(Process " ^ type_to_canonical t ^ ")"
+  | TVar i -> "(TVar " ^ string_of_int i ^ ")"
+  | TForall (arity, body) ->
+      "(Forall " ^ string_of_int arity ^ " " ^ type_to_canonical body ^ ")"
   | TNamed (n, _) -> fail ("unresolved type alias in canonical type: " ^ n)
 
 let req_capability = function
@@ -162,17 +165,26 @@ let req_to_canonical = function
   | ServerRequest (route, payload) ->
       "(ServerRequest " ^ Ast.quote route ^ " " ^ Ast.quote payload ^ ")"
 
+let builtin_type_names =
+  [ "Unit"; "Bool"; "Nat"; "String"; "List"; "View"; "Process"; "Record"; "Variant"; "->"; "Fun" ]
+
 let check_duplicate_names defs =
   let seen = Hashtbl.create 32 in
   List.iter
-    (fun d ->
+    (fun (d : def) ->
       if is_builtin d.name then fail ("definition shadows builtin: " ^ d.name);
       if Hashtbl.mem seen d.name then fail ("duplicate definition: " ^ d.name);
+      let params_seen = Hashtbl.create 8 in
+      List.iter
+        (fun param ->
+          if List.exists (String.equal param) builtin_type_names then
+            fail ("type parameter shadows builtin type: " ^ param);
+          if Hashtbl.mem params_seen param then
+            fail ("duplicate type parameter " ^ param ^ " in definition " ^ d.name);
+          Hashtbl.add params_seen param ())
+        d.type_params;
       Hashtbl.add seen d.name ())
     defs
-
-let builtin_type_names =
-  [ "Unit"; "Bool"; "Nat"; "String"; "List"; "View"; "Process"; "Record"; "Variant"; "->"; "Fun" ]
 
 let check_duplicate_type_aliases aliases =
   let seen = Hashtbl.create 32 in
@@ -217,6 +229,8 @@ let rec expand_type aliases vars stack = function
   | TList t -> TList (expand_type aliases vars stack t)
   | TView t -> TView (expand_type aliases vars stack t)
   | TProcess t -> TProcess (expand_type aliases vars stack t)
+  | TVar i -> TVar i
+  | TForall (arity, body) -> TForall (arity, expand_type aliases vars stack body)
   | TNamed (n, args) -> (
       let args = List.map (expand_type aliases vars stack) args in
       match assoc_opt n vars with
@@ -235,45 +249,71 @@ let rec expand_type aliases vars stack = function
             fail ("invalid builtin type application: " ^ Ast.string_of_typ (TNamed (n, args)))
           else fail ("unknown type alias: " ^ n))
 
-let rec expand_expr_types aliases = function
+let type_var_env params =
+  List.mapi (fun i param -> (param, TVar i)) params
+
+let rec expand_expr_types aliases vars = function
   | EUnit -> EUnit
   | EBool b -> EBool b
   | ENat n -> ENat n
   | EString s -> EString s
   | EName n -> EName n
-  | ELambda (x, t, body) -> ELambda (x, expand_type aliases [] [] t, expand_expr_types aliases body)
-  | EApp (f, x) -> EApp (expand_expr_types aliases f, expand_expr_types aliases x)
-  | ELet (x, e, body) -> ELet (x, expand_expr_types aliases e, expand_expr_types aliases body)
-  | ERecord fields -> ERecord (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types aliases e)) fields))
-  | EField (e, field) -> EField (expand_expr_types aliases e, field)
-  | EVariant (t, con, e) -> EVariant (expand_type aliases [] [] t, con, expand_expr_types aliases e)
-  | EVariantInferred (con, e) -> EVariantInferred (con, expand_expr_types aliases e)
-  | ECase (e, branches) -> ECase (expand_expr_types aliases e, List.map (expand_branch_types aliases) branches)
+  | ELambda (x, t, body) ->
+      ELambda (x, expand_type aliases vars [] t, expand_expr_types aliases vars body)
+  | EApp (f, x) -> EApp (expand_expr_types aliases vars f, expand_expr_types aliases vars x)
+  | ELet (x, e, body) ->
+      ELet (x, expand_expr_types aliases vars e, expand_expr_types aliases vars body)
+  | ERecord fields ->
+      ERecord
+        (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types aliases vars e)) fields))
+  | EField (e, field) -> EField (expand_expr_types aliases vars e, field)
+  | EVariant (t, con, e) ->
+      EVariant (expand_type aliases vars [] t, con, expand_expr_types aliases vars e)
+  | EVariantInferred (con, e) -> EVariantInferred (con, expand_expr_types aliases vars e)
+  | EInst (name, args) -> EInst (name, List.map (expand_type aliases vars []) args)
+  | ECase (e, branches) ->
+      ECase (expand_expr_types aliases vars e, List.map (expand_branch_types aliases vars) branches)
   | EFoldNat (n, z, step) ->
-      EFoldNat (expand_expr_types aliases n, expand_expr_types aliases z, expand_expr_types aliases step)
-  | ENil t -> ENil (expand_type aliases [] [] t)
+      EFoldNat
+        ( expand_expr_types aliases vars n,
+          expand_expr_types aliases vars z,
+          expand_expr_types aliases vars step )
+  | ENil t -> ENil (expand_type aliases vars [] t)
   | ECons (t, head, tail) ->
-      ECons (expand_type aliases [] [] t, expand_expr_types aliases head, expand_expr_types aliases tail)
+      ECons
+        ( expand_type aliases vars [] t,
+          expand_expr_types aliases vars head,
+          expand_expr_types aliases vars tail )
   | EFoldList (xs, z, step) ->
-      EFoldList (expand_expr_types aliases xs, expand_expr_types aliases z, expand_expr_types aliases step)
-  | EText e -> EText (expand_expr_types aliases e)
-  | EImage (src, alt) -> EImage (expand_expr_types aliases src, expand_expr_types aliases alt)
-  | EButton (label, msg) -> EButton (expand_expr_types aliases label, expand_expr_types aliases msg)
+      EFoldList
+        ( expand_expr_types aliases vars xs,
+          expand_expr_types aliases vars z,
+          expand_expr_types aliases vars step )
+  | EText e -> EText (expand_expr_types aliases vars e)
+  | EImage (src, alt) ->
+      EImage (expand_expr_types aliases vars src, expand_expr_types aliases vars alt)
+  | EButton (label, msg) ->
+      EButton (expand_expr_types aliases vars label, expand_expr_types aliases vars msg)
   | EInput (value, handler) ->
-      EInput (expand_expr_types aliases value, expand_expr_types aliases handler)
-  | EColumn children -> EColumn (expand_expr_types aliases children)
-  | ERow children -> ERow (expand_expr_types aliases children)
+      EInput (expand_expr_types aliases vars value, expand_expr_types aliases vars handler)
+  | EColumn children -> EColumn (expand_expr_types aliases vars children)
+  | ERow children -> ERow (expand_expr_types aliases vars children)
   | EListView (items, render) ->
-      EListView (expand_expr_types aliases items, expand_expr_types aliases render)
-  | EWhenView (cond, view) -> EWhenView (expand_expr_types aliases cond, expand_expr_types aliases view)
-  | EDone e -> EDone (expand_expr_types aliases e)
+      EListView (expand_expr_types aliases vars items, expand_expr_types aliases vars render)
+  | EWhenView (cond, view) ->
+      EWhenView (expand_expr_types aliases vars cond, expand_expr_types aliases vars view)
+  | EDone e -> EDone (expand_expr_types aliases vars e)
   | ERequest req -> ERequest req
   | EBind (p, x, t, body) ->
-      EBind (expand_expr_types aliases p, x, expand_type aliases [] [] t, expand_expr_types aliases body)
+      EBind
+        ( expand_expr_types aliases vars p,
+          x,
+          expand_type aliases vars [] t,
+          expand_expr_types aliases vars body )
 
-and expand_branch_types aliases = function
-  | BBool (b, e) -> BBool (b, expand_expr_types aliases e)
-  | BVariant (con, x, e) -> BVariant (con, x, expand_expr_types aliases e)
+and expand_branch_types aliases vars = function
+  | BBool (b, e) -> BBool (b, expand_expr_types aliases vars e)
+  | BVariant (con, x, e) -> BVariant (con, x, expand_expr_types aliases vars e)
 
 let resolve_program_types program =
   check_duplicate_type_aliases program.type_aliases;
@@ -287,11 +327,16 @@ let resolve_program_types program =
   in
   let defs =
     List.map
-      (fun d ->
+      (fun (d : def) ->
+        let vars = type_var_env d.type_params in
+        let typ = expand_type aliases vars [] d.typ in
         {
           d with
-          typ = expand_type aliases [] [] d.typ;
-          body = expand_expr_types aliases d.body;
+          typ =
+            (match d.type_params with
+            | [] -> typ
+            | params -> TForall (List.length params, typ));
+          body = expand_expr_types aliases vars d.body;
         })
       program.defs
   in
@@ -312,6 +357,8 @@ let collect_deps defs =
     | ERecord fields -> List.fold_left (fun a (_, e) -> expr bound a e) acc fields
     | EField (e, _) -> expr bound acc e
     | EVariant (_, _, e) | EVariantInferred (_, e) -> expr bound acc e
+    | EInst (n, _) ->
+        if is_global n && not (List.exists (String.equal n) acc) then n :: acc else acc
     | ECase (e, branches) ->
         List.fold_left
           (fun a -> function
@@ -349,18 +396,48 @@ let reject_cycles defs =
   in
   List.iter (fun d -> visit [] d.name) defs
 
+type global_type = { global_type_params : string list; global_typ : typ }
+
 type type_ctx = {
-  globals : (string * typ) list;
+  globals : (string * global_type) list;
   capabilities : string list;
   locals : (string * typ) list;
 }
+
+let rec subst_type args = function
+  | TUnit -> TUnit
+  | TBool -> TBool
+  | TNat -> TNat
+  | TString -> TString
+  | TFun (a, b) -> TFun (subst_type args a, subst_type args b)
+  | TRecord fields -> TRecord (sort_fields (List.map (fun (n, t) -> (n, subst_type args t)) fields))
+  | TVariant cases -> TVariant (sort_fields (List.map (fun (n, t) -> (n, subst_type args t)) cases))
+  | TList t -> TList (subst_type args t)
+  | TView t -> TView (subst_type args t)
+  | TProcess t -> TProcess (subst_type args t)
+  | TVar i -> option_or_fail ("type argument missing for TVar " ^ string_of_int i) (List.nth_opt args i)
+  | TForall (arity, body) -> TForall (arity, subst_type args body)
+  | TNamed (n, ts) -> TNamed (n, List.map (subst_type args) ts)
+
+let instantiate_type name params typ args =
+  let arity = List.length params and actual = List.length args in
+  if arity <> actual then
+    fail
+      ("polymorphic definition " ^ name ^ " expects " ^ string_of_int arity
+     ^ " type argument(s), got " ^ string_of_int actual);
+  let body = match typ with TForall (_, body) -> body | t -> t in
+  subst_type args body
+
+let lookup_global ctx n =
+  assoc_opt n ctx.globals
 
 let lookup_type ctx n =
   match assoc_opt n ctx.locals with
   | Some t -> Some t
   | None -> (
-      match assoc_opt n ctx.globals with
-      | Some t -> Some t
+      match lookup_global ctx n with
+      | Some g when g.global_type_params = [] -> Some g.global_typ
+      | Some _ -> fail ("polymorphic definition requires inst: " ^ n)
       | None -> assoc_opt n builtin_types)
 
 let edit_distance a b =
@@ -401,8 +478,9 @@ let rec contains_process_type = function
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
   | TList t | TView t -> contains_process_type t
+  | TForall (_, t) -> contains_process_type t
   | TNamed _ -> false
-  | TUnit | TBool | TNat | TString -> false
+  | TVar _ | TUnit | TBool | TNat | TString -> false
 
 let is_process_type = function TProcess _ -> true | _ -> false
 
@@ -465,6 +543,12 @@ let rec infer ctx = function
       | _ -> fail "variant expression must carry a Variant type")
   | EVariantInferred (con, _) ->
       fail ("variant constructor " ^ con ^ " requires an expected Variant type")
+  | EInst (name, args) -> (
+      match lookup_global ctx name with
+      | Some g when g.global_type_params <> [] ->
+          instantiate_type name g.global_type_params g.global_typ args
+      | Some _ -> fail ("definition is not polymorphic: " ^ name)
+      | None -> fail ("unknown polymorphic definition: " ^ name ^ "." ^ suggestion ctx name))
   | ECase (scrut, branches) -> (
       match infer ctx scrut with
       | TBool -> infer_bool_case ctx branches
@@ -635,6 +719,12 @@ let rec infer_elab ctx expr =
       (ty, EVariant (ty, con, e))
   | EVariantInferred (con, _) ->
       fail ("variant constructor " ^ con ^ " requires an expected Variant type")
+  | EInst (name, args) -> (
+      match lookup_global ctx name with
+      | Some g when g.global_type_params <> [] ->
+          (instantiate_type name g.global_type_params g.global_typ args, EInst (name, args))
+      | Some _ -> fail ("definition is not polymorphic: " ^ name)
+      | None -> fail ("unknown polymorphic definition: " ^ name ^ "." ^ suggestion ctx name))
   | ECase (scrut, branches) -> (
       let scrut_ty, scrut = infer_elab ctx scrut in
       match scrut_ty with
@@ -884,6 +974,7 @@ type cterm =
   | CRecord of (string * cterm) list
   | CField of cterm * string
   | CVariant of typ * string * cterm
+  | CInst of string * typ list
   | CCase of cterm * cbranch list
   | CFoldNat of cterm * cterm * cterm
   | CNil of typ
@@ -925,6 +1016,9 @@ let rec canonical_expr env = function
   | EField (e, field) -> CField (canonical_expr env e, field)
   | EVariant (t, con, e) -> CVariant (t, con, canonical_expr env e)
   | EVariantInferred (con, _) -> fail ("unelaborated variant constructor in canonicalization: " ^ con)
+  | EInst (name, args) ->
+      if index_of name env 0 <> None then fail ("cannot instantiate local binding: " ^ name);
+      CInst (name, args)
   | ECase (e, branches) -> CCase (canonical_expr env e, canonical_branches env branches)
   | EFoldNat (n, z, step) ->
       CFoldNat (canonical_expr env n, canonical_expr env z, canonical_expr env step)
@@ -978,6 +1072,10 @@ let rec cterm_to_string = function
   | CField (e, field) -> "(field " ^ cterm_to_string e ^ " " ^ field ^ ")"
   | CVariant (t, con, e) ->
       "(variant " ^ type_to_canonical t ^ " " ^ con ^ " " ^ cterm_to_string e ^ ")"
+  | CInst (name, args) ->
+      "(inst @" ^ name ^ " "
+      ^ String.concat " " (List.map type_to_canonical args)
+      ^ ")"
   | CCase (e, branches) ->
       "(case " ^ cterm_to_string e ^ " "
       ^ String.concat " " (List.map cbranch_to_string branches)
@@ -1049,6 +1147,10 @@ let rec cterm_to_canonical_v2 def_id_of = function
   | CVariant (t, con, e) ->
       "(variant " ^ type_to_canonical t ^ " " ^ con ^ " "
       ^ cterm_to_canonical_v2 def_id_of e ^ ")"
+  | CInst (name, args) ->
+      "(inst " ^ def_id_of name ^ " "
+      ^ String.concat " " (List.map type_to_canonical args)
+      ^ ")"
   | CCase (e, branches) ->
       "(case " ^ cterm_to_canonical_v2 def_id_of e ^ " "
       ^ String.concat " " (List.map (cbranch_to_canonical_v2 def_id_of) branches)
@@ -1168,6 +1270,15 @@ let rec type_to_graph_json = function
       json_obj [ json_field "tag" (json_string "View"); json_field "message" (type_to_graph_json t) ]
   | TProcess t ->
       json_obj [ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
+  | TVar i ->
+      json_obj [ json_field "tag" (json_string "TypeVar"); json_field "index" (string_of_int i) ]
+  | TForall (arity, body) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Forall");
+          json_field "arity" (string_of_int arity);
+          json_field "body" (type_to_graph_json body);
+        ]
   | TNamed (n, _) -> fail ("unresolved type alias in graph type: " ^ n)
 
 let req_to_graph_json req =
@@ -1272,6 +1383,13 @@ let rec cterm_to_graph_json def_id_of = function
           json_field "type" (type_to_graph_json typ);
           json_field "constructor" (json_string con);
           json_field "payload" (cterm_to_graph_json def_id_of payload);
+        ]
+  | CInst (name, args) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Inst");
+          json_field "defId" (json_string (def_id_of name));
+          json_field "typeArgs" (json_array type_to_graph_json args);
         ]
   | CCase (scrutinee, branches) ->
       json_obj
@@ -1408,6 +1526,9 @@ let rec type_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom i ] -> TVar (int_of_string i)
+  | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom arity; body ] ->
+      TForall (int_of_string arity, type_of_canonical_sexp body)
   | Sexp.List (Sexp.Atom "Record" :: fields) ->
       TRecord
         (sort_fields
@@ -1469,6 +1590,8 @@ let rec cterm_of_canonical_sexp = function
       CField (cterm_of_canonical_sexp e, field)
   | Sexp.List [ Sexp.Atom "variant"; typ; Sexp.Atom con; e ] ->
       CVariant (type_of_canonical_sexp typ, con, cterm_of_canonical_sexp e)
+  | Sexp.List (Sexp.Atom "inst" :: Sexp.Atom def_id :: args) ->
+      CInst (def_id, List.map type_of_canonical_sexp args)
   | Sexp.List (Sexp.Atom "case" :: e :: branches) ->
       CCase (cterm_of_canonical_sexp e, List.map cbranch_of_canonical_sexp branches)
   | Sexp.List [ Sexp.Atom "foldNat"; n; zero; step ] ->
@@ -1563,16 +1686,19 @@ let check_program (program : program) =
   validate_capabilities program.capabilities;
   check_duplicate_names program.defs;
   reject_cycles program.defs;
-  let globals = List.map (fun d -> (d.name, d.typ)) program.defs in
+  let globals =
+    List.map (fun d -> (d.name, { global_type_params = d.type_params; global_typ = d.typ })) program.defs
+  in
   let ctx = { globals; capabilities = program.capabilities; locals = [] } in
   let defs =
     List.map
       (fun d ->
         try
-          let actual, body = check_elab ctx d.typ d.body in
-          if not (equal_typ d.typ actual) then
+          let expected = match d.typ with TForall (_, body) -> body | t -> t in
+          let actual, body = check_elab ctx expected d.body in
+          if not (equal_typ expected actual) then
             fail
-              ("definition " ^ d.name ^ ": expected " ^ string_of_typ d.typ ^ ", got "
+              ("definition " ^ d.name ^ ": expected " ^ string_of_typ expected ^ ", got "
              ^ string_of_typ actual ^ ", expression " ^ string_of_expr d.body);
           { d with body }
         with Error msg ->
@@ -1677,6 +1803,7 @@ let rec shift amount cutoff = function
   | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, shift amount cutoff e)) fields)
   | CField (e, field) -> CField (shift amount cutoff e, field)
   | CVariant (t, con, e) -> CVariant (t, con, shift amount cutoff e)
+  | CInst (name, args) -> CInst (name, args)
   | CCase (e, branches) -> CCase (shift amount cutoff e, List.map (shift_branch amount cutoff) branches)
   | CFoldNat (n, zero, step) ->
       CFoldNat (shift amount cutoff n, shift amount cutoff zero, shift amount cutoff step)
@@ -1713,6 +1840,7 @@ let rec subst index replacement = function
   | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, subst index replacement e)) fields)
   | CField (e, field) -> CField (subst index replacement e, field)
   | CVariant (t, con, e) -> CVariant (t, con, subst index replacement e)
+  | CInst (name, args) -> CInst (name, args)
   | CCase (e, branches) -> CCase (subst index replacement e, List.map (subst_branch index replacement) branches)
   | CFoldNat (n, zero, step) ->
       CFoldNat
@@ -1742,6 +1870,47 @@ and subst_branch index replacement = function
 
 let subst_top replacement body = shift (-1) 0 (subst 0 (shift 1 0 replacement) body)
 
+let rec subst_type_in_cterm args = function
+  | CUnit -> CUnit
+  | CBool b -> CBool b
+  | CNat n -> CNat n
+  | CString s -> CString s
+  | CVar i -> CVar i
+  | CGlobal n -> CGlobal n
+  | CLambda (t, body) -> CLambda (subst_type args t, subst_type_in_cterm args body)
+  | CApp (f, x) -> CApp (subst_type_in_cterm args f, subst_type_in_cterm args x)
+  | CLet (e, body) -> CLet (subst_type_in_cterm args e, subst_type_in_cterm args body)
+  | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, subst_type_in_cterm args e)) fields)
+  | CField (e, field) -> CField (subst_type_in_cterm args e, field)
+  | CVariant (t, con, e) -> CVariant (subst_type args t, con, subst_type_in_cterm args e)
+  | CInst (name, nested_args) -> CInst (name, List.map (subst_type args) nested_args)
+  | CCase (e, branches) -> CCase (subst_type_in_cterm args e, List.map (subst_type_in_branch args) branches)
+  | CFoldNat (n, zero, step) ->
+      CFoldNat
+        (subst_type_in_cterm args n, subst_type_in_cterm args zero, subst_type_in_cterm args step)
+  | CNil t -> CNil (subst_type args t)
+  | CCons (t, head, tail) ->
+      CCons (subst_type args t, subst_type_in_cterm args head, subst_type_in_cterm args tail)
+  | CFoldList (xs, zero, step) ->
+      CFoldList
+        (subst_type_in_cterm args xs, subst_type_in_cterm args zero, subst_type_in_cterm args step)
+  | CText e -> CText (subst_type_in_cterm args e)
+  | CImage (src, alt) -> CImage (subst_type_in_cterm args src, subst_type_in_cterm args alt)
+  | CButton (label, msg) -> CButton (subst_type_in_cterm args label, subst_type_in_cterm args msg)
+  | CInput (value, handler) -> CInput (subst_type_in_cterm args value, subst_type_in_cterm args handler)
+  | CColumn children -> CColumn (subst_type_in_cterm args children)
+  | CRow children -> CRow (subst_type_in_cterm args children)
+  | CListView (items, render) -> CListView (subst_type_in_cterm args items, subst_type_in_cterm args render)
+  | CWhenView (cond, view) -> CWhenView (subst_type_in_cterm args cond, subst_type_in_cterm args view)
+  | CDone e -> CDone (subst_type_in_cterm args e)
+  | CRequest req -> CRequest req
+  | CBind (p, t, body) ->
+      CBind (subst_type_in_cterm args p, subst_type args t, subst_type_in_cterm args body)
+
+and subst_type_in_branch args = function
+  | CBBool (b, e) -> CBBool (b, subst_type_in_cterm args e)
+  | CBVariant (con, e) -> CBVariant (con, subst_type_in_cterm args e)
+
 let rec normalize_cterm checked = function
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CRequest _ | CNil _ as t -> t
   | CGlobal "succ" -> CGlobal "succ"
@@ -1751,6 +1920,12 @@ let rec normalize_cterm checked = function
       | Some d ->
           let canonical = parse_serialized_def d.canonical in
           normalize_cterm checked canonical.cbody)
+  | CInst (name, args) -> (
+      match checked_def_by_name checked name with
+      | None -> CInst (name, args)
+      | Some d ->
+          let canonical = parse_serialized_def d.canonical in
+          normalize_cterm checked (subst_type_in_cterm args canonical.cbody))
   | CLambda (t, body) -> CLambda (t, normalize_cterm checked body)
   | CApp (f, x) -> (
       let nf = normalize_cterm checked f in

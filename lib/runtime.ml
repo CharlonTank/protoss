@@ -226,6 +226,12 @@ let rec eval_cterm st env = function
       else if List.exists (String.equal n) [ "prim.Nat.eq"; "prim.String.concat"; "prim.String.eq" ]
       then VClosure (TUnit, Kernel.CGlobal n, [])
       else eval_def st n
+  | Kernel.CInst (n, args) -> (
+      match def_by_ref st.checked n with
+      | None -> fail ("unknown polymorphic definition at runtime: " ^ n)
+      | Some d ->
+          let canonical = Kernel.parse_serialized_def d.canonical in
+          eval_cterm st [] (Kernel.subst_type_in_cterm args canonical.cbody))
   | Kernel.CLambda (t, body) -> VClosure (t, body, env)
   | Kernel.CApp (f, arg) ->
       let fv = eval_cterm st env f in

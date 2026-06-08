@@ -9,6 +9,8 @@ type typ =
   | TList of typ
   | TView of typ
   | TProcess of typ
+  | TVar of int
+  | TForall of int * typ
   | TNamed of string * typ list
 
 type req =
@@ -32,6 +34,7 @@ type expr =
   | EField of expr * string
   | EVariant of typ * string * expr
   | EVariantInferred of string * expr
+  | EInst of string * typ list
   | ECase of expr * branch list
   | EFoldNat of expr * expr * expr
   | ENil of typ
@@ -55,6 +58,7 @@ and branch =
 
 type def = {
   name : string;
+  type_params : string list;
   typ : typ;
   body : expr;
 }
@@ -86,6 +90,9 @@ let rec equal_typ a b =
   | TView TUnit, TView _ | TView _, TView TUnit -> true
   | TView a, TView b -> equal_typ a b
   | TProcess a, TProcess b -> equal_typ a b
+  | TVar a, TVar b -> a = b
+  | TForall (arity_a, body_a), TForall (arity_b, body_b) ->
+      arity_a = arity_b && equal_typ body_a body_b
   | TNamed (a, args_a), TNamed (b, args_b) ->
       String.equal a b
       && List.length args_a = List.length args_b
@@ -113,32 +120,39 @@ let quote s =
   Buffer.add_char b '"';
   Buffer.contents b
 
-let rec string_of_typ = function
+let rec string_of_typ_with_params params = function
   | TUnit -> "Unit"
   | TBool -> "Bool"
   | TNat -> "Nat"
   | TString -> "String"
-  | TFun (a, b) -> "(-> " ^ string_of_typ a ^ " " ^ string_of_typ b ^ ")"
+  | TFun (a, b) ->
+      "(-> " ^ string_of_typ_with_params params a ^ " " ^ string_of_typ_with_params params b ^ ")"
   | TRecord fields ->
       "(Record "
       ^ String.concat " "
           (List.map
-             (fun (n, t) -> "(" ^ n ^ " " ^ string_of_typ t ^ ")")
+             (fun (n, t) -> "(" ^ n ^ " " ^ string_of_typ_with_params params t ^ ")")
              (sort_fields fields))
       ^ ")"
   | TVariant cases ->
       "(Variant "
       ^ String.concat " "
           (List.map
-             (fun (n, t) -> "(" ^ n ^ " " ^ string_of_typ t ^ ")")
+             (fun (n, t) -> "(" ^ n ^ " " ^ string_of_typ_with_params params t ^ ")")
              (sort_fields cases))
       ^ ")"
-  | TList t -> "(List " ^ string_of_typ t ^ ")"
-  | TView t -> "(View " ^ string_of_typ t ^ ")"
-  | TProcess t -> "(Process " ^ string_of_typ t ^ ")"
+  | TList t -> "(List " ^ string_of_typ_with_params params t ^ ")"
+  | TView t -> "(View " ^ string_of_typ_with_params params t ^ ")"
+  | TProcess t -> "(Process " ^ string_of_typ_with_params params t ^ ")"
+  | TVar i -> (
+      match List.nth_opt params i with Some name -> name | None -> "(TVar " ^ string_of_int i ^ ")")
+  | TForall (arity, body) ->
+      "(Forall " ^ string_of_int arity ^ " " ^ string_of_typ_with_params params body ^ ")"
   | TNamed (n, []) -> n
   | TNamed (n, args) ->
-      "(" ^ n ^ " " ^ String.concat " " (List.map string_of_typ args) ^ ")"
+      "(" ^ n ^ " " ^ String.concat " " (List.map (string_of_typ_with_params params) args) ^ ")"
+
+let string_of_typ t = string_of_typ_with_params [] t
 
 let string_of_req = function
   | AskHuman prompt -> "(Human.ask " ^ quote prompt ^ ")"
@@ -149,7 +163,7 @@ let string_of_req = function
   | ServerRequest (route, payload) ->
       "(Server.request " ^ quote route ^ " " ^ quote payload ^ ")"
 
-let rec string_of_expr = function
+let rec string_of_expr_with_params params = function
   | EUnit -> "unit"
   | EBool true -> "true"
   | EBool false -> "false"
@@ -157,60 +171,88 @@ let rec string_of_expr = function
   | EString s -> quote s
   | EName n -> n
   | ELambda (x, t, body) ->
-      "(lambda (" ^ x ^ " " ^ string_of_typ t ^ ") " ^ string_of_expr body ^ ")"
-  | EApp (f, x) -> "(" ^ string_of_expr f ^ " " ^ string_of_expr x ^ ")"
+      "(lambda (" ^ x ^ " " ^ string_of_typ_with_params params t ^ ") "
+      ^ string_of_expr_with_params params body ^ ")"
+  | EApp (f, x) ->
+      "(" ^ string_of_expr_with_params params f ^ " " ^ string_of_expr_with_params params x ^ ")"
   | ELet (x, e, body) ->
-      "(let (" ^ x ^ " " ^ string_of_expr e ^ ") " ^ string_of_expr body ^ ")"
+      "(let (" ^ x ^ " " ^ string_of_expr_with_params params e ^ ") "
+      ^ string_of_expr_with_params params body ^ ")"
   | ERecord fields ->
       "(record "
       ^ String.concat " "
           (List.map
-             (fun (n, e) -> "(" ^ n ^ " " ^ string_of_expr e ^ ")")
+             (fun (n, e) -> "(" ^ n ^ " " ^ string_of_expr_with_params params e ^ ")")
              (sort_fields fields))
       ^ ")"
-  | EField (e, field) -> "(get " ^ string_of_expr e ^ " " ^ field ^ ")"
+  | EField (e, field) -> "(get " ^ string_of_expr_with_params params e ^ " " ^ field ^ ")"
   | EVariant (t, con, e) ->
-      "(variant " ^ string_of_typ t ^ " " ^ con ^ " " ^ string_of_expr e ^ ")"
-  | EVariantInferred (con, e) -> "(variant " ^ con ^ " " ^ string_of_expr e ^ ")"
+      "(variant " ^ string_of_typ_with_params params t ^ " " ^ con ^ " "
+      ^ string_of_expr_with_params params e ^ ")"
+  | EVariantInferred (con, e) ->
+      "(variant " ^ con ^ " " ^ string_of_expr_with_params params e ^ ")"
+  | EInst (name, args) ->
+      "(inst " ^ name
+      ^ (match args with
+        | [] -> ""
+        | _ -> " " ^ String.concat " " (List.map (string_of_typ_with_params params) args))
+      ^ ")"
   | ECase (e, branches) ->
-      "(case " ^ string_of_expr e ^ " "
-      ^ String.concat " " (List.map string_of_branch branches)
+      "(case " ^ string_of_expr_with_params params e ^ " "
+      ^ String.concat " " (List.map (string_of_branch_with_params params) branches)
       ^ ")"
   | EFoldNat (n, z, step) ->
-      "(foldNat " ^ string_of_expr n ^ " " ^ string_of_expr z ^ " "
-      ^ string_of_expr step ^ ")"
-  | ENil t -> "(Nil " ^ string_of_typ t ^ ")"
+      "(foldNat " ^ string_of_expr_with_params params n ^ " "
+      ^ string_of_expr_with_params params z ^ " " ^ string_of_expr_with_params params step ^ ")"
+  | ENil t -> "(Nil " ^ string_of_typ_with_params params t ^ ")"
   | ECons (t, head, tail) ->
-      "(Cons " ^ string_of_typ t ^ " " ^ string_of_expr head ^ " " ^ string_of_expr tail ^ ")"
+      "(Cons " ^ string_of_typ_with_params params t ^ " "
+      ^ string_of_expr_with_params params head ^ " " ^ string_of_expr_with_params params tail ^ ")"
   | EFoldList (xs, zero, step) ->
-      "(foldList " ^ string_of_expr xs ^ " " ^ string_of_expr zero ^ " "
-      ^ string_of_expr step ^ ")"
-  | EText e -> "(text " ^ string_of_expr e ^ ")"
+      "(foldList " ^ string_of_expr_with_params params xs ^ " "
+      ^ string_of_expr_with_params params zero ^ " " ^ string_of_expr_with_params params step ^ ")"
+  | EText e -> "(text " ^ string_of_expr_with_params params e ^ ")"
   | EImage (src, alt) ->
-      "(image " ^ string_of_expr src ^ " " ^ string_of_expr alt ^ ")"
+      "(image " ^ string_of_expr_with_params params src ^ " "
+      ^ string_of_expr_with_params params alt ^ ")"
   | EButton (label, msg) ->
-      "(button " ^ string_of_expr label ^ " " ^ string_of_expr msg ^ ")"
+      "(button " ^ string_of_expr_with_params params label ^ " "
+      ^ string_of_expr_with_params params msg ^ ")"
   | EInput (value, handler) ->
-      "(input " ^ string_of_expr value ^ " " ^ string_of_expr handler ^ ")"
-  | EColumn children -> "(column " ^ string_of_expr children ^ ")"
-  | ERow children -> "(row " ^ string_of_expr children ^ ")"
+      "(input " ^ string_of_expr_with_params params value ^ " "
+      ^ string_of_expr_with_params params handler ^ ")"
+  | EColumn children -> "(column " ^ string_of_expr_with_params params children ^ ")"
+  | ERow children -> "(row " ^ string_of_expr_with_params params children ^ ")"
   | EListView (items, render) ->
-      "(list " ^ string_of_expr items ^ " " ^ string_of_expr render ^ ")"
+      "(list " ^ string_of_expr_with_params params items ^ " "
+      ^ string_of_expr_with_params params render ^ ")"
   | EWhenView (cond, view) ->
-      "(when " ^ string_of_expr cond ^ " " ^ string_of_expr view ^ ")"
-  | EDone e -> "(done " ^ string_of_expr e ^ ")"
+      "(when " ^ string_of_expr_with_params params cond ^ " "
+      ^ string_of_expr_with_params params view ^ ")"
+  | EDone e -> "(done " ^ string_of_expr_with_params params e ^ ")"
   | ERequest req -> string_of_req req
   | EBind (p, x, t, body) ->
-      "(bind " ^ string_of_expr p ^ " (lambda (" ^ x ^ " " ^ string_of_typ t
-      ^ ") " ^ string_of_expr body ^ "))"
+      "(bind " ^ string_of_expr_with_params params p ^ " (lambda (" ^ x ^ " "
+      ^ string_of_typ_with_params params t ^ ") " ^ string_of_expr_with_params params body ^ "))"
 
-and string_of_branch = function
-  | BBool (true, e) -> "(true " ^ string_of_expr e ^ ")"
-  | BBool (false, e) -> "(false " ^ string_of_expr e ^ ")"
-  | BVariant (con, x, e) -> "(" ^ con ^ " " ^ x ^ " " ^ string_of_expr e ^ ")"
+and string_of_branch_with_params params = function
+  | BBool (true, e) -> "(true " ^ string_of_expr_with_params params e ^ ")"
+  | BBool (false, e) -> "(false " ^ string_of_expr_with_params params e ^ ")"
+  | BVariant (con, x, e) ->
+      "(" ^ con ^ " " ^ x ^ " " ^ string_of_expr_with_params params e ^ ")"
 
-let string_of_def d =
-  "(def " ^ d.name ^ " " ^ string_of_typ d.typ ^ " " ^ string_of_expr d.body ^ ")"
+let string_of_expr e = string_of_expr_with_params [] e
+
+let string_of_branch branch = string_of_branch_with_params [] branch
+
+let string_of_def (d : def) =
+  match d.type_params with
+  | [] -> "(def " ^ d.name ^ " " ^ string_of_typ d.typ ^ " " ^ string_of_expr d.body ^ ")"
+  | params ->
+      let body_ty = match d.typ with TForall (_, body) -> body | t -> t in
+      "(defpoly " ^ d.name ^ " (params " ^ String.concat " " params ^ ") "
+      ^ string_of_typ_with_params params body_ty ^ " " ^ string_of_expr_with_params params d.body
+      ^ ")"
 
 let string_of_type_alias a =
   match a.type_params with

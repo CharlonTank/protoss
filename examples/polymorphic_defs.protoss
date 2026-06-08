@@ -1,0 +1,24 @@
+(type Maybe (A) (Variant (None Unit) (Some A)))
+
+(defpoly id (params A)
+  (-> A A)
+  (lambda (x A) x))
+
+(defpoly some (params A)
+  (-> A (Maybe A))
+  (lambda (x A)
+    (variant Some x)))
+
+(def n Nat
+  ((inst id Nat) 4))
+
+(def s String
+  ((inst id String) "ok"))
+
+(def m (Maybe Nat)
+  ((inst some Nat) 9))
+
+(def out Nat
+  (case m
+    (None _ 0)
+    (Some value value)))

@@ -73,6 +73,9 @@ let rec type_of_graph_json obj =
   | "List" -> Ast.TList (type_of_graph_json (json_field "item" obj))
   | "View" -> Ast.TView (type_of_graph_json (json_field "message" obj))
   | "Process" -> Ast.TProcess (type_of_graph_json (json_field "result" obj))
+  | "TypeVar" -> Ast.TVar (json_nat_field "index" obj)
+  | "Forall" ->
+      Ast.TForall (json_nat_field "arity" obj, type_of_graph_json (json_field "body" obj))
   | tag -> fail ("unknown canonical graph type tag: " ^ tag)
 
 let req_of_graph_json obj =
@@ -127,6 +130,10 @@ let rec term_of_graph_json obj =
         ( type_of_graph_json (json_field "type" obj),
           json_string_field "constructor" obj,
           term_of_graph_json (json_field "payload" obj) )
+  | "Inst" ->
+      Kernel.CInst
+        ( json_string_field "defId" obj,
+          List.map type_of_graph_json (json_array_field "typeArgs" obj) )
   | "Case" ->
       Kernel.CCase
         ( term_of_graph_json (json_field "scrutinee" obj),

@@ -131,7 +131,7 @@ let parse_one_json obj =
           try Parser.parse_expr (expr_sexp_of_json (json_field "expr" obj)) with
           | Parser.Error msg -> fail ("invalid patch expr: " ^ msg)
         in
-        Some { name; typ; body }
+        Some { name; type_params = []; typ; body }
     | DeleteDef | RenameDef -> None
   in
   let capabilities =
@@ -193,6 +193,8 @@ let rec contains_process_type = function
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
   | TList t | TView t -> contains_process_type t
+  | TForall (_, t) -> contains_process_type t
+  | TVar _ -> false
   | TNamed _ -> false
   | TUnit | TBool | TNat | TString -> false
 

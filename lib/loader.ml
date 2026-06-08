@@ -137,6 +137,8 @@ let rec type_refs = function
   | TFun (a, b) -> type_refs a @ type_refs b
   | TRecord fields | TVariant fields -> List.concat_map (fun (_, t) -> type_refs t) fields
   | TList t | TView t | TProcess t -> type_refs t
+  | TVar _ -> []
+  | TForall (_, t) -> type_refs t
   | TNamed (n, args) -> n :: List.concat_map type_refs args
 
 let rec expr_type_refs = function
@@ -148,6 +150,7 @@ let rec expr_type_refs = function
   | EField (e, _) -> expr_type_refs e
   | EVariant (t, _, e) -> type_refs t @ expr_type_refs e
   | EVariantInferred (_, e) -> expr_type_refs e
+  | EInst (_, args) -> List.concat_map type_refs args
   | ECase (e, branches) -> expr_type_refs e @ List.concat_map branch_type_refs branches
   | EFoldNat (n, z, step) -> expr_type_refs n @ expr_type_refs z @ expr_type_refs step
   | ENil t -> type_refs t
@@ -171,7 +174,10 @@ let parsed_type_refs parsed =
            |> List.filter (fun n -> not (List.exists (String.equal n) a.type_params)))
   in
   let def_refs =
-    parsed.defs |> List.concat_map (fun d -> type_refs d.typ @ expr_type_refs d.body)
+    parsed.defs
+    |> List.concat_map (fun (d : def) ->
+           type_refs d.typ @ expr_type_refs d.body
+           |> List.filter (fun n -> not (List.exists (String.equal n) d.type_params)))
   in
   sort_uniq (alias_refs @ def_refs)
 
