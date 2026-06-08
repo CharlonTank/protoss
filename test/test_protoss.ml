@@ -331,6 +331,17 @@ let () =
     (Kernel.serialize_checked_program graph_checked);
   let graph_value, _ = Runtime.normalize_def graph_checked "main" in
   assert_equal "canonical graph eval" "2" (Runtime.value_to_string graph_value);
+  let basic_path = find_up (Sys.getcwd ()) "examples/basic.protoss" in
+  let basic_invariants = Invariants.check_file basic_path in
+  assert_equal "invariants file hash" (Kernel.hash_program (Loader.check_file basic_path))
+    basic_invariants.Invariants.program_hash;
+  let invariants_graph_dir = temp_dir "invariants-graph" in
+  ensure_dir invariants_graph_dir;
+  let invariants_graph_path = Filename.concat invariants_graph_dir "basic.graph.json" in
+  write_file invariants_graph_path (Canonical_ir.serialize_graph (Loader.check_file basic_path));
+  let graph_invariants = Invariants.check_graph invariants_graph_path in
+  assert_equal "invariants graph hash" basic_invariants.program_hash
+    graph_invariants.Invariants.program_hash;
   (try
      ignore (Canonical_ir.parse_graph (replace_once graph_json "\"value\": 1" "\"value\": 2"));
      fail "canonical graph typed node mismatch should be rejected"
@@ -368,6 +379,11 @@ let () =
   assert_equal "canonical graph checked alpha-stable"
     (Kernel.hash_program (Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph alpha_a)))
     (Kernel.hash_program (Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph alpha_b)));
+  let alpha_a_path = find_up (Sys.getcwd ()) "examples/alpha_a.protoss" in
+  let alpha_b_path = find_up (Sys.getcwd ()) "examples/alpha_b.protoss" in
+  let alpha_invariants = Invariants.check_alpha alpha_a_path alpha_b_path in
+  assert_equal "invariants alpha hash" (Kernel.hash_program (Loader.check_file alpha_a_path))
+    alpha_invariants.Invariants.alpha_hash;
   assert_true "canonical graph omits bound names"
     (not (contains_substring (Canonical_ir.serialize_graph alpha_a) "\"x\"")
     && not (contains_substring (Canonical_ir.serialize_graph alpha_b) "\"y\""));
@@ -1065,6 +1081,19 @@ let () =
       (Runtime.response_value graph_suspended.Runtime.req "Ada")
   in
   assert_equal "graph process resume" "Done \"Ada\"" (Runtime.value_to_string graph_resumed);
+  let ask_human_path = find_up (Sys.getcwd ()) "examples/ask_human.protoss" in
+  let process_invariants = Invariants.check_process ask_human_path "askName" "String:Ada" in
+  assert_equal "invariants process result" "Done \"Ada\""
+    process_invariants.Invariants.result;
+  let process_graph_dir = temp_dir "invariants-process-graph" in
+  ensure_dir process_graph_dir;
+  let process_graph_path = Filename.concat process_graph_dir "ask_human.graph.json" in
+  write_file process_graph_path (Canonical_ir.serialize_graph (Loader.check_file ask_human_path));
+  let graph_process_invariants =
+    Invariants.check_graph_process process_graph_path "askName" "String:Ada"
+  in
+  assert_equal "invariants graph process result" process_invariants.result
+    graph_process_invariants.Invariants.result;
   let inferred_suspended =
     match fst (Runtime.eval_entry process_resume_inferred "askName") with
     | Runtime.VProcessRequest s -> Runtime.parse_suspended (Runtime.serialize_suspended s)

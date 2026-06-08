@@ -18,6 +18,9 @@ let usage () =
      \       protoss patch from-diff <store-a> <store-b>\n\
      \       protoss diff [--json] <store-a> <store-b>\n\
      \       protoss audit [project]\n\
+     \       protoss invariants file <file> | graph <graph.json> | alpha <file-a> <file-b>\n\
+     \       protoss invariants process <file> --entry <name> --response <value>\n\
+     \       protoss invariants process --graph <graph.json> --entry <name> --response <value>\n\
      \       protoss fmt [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss repl\n\
@@ -406,6 +409,28 @@ let command_audit = function
       print_string (Protoss.Workspace.audit manifest)
   | _ -> usage ()
 
+let command_invariants = function
+  | [ "file"; file ] ->
+      print_string (Protoss.Invariants.describe_file (Protoss.Invariants.check_file file))
+  | [ "graph"; file ] ->
+      print_string (Protoss.Invariants.describe_file (Protoss.Invariants.check_graph file))
+  | [ "alpha"; left; right ] ->
+      print_string
+        (Protoss.Invariants.describe_alpha (Protoss.Invariants.check_alpha left right))
+  | "process" :: "--graph" :: file :: args ->
+      let entry = fst (find_entry args) in
+      let response = required_arg "--response" args in
+      print_string
+        (Protoss.Invariants.describe_process
+           (Protoss.Invariants.check_graph_process file entry response))
+  | "process" :: file :: args ->
+      let entry = fst (find_entry args) in
+      let response = required_arg "--response" args in
+      print_string
+        (Protoss.Invariants.describe_process
+           (Protoss.Invariants.check_process file entry response))
+  | _ -> usage ()
+
 let command_fmt = function
   | [ file ] -> print_string (Protoss.Ast.string_of_program (Protoss.Parser.parse_file file))
   | [ "--check"; file ] ->
@@ -497,6 +522,7 @@ let () =
       | "patch" :: args -> command_patch args
       | "diff" :: args -> command_diff args
       | "audit" :: args -> command_audit args
+      | "invariants" :: args -> command_invariants args
       | "fmt" :: args -> command_fmt args
       | "graph" :: args -> command_graph args
       | [ "repl" ] -> command_repl ()

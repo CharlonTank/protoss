@@ -27,6 +27,7 @@ What works now:
 - Web bundles are deterministic and include `index.html`, `protoss-runtime.js`, `protoss-app.json`, `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-capabilities.json`, and `protoss-world.json`. The browser runtime interprets the embedded canonical graph for `view` and `update`; external effects suspend as typed requests exposed through the runtime ledger/request API.
 - `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Capabilities are checked against the kernel catalog and exported with typed request/response signatures. Typed resume rejects wrong response tags.
 - Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs. Request events validate that `cap-scope` uses known capabilities and contains the capability required by the recorded request before insertion and during inspection. Resume events record `response-type` and validate the typed host response against the suspended request before insertion and during inspection.
+- `invariants` runs executable checks over canonicalization, graph round-trip, graph-first loading, normalization, alpha-stability, and typed `Process` resume.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 
 Main commands:
@@ -69,6 +70,11 @@ dune exec protoss -- eval --graph /tmp/basic.protoss.graph.json --entry main
 dune exec protoss -- canon --graph examples/ask_human.protoss > /tmp/ask_human.protoss.graph.json
 dune exec protoss -- run --graph /tmp/ask_human.protoss.graph.json --entry askName --ledger /tmp/protoss-ledger
 dune exec protoss -- resume --graph /tmp/ask_human.protoss.graph.json --entry askName --event <EventRef> --response String:Ada --ledger /tmp/protoss-ledger
+dune exec protoss -- invariants file examples/basic.protoss
+dune exec protoss -- invariants graph /tmp/basic.protoss.graph.json
+dune exec protoss -- invariants alpha examples/alpha_a.protoss examples/alpha_b.protoss
+dune exec protoss -- invariants process examples/ask_human.protoss --entry askName --response String:Ada
+dune exec protoss -- invariants process --graph /tmp/ask_human.protoss.graph.json --entry askName --response String:Ada
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app
 ```
