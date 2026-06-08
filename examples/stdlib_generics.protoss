@@ -24,6 +24,20 @@
   (((inst List.filter Nat) appended)
     (lambda (x Nat) ((Nat.eqNat x) 2))))
 
+(def reversed (List Nat)
+  ((inst List.reverse Nat) appended))
+
+(def anyTwo Bool
+  (((inst List.any Nat) appended)
+    (lambda (x Nat) ((Nat.eqNat x) 2))))
+
+(def allTwo Bool
+  (((inst List.all Nat) appended)
+    (lambda (x Nat) ((Nat.eqNat x) 2))))
+
+(def memberThree Bool
+  ((((inst List.member Nat) Nat.eqNat) 3) appended))
+
 (def maybeAge (Maybe Nat)
   (variant Some 41))
 
@@ -68,6 +82,12 @@
   (((inst Result.andThen String Nat Nat) resultAge)
     (lambda (age Nat) (variant Ok (succ age)))))
 
+(def resultIsOk Bool
+  ((inst Result.isOk String Nat) resultAge))
+
+(def resultIsErr Bool
+  ((inst Result.isErr String Nat) resultErr))
+
 (def pair (Pair String Nat)
   (record (first "n") (second 7)))
 
@@ -102,6 +122,17 @@
 (def setUnion (Set Nat)
   ((((inst Set.union Nat) Nat.eqNat) setA)
     (Cons Nat 2 (Cons Nat 3 (Nil Nat)))))
+
+(def setRemoved (Set Nat)
+  ((((inst Set.remove Nat) Nat.eqNat) 2) setUnion))
+
+(def setIntersect (Set Nat)
+  ((((inst Set.intersect Nat) Nat.eqNat) setUnion)
+    (Cons Nat 2 (Cons Nat 4 (Nil Nat)))))
+
+(def setDifference (Set Nat)
+  ((((inst Set.difference Nat) Nat.eqNat) setUnion)
+    (Cons Nat 2 (Nil Nat))))
 
 (def total Nat
   (foldList bumped 0

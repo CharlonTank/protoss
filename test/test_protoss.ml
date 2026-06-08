@@ -913,6 +913,14 @@ let () =
   assert_equal "stdlib generic List.append" "[1, 2, 3]" (Runtime.value_to_string appended);
   let filtered, _ = Runtime.normalize_def stdlib_generics "filtered" in
   assert_equal "stdlib generic List.filter" "[2]" (Runtime.value_to_string filtered);
+  let reversed, _ = Runtime.normalize_def stdlib_generics "reversed" in
+  assert_equal "stdlib generic List.reverse" "[3, 2, 1]" (Runtime.value_to_string reversed);
+  let any_two, _ = Runtime.normalize_def stdlib_generics "anyTwo" in
+  assert_equal "stdlib generic List.any" "true" (Runtime.value_to_string any_two);
+  let all_two, _ = Runtime.normalize_def stdlib_generics "allTwo" in
+  assert_equal "stdlib generic List.all" "false" (Runtime.value_to_string all_two);
+  let member_three, _ = Runtime.normalize_def stdlib_generics "memberThree" in
+  assert_equal "stdlib generic List.member" "true" (Runtime.value_to_string member_three);
   let label, _ = Runtime.normalize_def stdlib_generics "label" in
   assert_equal "stdlib generic Maybe.map/default" "\"known\"" (Runtime.value_to_string label);
   let maybe_has_age, _ = Runtime.normalize_def stdlib_generics "maybeHasAge" in
@@ -932,6 +940,10 @@ let () =
     (Runtime.value_to_string result_mapped_err);
   let result_next, _ = Runtime.normalize_def stdlib_generics "resultNext" in
   assert_equal "stdlib generic Result.andThen" "Ok 8" (Runtime.value_to_string result_next);
+  let result_is_ok, _ = Runtime.normalize_def stdlib_generics "resultIsOk" in
+  assert_equal "stdlib generic Result.isOk" "true" (Runtime.value_to_string result_is_ok);
+  let result_is_err, _ = Runtime.normalize_def stdlib_generics "resultIsErr" in
+  assert_equal "stdlib generic Result.isErr" "true" (Runtime.value_to_string result_is_err);
   let swapped, _ = Runtime.normalize_def stdlib_generics "swapped" in
   assert_equal "stdlib generic Pair.swap" "{first = 7, second = \"n\"}"
     (Runtime.value_to_string swapped);
@@ -950,6 +962,14 @@ let () =
   assert_equal "stdlib generic Set.contains" "true" (Runtime.value_to_string set_has_two);
   let set_union, _ = Runtime.normalize_def stdlib_generics "setUnion" in
   assert_equal "stdlib generic Set.union" "[1, 2, 3]" (Runtime.value_to_string set_union);
+  let set_removed, _ = Runtime.normalize_def stdlib_generics "setRemoved" in
+  assert_equal "stdlib generic Set.remove" "[1, 3]" (Runtime.value_to_string set_removed);
+  let set_intersect, _ = Runtime.normalize_def stdlib_generics "setIntersect" in
+  assert_equal "stdlib generic Set.intersect" "[2]"
+    (Runtime.value_to_string set_intersect);
+  let set_difference, _ = Runtime.normalize_def stdlib_generics "setDifference" in
+  assert_equal "stdlib generic Set.difference" "[1, 3]"
+    (Runtime.value_to_string set_difference);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in

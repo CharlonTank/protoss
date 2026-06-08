@@ -1,4 +1,4 @@
-; Protoss stdlib v0.6. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.7. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Result (E A) (Variant (Err E) (Ok A)))
@@ -6,7 +6,7 @@
 (type Assoc (K V) (List (Pair K V)))
 (type Set (A) (List A))
 
-(def Stdlib.version String "v0.6")
+(def Stdlib.version String "v0.7")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -83,6 +83,45 @@
             (case (pred x)
               (true (Cons A x acc))
               (false acc))))))))
+
+(defpoly List.reverse (params A)
+  (-> (List A) (List A))
+  (lambda (xs (List A))
+    (foldList xs (Nil A)
+      (lambda (x A)
+        (lambda (acc (List A))
+          (((inst List.append A) acc) (Cons A x (Nil A))))))))
+
+(defpoly List.any (params A)
+  (-> (List A) (-> (-> A Bool) Bool))
+  (lambda (xs (List A))
+    (lambda (pred (-> A Bool))
+      (foldList xs false
+        (lambda (x A)
+          (lambda (acc Bool)
+            (case (pred x)
+              (true true)
+              (false acc))))))))
+
+(defpoly List.all (params A)
+  (-> (List A) (-> (-> A Bool) Bool))
+  (lambda (xs (List A))
+    (lambda (pred (-> A Bool))
+      (foldList xs true
+        (lambda (x A)
+          (lambda (acc Bool)
+            (case (pred x)
+              (true acc)
+              (false false))))))))
+
+(defpoly List.member (params A)
+  (-> (-> A (-> A Bool)) (-> A (-> (List A) Bool)))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (value A)
+      (lambda (xs (List A))
+        (((inst List.any A) xs)
+          (lambda (x A)
+            ((eq x) value)))))))
 
 (def List.mapNat (-> (List Nat) (-> (-> Nat Nat) (List Nat)))
   (lambda (xs (List Nat))
@@ -161,6 +200,20 @@
       (case r
         (Err err (variant Err err))
         (Ok value (f value))))))
+
+(defpoly Result.isOk (params E A)
+  (-> (Result E A) Bool)
+  (lambda (r (Result E A))
+    (case r
+      (Err err false)
+      (Ok value true))))
+
+(defpoly Result.isErr (params E A)
+  (-> (Result E A) Bool)
+  (lambda (r (Result E A))
+    (case r
+      (Err err true)
+      (Ok value false))))
 
 (defpoly Pair.swap (params A B)
   (-> (Pair A B) (Pair B A))
@@ -250,3 +303,30 @@
           (lambda (item A)
             (lambda (acc (Set A))
               ((((inst Set.insert A) eq) item) acc))))))))
+
+(defpoly Set.remove (params A)
+  (-> (-> A (-> A Bool)) (-> A (-> (Set A) (Set A))))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (value A)
+      (lambda (items (Set A))
+        (((inst List.filter A) items)
+          (lambda (item A)
+            (Bool.not ((eq item) value))))))))
+
+(defpoly Set.intersect (params A)
+  (-> (-> A (-> A Bool)) (-> (Set A) (-> (Set A) (Set A))))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (left (Set A))
+      (lambda (right (Set A))
+        (((inst List.filter A) left)
+          (lambda (item A)
+            ((((inst Set.contains A) eq) item) right)))))))
+
+(defpoly Set.difference (params A)
+  (-> (-> A (-> A Bool)) (-> (Set A) (-> (Set A) (Set A))))
+  (lambda (eq (-> A (-> A Bool)))
+    (lambda (left (Set A))
+      (lambda (right (Set A))
+        (((inst List.filter A) left)
+          (lambda (item A)
+            (Bool.not ((((inst Set.contains A) eq) item) right))))))))
