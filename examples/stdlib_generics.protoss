@@ -1,0 +1,40 @@
+(import "../stdlib/prelude.protoss")
+
+(def xs (List Nat)
+  (Cons Nat 1 (Cons Nat 2 (Nil Nat))))
+
+(def bumped (List Nat)
+  (((inst List.map Nat Nat) xs)
+    (lambda (x Nat) (succ x))))
+
+(def labels (List String)
+  (((inst List.map Nat String) xs)
+    (lambda (x Nat) "item")))
+
+(def len Nat
+  ((inst List.length Nat) xs))
+
+(def maybeAge (Maybe Nat)
+  (variant Some 41))
+
+(def maybeLabel (Maybe String)
+  (((inst Maybe.map Nat String)
+    (lambda (age Nat) "known"))
+    maybeAge))
+
+(def label String
+  (((inst Maybe.withDefault String) "unknown") maybeLabel))
+
+(def resultAge (Result String Nat)
+  (variant Ok 7))
+
+(def resultLabel (Result String String)
+  (((inst Result.map String Nat String)
+    (lambda (age Nat) "ok"))
+    resultAge))
+
+(def total Nat
+  (foldList bumped 0
+    (lambda (x Nat)
+      (lambda (acc Nat)
+        ((Nat.add x) acc)))))

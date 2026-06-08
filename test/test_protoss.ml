@@ -480,34 +480,44 @@ let () =
      (def xs (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
      (def mapped (List Nat) ((List.mapNat xs) (lambda (y Nat) (succ y))))\n\
      (def total Nat (foldList mapped 0 (lambda (z Nat) (lambda (acc Nat) ((Nat.add z) acc)))))\n";
-	  let imported_a = Loader.check_file app_a in
-	  let imported_b = Loader.check_file app_b in
-	  let total, _ = Runtime.normalize_def imported_a "total" in
-	  assert_equal "imports stdlib List/foldList" "5" (Runtime.value_to_string total);
-	  assert_equal "import path raw text ignored by hash" (Kernel.hash_program imported_a)
-	    (Kernel.hash_program imported_b);
-	  let module_root = temp_dir "modules" in
-	  ensure_dir module_root;
-	  let module_math = Filename.concat module_root "math.protoss" in
-	  let module_app = Filename.concat module_root "app.protoss" in
-	  let module_bad = Filename.concat module_root "bad.protoss" in
-	  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
-	  write_file module_math
-	    ("(module Demo.Math)\n(import " ^ Ast.quote stdlib_path
-	   ^ ")\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
-	      (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n");
-	  write_file module_app
-	    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 3))\n";
-	  let module_checked = Loader.check_file module_app in
-	  let module_result, _ = Runtime.normalize_def module_checked "result" in
-	  assert_equal "module export with private dependency" "6" (Runtime.value_to_string module_result);
-	  write_file module_bad
-	    "(import \"math.protoss\")\n(def leak Demo.Math.Number Demo.Math.hidden)\n";
-	  (try
-	     ignore (Loader.check_file module_bad);
-	     fail "private module definition should not be importable"
-	   with Loader.Error msg -> assert_true "private module export error" (String.contains msg 'e'));
-	  let cycle_a = Filename.concat import_root "cycle_a.protoss" in
+  let imported_a = Loader.check_file app_a in
+  let imported_b = Loader.check_file app_b in
+  let total, _ = Runtime.normalize_def imported_a "total" in
+  assert_equal "imports stdlib List/foldList" "5" (Runtime.value_to_string total);
+  assert_equal "import path raw text ignored by hash" (Kernel.hash_program imported_a)
+    (Kernel.hash_program imported_b);
+  let stdlib_generics_path = find_up (Sys.getcwd ()) "examples/stdlib_generics.protoss" in
+  let stdlib_generics = Loader.check_file stdlib_generics_path in
+  let bumped, _ = Runtime.normalize_def stdlib_generics "bumped" in
+  assert_equal "stdlib generic List.map" "[2, 3]" (Runtime.value_to_string bumped);
+  let len, _ = Runtime.normalize_def stdlib_generics "len" in
+  assert_equal "stdlib generic List.length" "2" (Runtime.value_to_string len);
+  let label, _ = Runtime.normalize_def stdlib_generics "label" in
+  assert_equal "stdlib generic Maybe.map/default" "\"known\"" (Runtime.value_to_string label);
+  let result_label, _ = Runtime.normalize_def stdlib_generics "resultLabel" in
+  assert_equal "stdlib generic Result.map" "Ok \"ok\"" (Runtime.value_to_string result_label);
+  let module_root = temp_dir "modules" in
+  ensure_dir module_root;
+  let module_math = Filename.concat module_root "math.protoss" in
+  let module_app = Filename.concat module_root "app.protoss" in
+  let module_bad = Filename.concat module_root "bad.protoss" in
+  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
+  write_file module_math
+    ("(module Demo.Math)\n(import " ^ Ast.quote stdlib_path
+   ^ ")\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
+      (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n");
+  write_file module_app
+    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 3))\n";
+  let module_checked = Loader.check_file module_app in
+  let module_result, _ = Runtime.normalize_def module_checked "result" in
+  assert_equal "module export with private dependency" "6" (Runtime.value_to_string module_result);
+  write_file module_bad
+    "(import \"math.protoss\")\n(def leak Demo.Math.Number Demo.Math.hidden)\n";
+  (try
+     ignore (Loader.check_file module_bad);
+     fail "private module definition should not be importable"
+   with Loader.Error msg -> assert_true "private module export error" (String.contains msg 'e'));
+  let cycle_a = Filename.concat import_root "cycle_a.protoss" in
   let cycle_b = Filename.concat import_root "cycle_b.protoss" in
   write_file cycle_a "(import \"cycle_b.protoss\")\n(def a Nat 1)\n";
   write_file cycle_b "(import \"cycle_a.protoss\")\n(def b Nat 2)\n";

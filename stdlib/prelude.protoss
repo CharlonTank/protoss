@@ -1,10 +1,10 @@
-; Protoss stdlib v0.3. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.4. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Result (E A) (Variant (Err E) (Ok A)))
 (type Pair (A B) (Record (first A) (second B)))
 
-(def Stdlib.version String "v0.3")
+(def Stdlib.version String "v0.4")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -45,6 +45,23 @@
     (lambda (b String)
       ((prim.String.eq a) b))))
 
+(defpoly List.map (params A B)
+  (-> (List A) (-> (-> A B) (List B)))
+  (lambda (xs (List A))
+    (lambda (f (-> A B))
+      (foldList xs (Nil B)
+        (lambda (x A)
+          (lambda (acc (List B))
+            (Cons B (f x) acc)))))))
+
+(defpoly List.length (params A)
+  (-> (List A) Nat)
+  (lambda (xs (List A))
+    (foldList xs 0
+      (lambda (x A)
+        (lambda (acc Nat)
+          (succ acc))))))
+
 (def List.mapNat (-> (List Nat) (-> (-> Nat Nat) (List Nat)))
   (lambda (xs (List Nat))
     (lambda (f (-> Nat Nat))
@@ -52,3 +69,27 @@
         (lambda (x Nat)
           (lambda (acc (List Nat))
             (Cons Nat (f x) acc)))))))
+
+(defpoly Maybe.withDefault (params A)
+  (-> A (-> (Maybe A) A))
+  (lambda (fallback A)
+    (lambda (m (Maybe A))
+      (case m
+        (None _ fallback)
+        (Some value value)))))
+
+(defpoly Maybe.map (params A B)
+  (-> (-> A B) (-> (Maybe A) (Maybe B)))
+  (lambda (f (-> A B))
+    (lambda (m (Maybe A))
+      (case m
+        (None _ (variant None unit))
+        (Some value (variant Some (f value)))))))
+
+(defpoly Result.map (params E A B)
+  (-> (-> A B) (-> (Result E A) (Result E B)))
+  (lambda (f (-> A B))
+    (lambda (r (Result E A))
+      (case r
+        (Err err (variant Err err))
+        (Ok value (variant Ok (f value)))))))
