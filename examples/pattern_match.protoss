@@ -7,6 +7,7 @@
 
 (def xs (List Nat) (Cons 1 (Cons 2 Nil)))
 (def first Nat (match xs (Nil 0) (Cons head tail head)))
+(def firstDefault Nat (match xs (Cons head tail head) (_ 0)))
 
 (def lead Lead (record (name "Ada") (status "open")))
 (def leadStatus String (match lead ((record name (status s)) s)))

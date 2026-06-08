@@ -370,8 +370,84 @@ let () =
     (Kernel.hash_program list_match);
   let list_match_first, _ = Runtime.normalize_def list_match "first" in
   assert_equal "match List normalizes" "1" (Runtime.value_to_string list_match_first);
+  let list_match_wildcard =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def first Nat (match xs (Cons head tail head) (_ 0)))"
+  in
+  let list_case_wildcard =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def first Nat (caseList xs (Cons head tail head) (_ 0)))"
+  in
+  assert_equal "match List wildcard hashes as caseList"
+    (Kernel.hash_program list_match_explicit)
+    (Kernel.hash_program list_match_wildcard);
+  assert_equal "caseList wildcard hashes as explicit caseList"
+    (Kernel.hash_program list_match_explicit)
+    (Kernel.hash_program list_case_wildcard);
+  let list_match_wildcard_first, _ = Runtime.normalize_def list_match_wildcard "first" in
+  assert_equal "match List wildcard normalizes" "1"
+    (Runtime.value_to_string list_match_wildcard_first);
+  let list_case_cons_wildcard =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def out Nat (caseList xs (Nil 0) (_ 9)))"
+  in
+  let list_case_cons_explicit =
+    check
+      "(def xs (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+       (def out Nat (caseList xs (Nil 0) (Cons head tail 9)))"
+  in
+  assert_equal "caseList Cons wildcard hashes as explicit caseList"
+    (Kernel.hash_program list_case_cons_explicit)
+    (Kernel.hash_program list_case_cons_wildcard);
+  let list_case_cons_wildcard_out, _ =
+    Runtime.normalize_def list_case_cons_wildcard "out"
+  in
+  assert_equal "caseList Cons wildcard normalizes" "9"
+    (Runtime.value_to_string list_case_cons_wildcard_out);
+  let list_case_wildcard_only =
+    check "(def xs (List Nat) (Nil Nat))\n(def out Nat (caseList xs (_ 7)))"
+  in
+  let list_case_wildcard_only_explicit =
+    check
+      "(def xs (List Nat) (Nil Nat))\n\
+       (def out Nat (caseList xs (Nil 7) (Cons head tail 7)))"
+  in
+  assert_equal "caseList wildcard-only hashes as explicit caseList"
+    (Kernel.hash_program list_case_wildcard_only_explicit)
+    (Kernel.hash_program list_case_wildcard_only);
+  let list_case_wildcard_only_out, _ =
+    Runtime.normalize_def list_case_wildcard_only "out"
+  in
+  assert_equal "caseList wildcard-only normalizes" "7"
+    (Runtime.value_to_string list_case_wildcard_only_out);
+  let list_case_wildcard_capture =
+    check
+      "(def out Nat \
+       (let (__match_head0 8) \
+       (let (xs (List Nat) (Cons 1 Nil)) \
+       (caseList xs (Nil 0) (_ __match_head0)))))"
+  in
+  let list_case_wildcard_capture_out, _ =
+    Runtime.normalize_def list_case_wildcard_capture "out"
+  in
+  assert_equal "caseList wildcard generated binders do not capture" "8"
+    (Runtime.value_to_string list_case_wildcard_capture_out);
   assert_true "match List has no canonical match node"
     (not (contains_substring (Kernel.serialize_checked_program list_match) "match"));
+  expect_parse_error_contains
+    "(def xs (List Nat) (Cons 1 Nil))\n\
+     (def bad Nat (caseList xs (Nil 0) (Cons head tail head) (_ 2)))"
+    "caseList wildcard branch is unreachable";
+  expect_parse_error_contains
+    "(def xs (List Nat) (Cons 1 Nil))\n\
+     (def bad Nat (match xs (Nil 0) (Cons head tail head) (_ 2)))"
+    "match wildcard branch is unreachable";
+  expect_parse_error_contains
+    "(def xs (List Nat) (Cons 1 Nil))\n(def bad Nat (caseList xs (_ 0) (_ 1)))"
+    "duplicate caseList wildcard branch";
   expect_parse_error
     "(def xs (List Nat) (Nil Nat))\n(def bad Nat (match xs (Nil 0)))";
   expect_parse_error

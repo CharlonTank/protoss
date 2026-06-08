@@ -62,6 +62,60 @@ let fresh_match_payload_name binders body =
   in
   loop 0
 
+let fresh_match_list_binders body =
+  let taken = sexp_atoms body |> List.sort_uniq String.compare in
+  let rec fresh prefix taken i =
+    let candidate = prefix ^ string_of_int i in
+    if List.exists (String.equal candidate) taken then fresh prefix taken (i + 1)
+    else candidate
+  in
+  let head = fresh "__match_head" taken 0 in
+  let tail = fresh "__match_tail" (head :: taken) 0 in
+  (head, tail)
+
+let case_list_syntax =
+  "caseList syntax is (caseList xs (Nil nilExpr) (Cons head tail consExpr))"
+
+let list_match_syntax =
+  "list match syntax is (match xs (Nil nilExpr) (Cons head tail consExpr))"
+
+let parse_list_case_branches context syntax branches =
+  if branches = [] then fail (context ^ " requires at least one branch");
+  let nil_branch = ref None in
+  let cons_branch = ref None in
+  let wildcard = ref None in
+  List.iter
+    (function
+      | Sexp.List [ Sexp.Atom "Nil"; nil_body ] ->
+          if Option.is_some !nil_branch then fail ("duplicate " ^ context ^ " Nil branch");
+          nil_branch := Some nil_body
+      | Sexp.List [ Sexp.Atom "Cons"; Sexp.Atom head; Sexp.Atom tail; cons_body ] ->
+          if String.equal head tail then fail ("duplicate " ^ context ^ " Cons binder: " ^ head);
+          if Option.is_some !cons_branch then fail ("duplicate " ^ context ^ " Cons branch");
+          cons_branch := Some (head, tail, cons_body)
+      | Sexp.List [ Sexp.Atom "_"; body ] ->
+          if Option.is_some !wildcard then fail ("duplicate " ^ context ^ " wildcard branch");
+          wildcard := Some body
+      | _ -> fail syntax)
+    branches;
+  if Option.is_some !wildcard && Option.is_some !nil_branch && Option.is_some !cons_branch
+  then fail (context ^ " wildcard branch is unreachable");
+  let nil_body =
+    match (!nil_branch, !wildcard) with
+    | Some body, _ -> body
+    | None, Some body -> body
+    | None, None -> fail (context ^ " missing Nil branch")
+  in
+  let head, tail, cons_body =
+    match (!cons_branch, !wildcard) with
+    | Some branch, _ -> branch
+    | None, Some body ->
+        let head, tail = fresh_match_list_binders body in
+        (head, tail, body)
+    | None, None -> fail (context ^ " missing Cons branch")
+  in
+  (nil_body, head, tail, cons_body)
+
 let rec parse_type = function
   | Sexp.Atom "Unit" -> TUnit
   | Sexp.Atom "Bool" -> TBool
@@ -208,17 +262,13 @@ let rec parse_expr = function
   | Sexp.List [ Sexp.Atom "Cons"; head; tail ] -> EConsInfer (parse_expr head, parse_expr tail)
   | Sexp.List [ Sexp.Atom "foldList"; xs; z; step ] ->
       EFoldList (parse_expr xs, parse_expr z, parse_expr step)
-  | Sexp.List
-      [
-        Sexp.Atom "caseList";
-        xs;
-        Sexp.List [ Sexp.Atom "Nil"; nil_body ];
-        Sexp.List [ Sexp.Atom "Cons"; Sexp.Atom head; Sexp.Atom tail; cons_body ];
-      ] ->
-      if String.equal head tail then fail ("duplicate caseList binder: " ^ head);
+  | Sexp.List (Sexp.Atom "caseList" :: xs :: branches) ->
+      let nil_body, head, tail, cons_body =
+        parse_list_case_branches "caseList" case_list_syntax branches
+      in
       ECaseList (parse_expr xs, parse_expr nil_body, head, tail, parse_expr cons_body)
   | Sexp.List (Sexp.Atom "caseList" :: _) ->
-      fail "caseList syntax is (caseList xs (Nil nilExpr) (Cons head tail consExpr))"
+      fail case_list_syntax
   | Sexp.List [ Sexp.Atom "text"; e ] -> EText (parse_expr e)
   | Sexp.List [ Sexp.Atom "image"; src; alt ] ->
       EImage (parse_expr src, parse_expr alt)
@@ -298,28 +348,16 @@ and parse_match_record scrut = function
   | _ -> None
 
 and parse_match_list scrut branches =
-  let nil_branch = ref None in
-  let cons_branch = ref None in
-  let saw_list_branch = ref false in
-  let parse_one = function
-    | Sexp.List [ Sexp.Atom "Nil"; nil_body ] ->
-        saw_list_branch := true;
-        if Option.is_some !nil_branch then fail "duplicate match Nil branch";
-        nil_branch := Some nil_body
-    | Sexp.List [ Sexp.Atom "Cons"; Sexp.Atom head; Sexp.Atom tail; cons_body ] ->
-        saw_list_branch := true;
-        if String.equal head tail then fail ("duplicate match Cons binder: " ^ head);
-        if Option.is_some !cons_branch then fail "duplicate match Cons branch";
-        cons_branch := Some (head, tail, cons_body)
-    | _ -> ()
+  let is_list_branch = function
+    | Sexp.List (Sexp.Atom "Nil" :: _) | Sexp.List (Sexp.Atom "Cons" :: _) -> true
+    | _ -> false
   in
-  List.iter parse_one branches;
-  if not !saw_list_branch then None
+  if not (List.exists is_list_branch branches) then None
   else
-    match (!nil_branch, !cons_branch, branches) with
-    | Some nil_body, Some (head, tail, cons_body), [ _; _ ] ->
-        Some (ECaseList (parse_expr scrut, parse_expr nil_body, head, tail, parse_expr cons_body))
-    | _ -> fail "list match syntax is (match xs (Nil nilExpr) (Cons head tail consExpr))"
+    let nil_body, head, tail, cons_body =
+      parse_list_case_branches "match" list_match_syntax branches
+    in
+    Some (ECaseList (parse_expr scrut, parse_expr nil_body, head, tail, parse_expr cons_body))
 
 and parse_branch = function
   | Sexp.List [ Sexp.Atom "_"; e ] -> BWildcard (parse_expr e)
