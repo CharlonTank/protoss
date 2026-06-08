@@ -387,6 +387,10 @@ let graph_to_program input =
   let caps, defs = parse_graph input in
   Kernel.serialize_program caps defs
 
+let checked_of_graph input =
+  let caps, defs = parse_graph input in
+  Kernel.checked_of_canonical caps defs
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program

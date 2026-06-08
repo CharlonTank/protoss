@@ -2653,6 +2653,193 @@ type checked = {
   defs : checked_def list;
 }
 
+let ensure_unique_canonical_defs defs =
+  let names = Hashtbl.create 32 in
+  List.iter
+    (fun d ->
+      if is_builtin d.cname then fail ("canonical definition shadows builtin: " ^ d.cname);
+      if Hashtbl.mem names d.cname then fail ("duplicate canonical definition: " ^ d.cname);
+      Hashtbl.add names d.cname ())
+    defs
+
+let canonical_def_by_ref defs ref =
+  List.find_opt (fun d -> String.equal d.cname ref || String.equal d.cdef_id ref) defs
+
+let canonical_def_id_of defs ref =
+  if is_builtin ref then "builtin:" ^ ref
+  else
+    match canonical_def_by_ref defs ref with
+    | Some d -> d.cdef_id
+    | None -> fail ("canonical graph references missing definition: " ^ ref)
+
+let canonical_def_name_of defs ref =
+  if is_builtin ref then ref
+  else
+    match canonical_def_by_ref defs ref with
+    | Some d -> d.cname
+    | None -> fail ("canonical graph references missing definition: " ^ ref)
+
+let canonical_type_params = function
+  | TForall (arity, _) -> List.init arity (fun i -> "T" ^ string_of_int i)
+  | _ -> []
+
+let canonical_surface_expr defs term =
+  let def_name_of = canonical_def_name_of defs in
+  let rec nth env i =
+    match (env, i) with
+    | x :: _, 0 -> x
+    | _ :: rest, n when n > 0 -> nth rest (n - 1)
+    | _ -> fail ("canonical term has unbound variable #" ^ string_of_int i)
+  in
+  let rec expr depth env = function
+    | CUnit -> EUnit
+    | CBool b -> EBool b
+    | CNat n -> ENat n
+    | CString s -> EString s
+    | CVar i -> EName (nth env i)
+    | CGlobal ref -> EName (def_name_of ref)
+    | CLambda (typ, body) ->
+        let x = "__x" ^ string_of_int depth in
+        ELambda (x, typ, expr (depth + 1) (x :: env) body)
+    | CApp (f, arg) -> EApp (expr depth env f, expr depth env arg)
+    | CLet (value, body) ->
+        let x = "__let" ^ string_of_int depth in
+        ELet (x, expr depth env value, expr (depth + 1) (x :: env) body)
+    | CRecord fields ->
+        ERecord (sort_fields (List.map (fun (name, value) -> (name, expr depth env value)) fields))
+    | CField (record, field) -> EField (expr depth env record, field)
+    | CVariant (typ, con, value) -> EVariant (typ, con, expr depth env value)
+    | CInst (ref, args) -> EInst (def_name_of ref, args)
+    | CCase (scrut, branches) -> ECase (expr depth env scrut, List.map (branch depth env) branches)
+    | CFoldNat (n, zero, step) ->
+        EFoldNat (expr depth env n, expr depth env zero, expr depth env step)
+    | CFoldVariant (target, result, scrut, branches) ->
+        EFoldVariant
+          (target, result, expr depth env scrut, List.map (branch depth env) branches)
+    | CRecur value -> ERecur (expr depth env value)
+    | CNil typ -> ENil typ
+    | CCons (typ, head, tail) -> ECons (typ, expr depth env head, expr depth env tail)
+    | CFoldList (xs, zero, step) ->
+        EFoldList (expr depth env xs, expr depth env zero, expr depth env step)
+    | CCaseList (xs, nil_body, cons_body) ->
+        let head = "__head" ^ string_of_int depth in
+        let tail = "__tail" ^ string_of_int depth in
+        ECaseList
+          ( expr depth env xs,
+            expr depth env nil_body,
+            head,
+            tail,
+            expr (depth + 1) (head :: tail :: env) cons_body )
+    | CText value -> EText (expr depth env value)
+    | CImage (src, alt) -> EImage (expr depth env src, expr depth env alt)
+    | CButton (label, msg) -> EButton (expr depth env label, expr depth env msg)
+    | CInput (value, handler) -> EInput (expr depth env value, expr depth env handler)
+    | CColumn children -> EColumn (expr depth env children)
+    | CRow children -> ERow (expr depth env children)
+    | CListView (items, render) -> EListView (expr depth env items, expr depth env render)
+    | CWhenView (cond, view) -> EWhenView (expr depth env cond, expr depth env view)
+    | CDone value -> EDone (expr depth env value)
+    | CRequest req -> ERequest req
+    | CBind (process, typ, body) ->
+        let x = "__bind" ^ string_of_int depth in
+        EBind (expr depth env process, x, typ, expr (depth + 1) (x :: env) body)
+  and branch depth env = function
+    | CBBool (b, body) -> BBool (b, expr depth env body)
+    | CBVariant (con, body) ->
+        let payload = "__payload" ^ string_of_int depth in
+        BVariant (con, payload, expr (depth + 1) (payload :: env) body)
+  in
+  expr 0 [] term
+
+let validate_canonical_refs defs =
+  List.iter
+    (fun d ->
+      cterm_global_refs d.cbody
+      |> List.iter (fun ref -> ignore (canonical_def_id_of defs ref)))
+    defs
+
+let validate_canonical_def_ids defs =
+  List.iter
+    (fun d ->
+      let body = cterm_to_canonical_v2 (canonical_def_id_of defs) d.cbody in
+      let expected = hash_string ("defid-v2:" ^ type_to_canonical d.ctyp ^ ":" ^ body) in
+      if not (String.equal expected d.cdef_id) then
+        fail
+          ("canonical DefId mismatch for " ^ d.cname ^ ": expected " ^ expected ^ ", got "
+         ^ d.cdef_id))
+    defs
+
+let canonical_capabilities_of_defs caps defs =
+  let declared cap = List.exists (String.equal cap) caps in
+  let memo = Hashtbl.create 32 in
+  let visiting = Hashtbl.create 32 in
+  let rec capabilities_of_ref ref =
+    match canonical_def_by_ref defs ref with
+    | Some d -> capabilities_of_def d
+    | None -> if is_builtin ref then [] else fail ("canonical graph references missing definition: " ^ ref)
+  and capabilities_of_def d =
+    match Hashtbl.find_opt memo d.cdef_id with
+    | Some caps -> caps
+    | None ->
+        if Hashtbl.mem visiting d.cdef_id then
+          fail ("canonical graph cyclic capability dependency: " ^ d.cname);
+        Hashtbl.add visiting d.cdef_id ();
+        let direct = cterm_direct_capabilities d.cbody in
+        let inherited = cterm_global_refs d.cbody |> List.concat_map capabilities_of_ref in
+        let actual = List.sort_uniq String.compare (direct @ inherited) in
+        List.iter
+          (fun cap ->
+            if not (declared cap) then
+              fail
+                ("canonical graph uses undeclared capability in " ^ d.cname ^ ": " ^ cap))
+          actual;
+        Hashtbl.remove visiting d.cdef_id;
+        Hashtbl.add memo d.cdef_id actual;
+        actual
+  in
+  List.iter (fun d -> ignore (capabilities_of_def d)) defs;
+  fun d -> capabilities_of_def d
+
+let checked_of_canonical caps defs =
+  let caps = List.sort_uniq String.compare caps in
+  validate_capabilities caps;
+  ensure_unique_canonical_defs defs;
+  validate_canonical_refs defs;
+  validate_canonical_def_ids defs;
+  let capabilities_of = canonical_capabilities_of_defs caps defs in
+  let checked_defs =
+    defs
+    |> List.sort (fun a b -> String.compare a.cname b.cname)
+    |> List.map (fun d ->
+           let canonical = serialize_def d.cname d.cdef_id d.ctyp d.cbody (canonical_def_id_of defs) in
+           {
+             def =
+               {
+                 name = d.cname;
+                 type_params = canonical_type_params d.ctyp;
+                 typ = d.ctyp;
+                 body = canonical_surface_expr defs d.cbody;
+               };
+             def_id = d.cdef_id;
+             cterm = d.cbody;
+             canonical;
+             hash = hash_string canonical;
+             capabilities = capabilities_of d;
+           })
+  in
+  {
+    program =
+      {
+        imports = [];
+        capabilities = caps;
+        module_name = None;
+        exports = None;
+        type_aliases = [];
+        defs = List.map (fun d -> d.def) checked_defs;
+      };
+    defs = checked_defs;
+  }
+
 let check_program (program : program) =
   let program = resolve_program_types program in
   validate_capabilities program.capabilities;

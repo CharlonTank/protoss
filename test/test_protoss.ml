@@ -324,6 +324,13 @@ let () =
   assert_equal "canonical graph parsed caps" "" (String.concat "," graph_caps);
   assert_equal "canonical graph parsed defs" "main"
     (String.concat "," (List.map (fun d -> d.Kernel.cname) graph_defs));
+  let graph_checked = Canonical_ir.checked_of_graph graph_json in
+  assert_equal "canonical graph checked hash" (Kernel.hash_program formatted_a)
+    (Kernel.hash_program graph_checked);
+  assert_equal "canonical graph checked serialization" (Kernel.serialize_checked_program formatted_a)
+    (Kernel.serialize_checked_program graph_checked);
+  let graph_value, _ = Runtime.normalize_def graph_checked "main" in
+  assert_equal "canonical graph eval" "2" (Runtime.value_to_string graph_value);
   (try
      ignore (Canonical_ir.parse_graph (replace_once graph_json "\"value\": 1" "\"value\": 2"));
      fail "canonical graph typed node mismatch should be rejected"
@@ -358,6 +365,9 @@ let () =
   assert_equal "canonical graph deterministic" graph_json (Canonical_ir.serialize_graph formatted_a);
   assert_equal "canonical graph alpha-stable" (Canonical_ir.serialize_graph alpha_a)
     (Canonical_ir.serialize_graph alpha_b);
+  assert_equal "canonical graph checked alpha-stable"
+    (Kernel.hash_program (Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph alpha_a)))
+    (Kernel.hash_program (Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph alpha_b)));
   assert_true "canonical graph omits bound names"
     (not (contains_substring (Canonical_ir.serialize_graph alpha_a) "\"x\"")
     && not (contains_substring (Canonical_ir.serialize_graph alpha_b) "\"y\""));
@@ -762,6 +772,13 @@ let () =
     (contains_substring (Kernel.serialize_checked_program recursive_tree) "(foldVariant");
   assert_equal "recursive Tree graph roundtrip" (Kernel.serialize_checked_program recursive_tree)
     (Canonical_ir.graph_to_program (Canonical_ir.serialize_graph recursive_tree));
+  let recursive_graph_checked =
+    Canonical_ir.checked_of_graph (Canonical_ir.serialize_graph recursive_tree)
+  in
+  assert_equal "recursive Tree graph checked hash" (Kernel.hash_program recursive_tree)
+    (Kernel.hash_program recursive_graph_checked);
+  let graph_size, _ = Runtime.normalize_def recursive_graph_checked "size" in
+  assert_equal "recursive Tree graph eval" "2" (Runtime.value_to_string graph_size);
   expect_check_error "(type Bad Bad)\n(def bad Bad unit)";
   expect_check_error "(record Bad (next Bad))\n(def bad Bad unit)";
   expect_check_error "(variant Bad (Apply (-> Bad Nat)))\n(def bad Bad unit)";

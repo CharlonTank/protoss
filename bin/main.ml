@@ -1,8 +1,9 @@
 let usage () =
   prerr_endline
-    "usage: protoss parse|check|nf|hash <file>\n\
+    "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
      \       protoss canon <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
+     \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss run <file> --entry <name>\n\
      \       protoss resume <file> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss world init [<ledger-root>]\n\
@@ -88,14 +89,31 @@ let command_check file =
   let checked = parse_and_check file in
   Printf.printf "OK: %d definitions\n" (List.length checked.Protoss.Kernel.defs)
 
+let checked_graph file =
+  Protoss.Canonical_ir.checked_of_graph (Protoss.Store.read_file file)
+
+let command_check_graph file =
+  let checked = checked_graph file in
+  Printf.printf "Graph OK: %d definitions\n" (List.length checked.Protoss.Kernel.defs)
+
 let command_nf file =
   let checked = parse_and_check file in
   Protoss.Runtime.normalize_all checked
   |> List.iter (fun (name, value) ->
          Printf.printf "%s = %s\n" name (Protoss.Runtime.value_to_string value))
 
+let command_nf_graph file =
+  let checked = checked_graph file in
+  Protoss.Runtime.normalize_all checked
+  |> List.iter (fun (name, value) ->
+         Printf.printf "%s = %s\n" name (Protoss.Runtime.value_to_string value))
+
 let command_hash file =
   let checked = parse_and_check file in
+  print_endline (Protoss.Kernel.hash_program checked)
+
+let command_hash_graph file =
+  let checked = checked_graph file in
   print_endline (Protoss.Kernel.hash_program checked)
 
 let canonical_program checked =
@@ -124,6 +142,16 @@ let command_canon_from_graph file =
 let command_eval file args =
   let entry, rest = find_entry args in
   let checked = parse_and_check file in
+  let value, trace =
+    Protoss.Runtime.eval_entry ~trace_cache:(has_flag "--trace-cache" rest)
+      ?cache_dir:(find_arg "--cache" rest) checked entry
+  in
+  List.iter print_endline trace;
+  Printf.printf "%s = %s\n" entry (Protoss.Runtime.value_to_string value)
+
+let command_eval_graph file args =
+  let entry, rest = find_entry args in
+  let checked = checked_graph file in
   let value, trace =
     Protoss.Runtime.eval_entry ~trace_cache:(has_flag "--trace-cache" rest)
       ?cache_dir:(find_arg "--cache" rest) checked entry
@@ -432,13 +460,17 @@ let () =
   protect (fun () ->
       match Array.to_list Sys.argv |> List.tl with
       | [ "parse"; file ] -> command_parse file
+      | [ "check"; "--graph"; file ] -> command_check_graph file
       | [ "check"; file ] -> command_check file
+      | [ "nf"; "--graph"; file ] -> command_nf_graph file
       | [ "nf"; file ] -> command_nf file
+      | [ "hash"; "--graph"; file ] -> command_hash_graph file
       | [ "hash"; file ] -> command_hash file
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--graph"; file ] -> command_canon_graph file
       | [ "canon"; "--from-graph"; file ] -> command_canon_from_graph file
       | [ "canon"; file ] -> command_canon file
+      | "eval" :: "--graph" :: file :: args -> command_eval_graph file args
       | "eval" :: file :: args -> command_eval file args
       | "run" :: file :: args -> command_run file args
       | "resume" :: file :: args -> command_resume file args
