@@ -359,10 +359,16 @@ let command_project_lock args =
 let command_project_package args =
   let root = project_arg args in
   let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
-  let result = Protoss.Workspace.write_package ~locked:(has_flag "--locked" args) manifest in
-  Printf.printf "Package %s\nPath %s\nLock %s\nBuild %s\nStore %s\n"
-    result.Protoss.Workspace.package_ref result.package_path result.lock_hash result.build_id
-    result.store
+  if has_flag "--check" args then
+    let result = Protoss.Workspace.check_package manifest in
+    Printf.printf "Package OK %s\nPath %s\nLock %s\nBuild %s\nStore %s\n"
+      result.Protoss.Workspace.package_ref result.package_path result.lock_hash result.build_id
+      result.store
+  else
+    let result = Protoss.Workspace.write_package ~locked:(has_flag "--locked" args) manifest in
+    Printf.printf "Package %s\nPath %s\nLock %s\nBuild %s\nStore %s\n"
+      result.Protoss.Workspace.package_ref result.package_path result.lock_hash result.build_id
+      result.store
 
 let command_project = function
   | "init" :: args ->

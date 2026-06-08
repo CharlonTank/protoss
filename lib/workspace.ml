@@ -685,6 +685,9 @@ let package_current_path manifest = Filename.concat (Filename.concat manifest.ro
 
 let packages_dir manifest = Filename.concat (Filename.concat manifest.root ".protoss") "packages"
 
+let package_path_for_ref manifest package_ref =
+  Filename.concat (packages_dir manifest) (sanitize_id package_ref ^ ".package")
+
 let relative_to_root manifest path =
   let root = realpath_or manifest.root in
   let path = realpath_or path in
@@ -840,7 +843,7 @@ let write_package ?(locked = false) manifest =
   let package_ref = Kernel.hash_string content in
   let dir = packages_dir manifest in
   ensure_dir dir;
-  let package_path = Filename.concat dir (sanitize_id package_ref ^ ".package") in
+  let package_path = package_path_for_ref manifest package_ref in
   write_file package_path content;
   write_file (package_current_path manifest) (package_ref ^ "\n");
   {
@@ -850,6 +853,71 @@ let write_package ?(locked = false) manifest =
     build_id = build_result.build_id;
     store = build_result.store;
   }
+
+let package_items content =
+  match Sexp.parse content with
+  | [ Sexp.List (Sexp.Atom "protoss-package-v1" :: items) ] -> items
+  | [ form ] -> fail ("invalid package descriptor: " ^ Sexp.to_string form)
+  | [] -> fail "empty package descriptor"
+  | _ -> fail "package descriptor must contain one form"
+
+let package_atom_field name items =
+  match
+    List.find_opt
+      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
+      items
+  with
+  | Some (Sexp.List [ Sexp.Atom _; Sexp.Atom value ]) -> value
+  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+  | None -> fail ("package missing field: " ^ name)
+
+let package_string_field name items =
+  match
+    List.find_opt
+      (function Sexp.List (Sexp.Atom n :: _) when String.equal n name -> true | _ -> false)
+      items
+  with
+  | Some (Sexp.List [ Sexp.Atom _; Sexp.Str value ]) -> value
+  | Some item -> fail ("invalid package field " ^ name ^ ": " ^ Sexp.to_string item)
+  | None -> fail ("package missing field: " ^ name)
+
+let check_package manifest =
+  let current_path = package_current_path manifest in
+  if not (Sys.file_exists current_path) then fail ("missing package pointer: " ^ current_path);
+  let package_ref = trim (read_file current_path) in
+  if String.equal package_ref "" then fail ("empty package pointer: " ^ current_path);
+  let package_path = package_path_for_ref manifest package_ref in
+  if not (Sys.file_exists package_path) then fail ("missing package descriptor: " ^ package_path);
+  let content = read_file package_path in
+  let actual_ref = Kernel.hash_string content in
+  if not (String.equal package_ref actual_ref) then
+    fail
+      ("package hash mismatch: pointer " ^ package_ref ^ ", content " ^ actual_ref);
+  let items = package_items content in
+  let prepared = prepare_build manifest in
+  let lock_hash = check_lock_prepared manifest prepared in
+  let expect_atom name expected =
+    let actual = package_atom_field name items in
+    if not (String.equal actual expected) then
+      fail
+        ("package " ^ name ^ " mismatch: expected " ^ expected ^ ", got " ^ actual)
+  in
+  let expect_string name expected =
+    let actual = package_string_field name items in
+    if not (String.equal actual expected) then
+      fail
+        ("package " ^ name ^ " mismatch: expected " ^ expected ^ ", got " ^ actual)
+  in
+  expect_string "package" manifest.name;
+  expect_string "version" manifest.version;
+  expect_string "canonical-version" Kernel.canonical_version;
+  expect_string "canonical-graph-version" Kernel.canonical_graph_version;
+  expect_string "canonical-node-graph-version" Kernel.canonical_node_graph_version;
+  expect_atom "lock-hash" lock_hash;
+  expect_atom "program-hash" prepared.build_id;
+  expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
+  expect_atom "program-graph-hash" (Kernel.hash_string prepared.program_graph);
+  { package_ref; package_path; lock_hash; build_id = prepared.build_id; store = store_root manifest }
 
 let stats_to_string stats =
   "parsed=" ^ string_of_int stats.parsed ^ "\nreused=" ^ string_of_int stats.reused
@@ -1145,4 +1213,5 @@ let audit manifest =
   let events = Filename.concat ledger "events" in
   if Sys.file_exists events then
     Sys.readdir events |> Array.iter (fun event -> ignore (Ledger.inspect_event ledger event));
+  if Sys.file_exists (package_current_path manifest) then ignore (check_package manifest);
   "Audit OK\n"

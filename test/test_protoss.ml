@@ -1612,6 +1612,10 @@ let () =
     (contains_substring package_content lock_hash);
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
+  let package_checked = Workspace.check_package manifest_a in
+  assert_equal "project package check ref" package_a.package_ref package_checked.package_ref;
+  assert_equal "project package check lock" lock_hash package_checked.lock_hash;
+  assert_equal "project package audit" "Audit OK\n" (Workspace.audit manifest_a);
   let package_again = Workspace.write_package manifest_a in
   assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
   assert_equal "project package deterministic path" package_a.package_path package_again.package_path;
@@ -1626,6 +1630,10 @@ let () =
   (try
      ignore (Workspace.check_lock manifest_a);
      fail "project lock check should reject source drift"
+   with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.check_package manifest_a);
+     fail "package check should reject source drift"
    with Workspace.Error _ -> ());
   (try
      ignore (Workspace.write_package ~locked:true manifest_a);
@@ -1659,6 +1667,26 @@ let () =
      ignore (Workspace.audit scope_corrupt_manifest);
      fail "audit should reject corrupt capability scope"
    with Workspace.Error _ | Kernel.Error _ -> ());
+  let package_corrupt_root = temp_dir "workspace-package-corrupt" in
+  copy_tree ws_a package_corrupt_root;
+  let package_corrupt_manifest = Workspace.parse_manifest package_corrupt_root in
+  let package_corrupt_ref =
+    String.trim (Store.read_file (Workspace.package_current_path package_corrupt_manifest))
+  in
+  let package_corrupt_path =
+    Filename.concat (Workspace.packages_dir package_corrupt_manifest)
+      (Workspace.sanitize_id package_corrupt_ref ^ ".package")
+  in
+  write_file package_corrupt_path
+    (replace_once (Store.read_file package_corrupt_path) "protoss-package-v1" "protoss-package-bad");
+  (try
+     ignore (Workspace.check_package package_corrupt_manifest);
+     fail "package check should reject corrupt descriptor"
+   with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.audit package_corrupt_manifest);
+     fail "audit should reject corrupt package descriptor"
+   with Workspace.Error _ -> ());
   let graph_corrupt_root = temp_dir "workspace-graph-corrupt" in
   copy_tree ws_a graph_corrupt_root;
   let graph_corrupt_manifest = Workspace.parse_manifest graph_corrupt_root in
