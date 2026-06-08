@@ -45,6 +45,7 @@ type package_result = {
   store : string;
   interface_hash : string;
   interface_contract_hash : string;
+  interface_capabilities : int;
   interface_exports : int;
   interface_type_hashes : int;
   imported_packages : int;
@@ -243,6 +244,7 @@ let check_package project =
   require_field "buildId" package.build_id;
   let interface_hash = json_string_field "interfaceHash" interface in
   let interface_contract_hash = json_string_field "contractHash" interface in
+  let capabilities = json_array_field "capabilities" interface in
   let exports = json_array_field "exports" interface in
   let validated_type_hashes =
     exports
@@ -265,6 +267,7 @@ let check_package project =
     store = package.store;
     interface_hash;
     interface_contract_hash;
+    interface_capabilities = List.length capabilities;
     interface_exports = List.length exports;
     interface_type_hashes = validated_type_hashes;
     imported_packages = List.length imports;
@@ -302,7 +305,8 @@ let describe_package (result : package_result) =
   ^ result.package_ref ^ "\nlock_hash=" ^ result.lock_hash ^ "\nbuild_id="
   ^ result.build_id ^ "\nstore=" ^ result.store ^ "\ninterface_hash="
   ^ result.interface_hash ^ "\ninterface_contract_hash="
-  ^ result.interface_contract_hash ^ "\ninterface_exports="
+  ^ result.interface_contract_hash ^ "\ninterface_capabilities="
+  ^ string_of_int result.interface_capabilities ^ "\ninterface_exports="
   ^ string_of_int result.interface_exports ^ "\ninterface_type_hashes="
   ^ string_of_int result.interface_type_hashes ^ "\nimported_packages="
   ^ string_of_int result.imported_packages ^ "\n"

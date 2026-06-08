@@ -869,6 +869,7 @@ type package_interface = {
   interface_lock_hash : string;
   interface_build_id : string;
   interface_hash : string;
+  interface_capabilities : string list;
   interface_imports : (string * string * string * string * string) list;
   interface_exports : package_interface_export list;
 }
@@ -920,6 +921,13 @@ let package_interface_imports_from_items items =
            assoc_value name import_interfaces,
            assoc_value name import_contracts ))
 
+let package_interface_export_capabilities = function
+  | PackageDefExport { export_capabilities; _ } -> export_capabilities
+  | PackageTypeExport _ -> []
+
+let package_interface_capabilities exports =
+  exports |> List.concat_map package_interface_export_capabilities |> List.sort_uniq String.compare
+
 let package_interface_export_contract_item = function
   | PackageDefExport
       { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
@@ -970,11 +978,15 @@ let package_interface_contract_hash interface =
          lock_item "lock-hash" [ interface.interface_lock_hash ];
          lock_item "build-id" [ interface.interface_build_id ];
          lock_item "interface-hash" [ interface.interface_hash ];
+         lock_string_list "capabilities" interface.interface_capabilities;
+         lock_item "capability-descriptors"
+           [ lock_string (Kernel.capabilities_to_graph_json interface.interface_capabilities) ];
          lock_item "imports" imports;
          lock_item "exports" exports;
        ])
 
 let package_interface_from_items ?(project = "") package_ref items =
+  let exports = package_interface_exports_from_items items in
   {
     interface_project = project;
     interface_package = package_string_field "package" items;
@@ -983,8 +995,9 @@ let package_interface_from_items ?(project = "") package_ref items =
     interface_lock_hash = package_atom_field "lock-hash" items;
     interface_build_id = package_atom_field "program-hash" items;
     interface_hash = package_atom_field "interface-hash" items;
+    interface_capabilities = package_interface_capabilities exports;
     interface_imports = package_interface_imports_from_items items;
-    interface_exports = package_interface_exports_from_items items;
+    interface_exports = exports;
   }
 
 type package_import_info = {
@@ -1383,6 +1396,10 @@ let package_interface_json manifest =
       package_json_field "lockHash" (package_json_string interface.interface_lock_hash);
       package_json_field "buildId" (package_json_string interface.interface_build_id);
       package_json_field "interfaceHash" (package_json_string interface.interface_hash);
+      package_json_field "capabilities"
+        (package_json_array package_json_string interface.interface_capabilities);
+      package_json_field "capabilityDescriptors"
+        (Kernel.capabilities_to_graph_json interface.interface_capabilities);
       package_json_field "contractHash"
         (package_json_string (package_interface_contract_hash interface));
       package_json_field "imports"
@@ -1509,12 +1526,27 @@ let package_interface_of_json path obj =
       interface_lock_hash = package_json_string_field "lockHash" obj;
       interface_build_id = package_json_string_field "buildId" obj;
       interface_hash = package_json_string_field "interfaceHash" obj;
+      interface_capabilities =
+        package_json_array_field "capabilities" obj
+        |> List.map (function
+             | Json.String value -> value
+             | _ -> fail "package interface JSON capabilities must be strings");
       interface_imports =
         package_json_array_field "imports" obj |> List.map package_interface_import_of_json;
       interface_exports =
         package_json_array_field "exports" obj |> List.map package_interface_export_of_json;
     }
   in
+  let export_caps = package_interface_capabilities interface.interface_exports in
+  if not (export_caps = interface.interface_capabilities) then
+    fail ("package interface JSON capabilities mismatch in " ^ path);
+  let expected_descriptors =
+    try Json.parse (Kernel.capabilities_to_graph_json interface.interface_capabilities)
+    with Json.Error msg -> fail ("internal capability descriptor JSON invalid: " ^ msg)
+  in
+  let actual_descriptors = package_json_field_value "capabilityDescriptors" obj in
+  if actual_descriptors <> expected_descriptors then
+    fail ("package interface JSON capabilityDescriptors mismatch in " ^ path);
   let expected_contract = package_json_string_field "contractHash" obj in
   let actual_contract = package_interface_contract_hash interface in
   if not (String.equal expected_contract actual_contract) then

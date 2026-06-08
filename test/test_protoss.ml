@@ -1701,6 +1701,19 @@ let () =
   let package_interface_contract_hash = json_string_field "contractHash" package_interface_obj in
   assert_true "project package interface json contract hash"
     (String.length package_interface_contract_hash > 3);
+  assert_equal "project package interface json capability list" "Human.ask"
+    (String.concat "," (json_string_array_field "capabilities" package_interface_obj));
+  let package_capability_descriptors =
+    json_array_field "capabilityDescriptors" package_interface_obj
+  in
+  assert_true "project package interface json capability descriptor count"
+    (List.length package_capability_descriptors = 1);
+  let package_capability_descriptor = List.hd package_capability_descriptors in
+  assert_equal "project package interface json capability descriptor name" "Human.ask"
+    (json_string_field "name" package_capability_descriptor);
+  let package_capability_requests = json_array_field "requests" package_capability_descriptor in
+  assert_equal "project package interface json capability request tag" "AskHuman"
+    (json_string_field "tag" (List.hd package_capability_requests));
   let package_interface_exports = json_array_field "exports" package_interface_obj in
   let ask_export =
     match
@@ -1749,11 +1762,20 @@ let () =
      ignore (Workspace.check_package_interface_contract manifest_a bad_package_interface_file);
      fail "package interface contract check should reject mismatched contract hash"
    with Workspace.Error _ -> ());
+  let bad_package_capabilities_file = Filename.concat ws_a "interface-bad-capabilities.json" in
+  write_file bad_package_capabilities_file
+    (replace_once package_interface_json "\"AskHuman\"" "\"ReadClock\"");
+  (try
+     ignore (Workspace.check_package_interface_contract manifest_a bad_package_capabilities_file);
+     fail "package interface contract check should reject corrupt capability descriptors"
+   with Workspace.Error _ -> ());
   let package_invariants = Invariants.check_package ws_a in
   assert_equal "package invariant interface hash" interface_hash
     package_invariants.Invariants.interface_hash;
   assert_equal "package invariant interface contract hash" package_interface_contract_hash
     package_invariants.Invariants.interface_contract_hash;
+  assert_equal "package invariant interface capability count" "1"
+    (string_of_int package_invariants.Invariants.interface_capabilities);
   assert_true "package invariant counts interface exports"
     (package_invariants.Invariants.interface_exports > 0);
   assert_equal "package invariant validates all interface type hashes"
@@ -1839,6 +1861,8 @@ let () =
     (string_of_int consumer_package_invariants.Invariants.imported_packages);
   assert_true "package invariant imported contract hash"
     (String.length consumer_package_invariants.Invariants.interface_contract_hash > 3);
+  assert_true "package invariant imported capability count"
+    (consumer_package_invariants.Invariants.interface_capabilities > 0);
   assert_true "package invariant imported interface exports"
     (consumer_package_invariants.Invariants.interface_exports > 0);
   assert_equal "package invariant imported type hash count"
