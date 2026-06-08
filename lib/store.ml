@@ -57,7 +57,7 @@ let object_path root hash = Filename.concat (objects_dir root) hash
 let put_object root kind content =
   ensure_store root;
   let payload = "kind=" ^ kind ^ "\n" ^ content in
-  let hash = "p1:" ^ Hashcons.digest payload in
+  let hash = Hashcons.hash payload in
   let path = object_path root hash in
   if not (Sys.file_exists path) then write_file_atomic path payload;
   hash

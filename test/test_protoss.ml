@@ -54,6 +54,14 @@ let json_string_array_field name obj =
   json_array_field name obj
   |> List.map (function Json.String s -> s | _ -> fail ("JSON field is not string array: " ^ name))
 
+let () =
+  assert_equal "sha256 empty digest"
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    (Hashcons.digest "");
+  assert_equal "content address hash prefix"
+    "p2:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    (Hashcons.hash "abc")
+
 let expect_parse_error input =
   try
     let _ = Parser.parse_string input in
@@ -289,7 +297,9 @@ let () =
   assert_equal "formatting independent hash" (Kernel.hash_program formatted_a)
     (Kernel.hash_program formatted_b);
 
-  assert_equal "golden basic hash" "p1:3aa9fcfdeb989eec5013f30dec6ed730" (Kernel.hash_program formatted_a);
+  assert_equal "golden basic hash"
+    "p2:f029c8a33822c2a56c9d4a7ab2abe6f87345308170f625a846829e66ff9ccfff"
+    (Kernel.hash_program formatted_a);
 
   let canonical_def = List.hd formatted_a.Kernel.defs in
   let round_def = Kernel.parse_serialized_def canonical_def.canonical in
@@ -366,7 +376,8 @@ let () =
   (try
      ignore
        (Canonical_ir.parse_graph
-          (replace_once graph_json (Kernel.hash_program formatted_a) "p1:00000000000000000000000000000000"));
+          (replace_once graph_json (Kernel.hash_program formatted_a)
+             "p2:0000000000000000000000000000000000000000000000000000000000000000"));
      fail "canonical graph program hash mismatch should be rejected"
    with Kernel.Error _ -> ());
   (try
@@ -1601,7 +1612,7 @@ let () =
   let lock_before = Store.read_file lock_path in
   assert_true "project lock records version" (contains_substring lock_before "protoss-lock-v1");
   assert_true "project lock records program hash" (contains_substring lock_before build_a.build_id);
-  assert_true "project lock records source units" (contains_substring lock_before "(source-hash p1:");
+  assert_true "project lock records source units" (contains_substring lock_before "(source-hash p2:");
   assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
   let lock_path_again, lock_hash_again = Workspace.write_lock manifest_a in
   assert_equal "project lock deterministic path" lock_path lock_path_again;
@@ -1621,7 +1632,7 @@ let () =
   assert_true "project package records lock hash in content"
     (contains_substring package_content lock_hash);
   assert_true "project package records interface hash"
-    (contains_substring package_content "(interface-hash p1:");
+    (contains_substring package_content "(interface-hash p2:");
   assert_true "project package records public interface"
     (contains_substring package_content "(interface ");
   let interface_hash = sexp_atom_field "interface-hash" package_content in
@@ -1651,7 +1662,7 @@ let () =
   assert_equal "package interface constraint accepts current package" package_with_interface.package_ref
     (Workspace.check_package manifest_with_interface).Workspace.package_ref;
   write_file manifest_path_interface
-    (manifest_without_interface ^ "package_interfaces = [\"workspace-a=p1:bad\"]\n");
+    (manifest_without_interface ^ "package_interfaces = [\"workspace-a=p2:bad\"]\n");
   let manifest_bad_interface = Workspace.parse_manifest interface_ws in
   let package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss") in
   (try
@@ -1754,7 +1765,7 @@ let () =
     Store.read_file
       (Filename.concat (Workspace.packages_dir package_outdated_manifest)
          (Workspace.sanitize_id package_outdated_ref ^ ".package"))
-    |> fun content -> replace_once content "(interface-hash p1:" "(interface-hash p1:bad"
+    |> fun content -> replace_once content "(interface-hash p2:" "(interface-hash p2:bad"
   in
   let package_outdated_ref = Kernel.hash_string package_outdated_content in
   let package_outdated_path =
@@ -1776,7 +1787,7 @@ let () =
   write_file graph_corrupt_path
     (replace_once (Store.read_file graph_corrupt_path)
        (Kernel.hash_program build_a.Workspace.checked)
-       "p1:00000000000000000000000000000000");
+       "p2:0000000000000000000000000000000000000000000000000000000000000000");
   (try
      ignore (Workspace.audit graph_corrupt_manifest);
      fail "audit should reject corrupt canonical graph"
@@ -2053,13 +2064,13 @@ let () =
    with Failure _ -> ());
   assert_true "unknown capability ledger request must not create files"
     (count_files unknown_scope_ledger = 0);
-  let bad_event = "p1:bad-event" in
+  let bad_event = "p2:bad-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_event) "world=x\nkind=request\n";
   (try
      ignore (Ledger.inspect_event ledger_root bad_event);
      fail "maltyped ledger event should be rejected"
    with Failure _ -> ());
-  let bad_scope_event = "p1:bad-scope-event" in
+  let bad_scope_event = "p2:bad-scope-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_scope_event)
     "world=x\nkind=request\nrequest-id=req\nrequest=AskHuman:x\ncontinuation-id=cont\n\
      cap-scope=Clock.read\nsuspended=s\n";
@@ -2067,7 +2078,7 @@ let () =
      ignore (Ledger.inspect_event ledger_root bad_scope_event);
      fail "ledger event with wrong cap-scope should be rejected"
    with Failure _ -> ());
-  let unknown_scope_event = "p1:unknown-scope-event" in
+  let unknown_scope_event = "p2:unknown-scope-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root unknown_scope_event)
     "world=x\nkind=request\nrequest-id=req\nrequest=AskHuman:x\ncontinuation-id=cont\n\
      cap-scope=Human.ask,Space.laser\nsuspended=s\n";
@@ -2075,14 +2086,14 @@ let () =
      ignore (Ledger.inspect_event ledger_root unknown_scope_event);
      fail "ledger event with unknown cap should be rejected"
    with Failure _ -> ());
-  let bad_signature_event = "p1:bad-signature-event" in
+  let bad_signature_event = "p2:bad-signature-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_signature_event)
     (replace_once inspected_request_event "request-tag=AskHuman" "request-tag=HttpGet");
   (try
      ignore (Ledger.inspect_event ledger_root bad_signature_event);
      fail "ledger request event with bad signature should be rejected"
    with Failure _ -> ());
-  let bad_resume_event = "p1:bad-resume-event" in
+  let bad_resume_event = "p2:bad-resume-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_event)
     ("world=x\nkind=resume\nresume=" ^ event
    ^ "\nresponse-type=String\nresponse=Nat:1\nresult=bad\n");
@@ -2090,13 +2101,13 @@ let () =
      ignore (Ledger.inspect_event ledger_root bad_resume_event);
      fail "ledger resume event with wrong response type should be rejected"
    with Failure _ -> ());
-  let mismatched_request_event = "p1:mismatched-request-event" in
+  let mismatched_request_event = "p2:mismatched-request-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root mismatched_request_event)
     ("world=x\nkind=request\nrequest-id=req\nrequest=HttpGet:https://example.invalid\n\
       capability=Http.get\nrequest-tag=HttpGet\nrequest-payload-type=(Record (url String))\n\
       response-type=String\ncontinuation-id=cont\ncap-scope=Http.get\nsuspended="
     ^ String.escaped suspended ^ "\n");
-  let bad_resume_mismatch_event = "p1:bad-resume-mismatch-event" in
+  let bad_resume_mismatch_event = "p2:bad-resume-mismatch-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_mismatch_event)
     ("world=x\nkind=resume\nresume=" ^ mismatched_request_event
    ^ "\nresponse-type=String\nresponse=String:Ada\nresult=bad\n");

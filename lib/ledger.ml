@@ -1,6 +1,6 @@
 open Ast
 
-let hash s = "p1:" ^ Hashcons.digest s
+let hash = Hashcons.hash
 
 let initial_world = hash "world:initial"
 

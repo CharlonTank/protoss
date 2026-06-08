@@ -4,7 +4,7 @@ exception Error = Kernel_error.Error
 
 let fail = Kernel_error.fail
 
-let hash_string s = "p1:" ^ Hashcons.digest s
+let hash_string = Hashcons.hash
 
 let builtin_types =
   [
