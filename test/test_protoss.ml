@@ -1356,6 +1356,11 @@ let () =
     | None -> fail "missing Human.ask capability ref"
   in
   let human_signature_ref = Kernel.req_signature_ref (Ast.AskHuman "") in
+  let clock_capability_ref =
+    match Kernel.req_capability_ref Ast.ReadClock with
+    | Some ref -> ref
+    | None -> fail "missing Clock.read capability ref"
+  in
   assert_equal "process graph capability descriptor ref" human_capability_ref
     (json_string_field "ref" human_descriptor);
   assert_equal "process graph capability descriptor name" "Human.ask"
@@ -1368,6 +1373,29 @@ let () =
   assert_equal "process graph request tag" "AskHuman" (json_string_field "tag" ask_request);
   assert_equal "process graph response type" "String"
     (json_string_field "tag" (json_field "responseType" ask_request));
+  assert_equal "process graph def capability scope refs" human_capability_ref
+    (String.concat ","
+       (json_string_array_field "capabilityScopeRefs" (graph_def process_graph "askName")));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             "\"capabilityScopeRefs\": ["
+             "\"capabilityScopeRefsMissing\": ["));
+     fail "canonical graph should reject missing capability scope refs"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing capability scope refs"
+       (contains_substring msg "canonical graph missing field: capabilityScopeRefs"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             ("\"capabilityScopeRefs\": [" ^ Ast.quote human_capability_ref ^ "]")
+             "\"capabilityScopeRefs\": [\"p2:bad\"]"));
+     fail "canonical graph should reject corrupt capability scope refs"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt capability scope refs"
+       (contains_substring msg "canonical graph capabilityScopeRefs mismatch: askName"));
 
   let scoped_process =
     check
@@ -1399,7 +1427,10 @@ let () =
      ignore
        (Canonical_ir.parse_graph
           (replace_once (Canonical_ir.serialize_graph scoped_process)
-             "\"capabilityScope\": [\"Human.ask\"]" "\"capabilityScope\": [\"Clock.read\"]"));
+             ("\"capabilityScope\": [\"Human.ask\"], \"capabilityScopeRefs\": ["
+            ^ Ast.quote human_capability_ref ^ "]")
+             ("\"capabilityScope\": [\"Clock.read\"], \"capabilityScopeRefs\": ["
+            ^ Ast.quote clock_capability_ref ^ "]")));
      fail "canonical graph should reject corrupt capability scope"
    with Kernel.Error msg ->
      assert_true "canonical graph rejects corrupt capability scope"
@@ -1412,6 +1443,11 @@ let () =
   in
   let multi_cap_graph_json = Canonical_ir.serialize_graph multi_cap_process in
   ignore (Canonical_ir.parse_graph multi_cap_graph_json);
+  let multi_cap_graph = Json.parse multi_cap_graph_json in
+  assert_equal "graph multi capability scope refs"
+    (clock_capability_ref ^ "," ^ human_capability_ref)
+    (String.concat ","
+       (json_string_array_field "capabilityScopeRefs" (graph_def multi_cap_graph "both")));
   (try
      ignore
        (Canonical_ir.parse_graph

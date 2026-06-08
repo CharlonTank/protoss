@@ -313,6 +313,16 @@ let validate_capability_scopes caps def_objs defs =
       let canonical_declared = List.sort_uniq String.compare declared in
       if declared <> canonical_declared then
         fail ("canonical graph capabilityScope not canonical: " ^ d.Kernel.cname);
+      let declared_refs = json_string_array_field "capabilityScopeRefs" obj in
+      let expected_refs =
+        declared
+        |> List.map (fun cap ->
+               match Kernel.capability_ref cap with
+               | Some ref -> ref
+               | None -> fail ("canonical graph capabilityScope unknown capability: " ^ cap))
+      in
+      if declared_refs <> expected_refs then
+        fail ("canonical graph capabilityScopeRefs mismatch: " ^ d.Kernel.cname);
       let actual = capabilities_of_def d in
       if declared <> actual then
         fail

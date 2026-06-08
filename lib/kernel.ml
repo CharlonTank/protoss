@@ -3013,6 +3013,13 @@ let checked_to_graph_json checked =
   in
   let def_json d =
     let canonical_payload = cterm_to_canonical_v2 def_id_of d.cterm in
+    let capability_scope_refs =
+      d.capabilities
+      |> List.map (fun cap ->
+             match capability_ref cap with
+             | Some ref -> ref
+             | None -> fail ("unknown capability in canonical graph scope: " ^ cap))
+    in
     json_obj
       [
         json_field "name" (json_string d.def.name);
@@ -3021,6 +3028,7 @@ let checked_to_graph_json checked =
         json_field "typeRef" (json_string (type_node_id d.def.typ));
         json_field "termRef" (json_string (term_node_id def_id_of d.cterm));
         json_field "capabilityScope" (json_array json_string d.capabilities);
+        json_field "capabilityScopeRefs" (json_array json_string capability_scope_refs);
         json_field "type" (type_to_graph_json d.def.typ);
         json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
         json_field "deps"
