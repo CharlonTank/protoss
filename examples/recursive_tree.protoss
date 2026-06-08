@@ -1,0 +1,31 @@
+(variant Tree (params A)
+  (Leaf A)
+  (Node (Record
+    (left (Tree A))
+    (right (Tree A)))))
+
+(def leaf (Tree Nat)
+  (variant Leaf 1))
+
+(def tree (Tree Nat)
+  (variant Node
+    (record
+      (left leaf)
+      (right (variant Leaf 2)))))
+
+(def leftmost Nat
+  (case tree
+    (Leaf n n)
+    (Node pair
+      (case (get pair left)
+        (Leaf n n)
+        (Node nested 0)))))
+
+(def mirrored (Tree Nat)
+  (case tree
+    (Leaf n (variant Leaf n))
+    (Node pair
+      (variant Node
+        (record
+          (left (get pair right))
+          (right (get pair left)))))))

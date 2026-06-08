@@ -429,6 +429,21 @@ let () =
   assert_equal "variant canonical order" (Kernel.hash_program variant_order_a)
     (Kernel.hash_program variant_order_b);
 
+  let recursive_tree_path = find_up (Sys.getcwd ()) "examples/recursive_tree.protoss" in
+  let recursive_tree = Loader.check_file recursive_tree_path in
+  let leftmost, _ = Runtime.normalize_def recursive_tree "leftmost" in
+  assert_equal "recursive Tree case normalization" "1" (Runtime.value_to_string leftmost);
+  let mirrored, _ = Runtime.normalize_def recursive_tree "mirrored" in
+  assert_equal "recursive Tree rebuild"
+    "Node {left = Leaf 2, right = Leaf 1}" (Runtime.value_to_string mirrored);
+  assert_true "recursive type appears as nominal canonical type"
+    (contains_substring (Kernel.serialize_checked_program recursive_tree) "(Named Tree Nat)");
+  assert_equal "recursive Tree graph roundtrip" (Kernel.serialize_checked_program recursive_tree)
+    (Canonical_ir.graph_to_program (Canonical_ir.serialize_graph recursive_tree));
+  expect_check_error "(type Bad Bad)\n(def bad Bad unit)";
+  expect_check_error "(record Bad (next Bad))\n(def bad Bad unit)";
+  expect_check_error "(variant Bad (Apply (-> Bad Nat)))\n(def bad Bad unit)";
+
   let kernel_nf = Kernel.normalize_checked_def norm "two" in
   assert_equal "kernel pure normalizer" "2" (Kernel.cterm_to_string kernel_nf);
 

@@ -76,6 +76,10 @@ let rec type_of_graph_json obj =
   | "TypeVar" -> Ast.TVar (json_nat_field "index" obj)
   | "Forall" ->
       Ast.TForall (json_nat_field "arity" obj, type_of_graph_json (json_field "body" obj))
+  | "Named" ->
+      Ast.TNamed
+        ( json_string_field "name" obj,
+          List.map type_of_graph_json (json_array_field "args" obj) )
   | tag -> fail ("unknown canonical graph type tag: " ^ tag)
 
 let req_of_graph_json obj =

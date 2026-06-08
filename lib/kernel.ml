@@ -50,7 +50,10 @@ let rec type_to_canonical = function
   | TVar i -> "(TVar " ^ string_of_int i ^ ")"
   | TForall (arity, body) ->
       "(Forall " ^ string_of_int arity ^ " " ^ type_to_canonical body ^ ")"
-  | TNamed (n, _) -> fail ("unresolved type alias in canonical type: " ^ n)
+  | TNamed (n, args) ->
+      "(Named " ^ n
+      ^ (match args with [] -> "" | _ -> " " ^ String.concat " " (List.map type_to_canonical args))
+      ^ ")"
 
 let req_capability = function
   | AskHuman _ -> "Human.ask"
@@ -216,127 +219,172 @@ let bind_type_params alias args =
      ^ " argument(s), got " ^ string_of_int actual);
   List.combine alias.type_params args
 
-let rec expand_type aliases vars stack = function
+let rec direct_self_refs alias guarded = function
+  | TUnit | TBool | TNat | TString | TVar _ -> []
+  | TFun (a, b) -> direct_self_refs alias false a @ direct_self_refs alias false b
+  | TRecord fields -> List.concat_map (fun (_, t) -> direct_self_refs alias guarded t) fields
+  | TVariant cases -> List.concat_map (fun (_, t) -> direct_self_refs alias true t) cases
+  | TList t -> direct_self_refs alias guarded t
+  | TView t | TProcess t -> direct_self_refs alias false t
+  | TForall (_, body) -> direct_self_refs alias guarded body
+  | TNamed (n, args) ->
+      let arg_refs = List.concat_map (direct_self_refs alias guarded) args in
+      if String.equal n alias.type_name
+         && not (List.exists (String.equal n) alias.type_params)
+      then guarded :: arg_refs
+      else arg_refs
+
+let validate_type_alias_recursion aliases =
+  List.iter
+    (fun alias ->
+      match direct_self_refs alias false alias.type_body with
+      | [] -> ()
+      | refs when List.for_all Fun.id refs -> ()
+      | _ ->
+          fail
+            ("recursive type alias must be guarded by a Variant constructor: "
+            ^ alias.type_name))
+    aliases
+
+let recursive_alias_names aliases =
+  aliases
+  |> List.filter (fun alias -> direct_self_refs alias false alias.type_body <> [])
+  |> List.map (fun alias -> alias.type_name)
+
+let rec expand_type recursive_names aliases vars stack = function
   | TUnit -> TUnit
   | TBool -> TBool
   | TNat -> TNat
   | TString -> TString
-  | TFun (a, b) -> TFun (expand_type aliases vars stack a, expand_type aliases vars stack b)
+  | TFun (a, b) -> TFun (expand_type recursive_names aliases vars stack a, expand_type recursive_names aliases vars stack b)
   | TRecord fields ->
-      TRecord (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases vars stack t)) fields))
+      TRecord
+        (sort_fields
+           (List.map (fun (n, t) -> (n, expand_type recursive_names aliases vars stack t)) fields))
   | TVariant cases ->
-      TVariant (sort_fields (List.map (fun (n, t) -> (n, expand_type aliases vars stack t)) cases))
-  | TList t -> TList (expand_type aliases vars stack t)
-  | TView t -> TView (expand_type aliases vars stack t)
-  | TProcess t -> TProcess (expand_type aliases vars stack t)
+      TVariant
+        (sort_fields
+           (List.map (fun (n, t) -> (n, expand_type recursive_names aliases vars stack t)) cases))
+  | TList t -> TList (expand_type recursive_names aliases vars stack t)
+  | TView t -> TView (expand_type recursive_names aliases vars stack t)
+  | TProcess t -> TProcess (expand_type recursive_names aliases vars stack t)
   | TVar i -> TVar i
-  | TForall (arity, body) -> TForall (arity, expand_type aliases vars stack body)
+  | TForall (arity, body) -> TForall (arity, expand_type recursive_names aliases vars stack body)
   | TNamed (n, args) -> (
-      let args = List.map (expand_type aliases vars stack) args in
+      let args = List.map (expand_type recursive_names aliases vars stack) args in
       match assoc_opt n vars with
       | Some t ->
           if args <> [] then fail ("type parameter is not a type constructor: " ^ n);
           t
       | None ->
-      if List.exists (String.equal n) stack then
-        fail ("cyclic type alias: " ^ String.concat " -> " (List.rev (n :: stack)));
-      match alias_by_name aliases n with
-      | Some alias ->
-          let vars = bind_type_params alias args in
-          expand_type aliases vars (n :: stack) alias.type_body
-      | None ->
-          if List.exists (String.equal n) builtin_type_names then
-            fail ("invalid builtin type application: " ^ Ast.string_of_typ (TNamed (n, args)))
-          else fail ("unknown type alias: " ^ n))
+      if List.exists (String.equal n) recursive_names then (
+        match alias_by_name aliases n with
+        | Some alias ->
+            ignore (bind_type_params alias args);
+            TNamed (n, args)
+        | None -> fail ("unknown recursive type alias: " ^ n))
+      else if List.exists (String.equal n) stack then
+        fail ("cyclic type alias: " ^ String.concat " -> " (List.rev (n :: stack)))
+      else
+        match alias_by_name aliases n with
+        | Some alias ->
+            let vars = bind_type_params alias args in
+            expand_type recursive_names aliases vars (n :: stack) alias.type_body
+        | None ->
+            if List.exists (String.equal n) builtin_type_names then
+              fail ("invalid builtin type application: " ^ Ast.string_of_typ (TNamed (n, args)))
+            else fail ("unknown type alias: " ^ n))
 
 let type_var_env params =
   List.mapi (fun i param -> (param, TVar i)) params
 
-let rec expand_expr_types aliases vars = function
+let rec expand_expr_types recursive_names aliases vars = function
   | EUnit -> EUnit
   | EBool b -> EBool b
   | ENat n -> ENat n
   | EString s -> EString s
   | EName n -> EName n
   | ELambda (x, t, body) ->
-      ELambda (x, expand_type aliases vars [] t, expand_expr_types aliases vars body)
-  | EApp (f, x) -> EApp (expand_expr_types aliases vars f, expand_expr_types aliases vars x)
+      ELambda (x, expand_type recursive_names aliases vars [] t, expand_expr_types recursive_names aliases vars body)
+  | EApp (f, x) -> EApp (expand_expr_types recursive_names aliases vars f, expand_expr_types recursive_names aliases vars x)
   | ELet (x, e, body) ->
-      ELet (x, expand_expr_types aliases vars e, expand_expr_types aliases vars body)
+      ELet (x, expand_expr_types recursive_names aliases vars e, expand_expr_types recursive_names aliases vars body)
   | ERecord fields ->
       ERecord
-        (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types aliases vars e)) fields))
-  | EField (e, field) -> EField (expand_expr_types aliases vars e, field)
+        (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types recursive_names aliases vars e)) fields))
+  | EField (e, field) -> EField (expand_expr_types recursive_names aliases vars e, field)
   | EVariant (t, con, e) ->
-      EVariant (expand_type aliases vars [] t, con, expand_expr_types aliases vars e)
-  | EVariantInferred (con, e) -> EVariantInferred (con, expand_expr_types aliases vars e)
-  | EInst (name, args) -> EInst (name, List.map (expand_type aliases vars []) args)
+      EVariant (expand_type recursive_names aliases vars [] t, con, expand_expr_types recursive_names aliases vars e)
+  | EVariantInferred (con, e) -> EVariantInferred (con, expand_expr_types recursive_names aliases vars e)
+  | EInst (name, args) -> EInst (name, List.map (expand_type recursive_names aliases vars []) args)
   | ECase (e, branches) ->
-      ECase (expand_expr_types aliases vars e, List.map (expand_branch_types aliases vars) branches)
+      ECase (expand_expr_types recursive_names aliases vars e, List.map (expand_branch_types recursive_names aliases vars) branches)
   | EFoldNat (n, z, step) ->
       EFoldNat
-        ( expand_expr_types aliases vars n,
-          expand_expr_types aliases vars z,
-          expand_expr_types aliases vars step )
-  | ENil t -> ENil (expand_type aliases vars [] t)
+        ( expand_expr_types recursive_names aliases vars n,
+          expand_expr_types recursive_names aliases vars z,
+          expand_expr_types recursive_names aliases vars step )
+  | ENil t -> ENil (expand_type recursive_names aliases vars [] t)
   | ECons (t, head, tail) ->
       ECons
-        ( expand_type aliases vars [] t,
-          expand_expr_types aliases vars head,
-          expand_expr_types aliases vars tail )
+        ( expand_type recursive_names aliases vars [] t,
+          expand_expr_types recursive_names aliases vars head,
+          expand_expr_types recursive_names aliases vars tail )
   | EFoldList (xs, z, step) ->
       EFoldList
-        ( expand_expr_types aliases vars xs,
-          expand_expr_types aliases vars z,
-          expand_expr_types aliases vars step )
-  | EText e -> EText (expand_expr_types aliases vars e)
+        ( expand_expr_types recursive_names aliases vars xs,
+          expand_expr_types recursive_names aliases vars z,
+          expand_expr_types recursive_names aliases vars step )
+  | EText e -> EText (expand_expr_types recursive_names aliases vars e)
   | EImage (src, alt) ->
-      EImage (expand_expr_types aliases vars src, expand_expr_types aliases vars alt)
+      EImage (expand_expr_types recursive_names aliases vars src, expand_expr_types recursive_names aliases vars alt)
   | EButton (label, msg) ->
-      EButton (expand_expr_types aliases vars label, expand_expr_types aliases vars msg)
+      EButton (expand_expr_types recursive_names aliases vars label, expand_expr_types recursive_names aliases vars msg)
   | EInput (value, handler) ->
-      EInput (expand_expr_types aliases vars value, expand_expr_types aliases vars handler)
-  | EColumn children -> EColumn (expand_expr_types aliases vars children)
-  | ERow children -> ERow (expand_expr_types aliases vars children)
+      EInput (expand_expr_types recursive_names aliases vars value, expand_expr_types recursive_names aliases vars handler)
+  | EColumn children -> EColumn (expand_expr_types recursive_names aliases vars children)
+  | ERow children -> ERow (expand_expr_types recursive_names aliases vars children)
   | EListView (items, render) ->
-      EListView (expand_expr_types aliases vars items, expand_expr_types aliases vars render)
+      EListView (expand_expr_types recursive_names aliases vars items, expand_expr_types recursive_names aliases vars render)
   | EWhenView (cond, view) ->
-      EWhenView (expand_expr_types aliases vars cond, expand_expr_types aliases vars view)
-  | EDone e -> EDone (expand_expr_types aliases vars e)
+      EWhenView (expand_expr_types recursive_names aliases vars cond, expand_expr_types recursive_names aliases vars view)
+  | EDone e -> EDone (expand_expr_types recursive_names aliases vars e)
   | ERequest req -> ERequest req
   | EBind (p, x, t, body) ->
       EBind
-        ( expand_expr_types aliases vars p,
+        ( expand_expr_types recursive_names aliases vars p,
           x,
-          expand_type aliases vars [] t,
-          expand_expr_types aliases vars body )
+          expand_type recursive_names aliases vars [] t,
+          expand_expr_types recursive_names aliases vars body )
 
-and expand_branch_types aliases vars = function
-  | BBool (b, e) -> BBool (b, expand_expr_types aliases vars e)
-  | BVariant (con, x, e) -> BVariant (con, x, expand_expr_types aliases vars e)
+and expand_branch_types recursive_names aliases vars = function
+  | BBool (b, e) -> BBool (b, expand_expr_types recursive_names aliases vars e)
+  | BVariant (con, x, e) -> BVariant (con, x, expand_expr_types recursive_names aliases vars e)
 
 let resolve_program_types program =
   check_duplicate_type_aliases program.type_aliases;
+  validate_type_alias_recursion program.type_aliases;
   let aliases = program.type_aliases in
+  let recursive_names = recursive_alias_names aliases in
   let expanded_aliases =
     List.map
       (fun a ->
         let vars = List.map (fun param -> (param, TNamed (param, []))) a.type_params in
-        { a with type_body = expand_type aliases vars [ a.type_name ] a.type_body })
+        { a with type_body = expand_type recursive_names aliases vars [ a.type_name ] a.type_body })
       program.type_aliases
   in
   let defs =
     List.map
       (fun (d : def) ->
         let vars = type_var_env d.type_params in
-        let typ = expand_type aliases vars [] d.typ in
+        let typ = expand_type recursive_names aliases vars [] d.typ in
         {
           d with
           typ =
             (match d.type_params with
             | [] -> typ
             | params -> TForall (List.length params, typ));
-          body = expand_expr_types aliases vars d.body;
+          body = expand_expr_types recursive_names aliases vars d.body;
         })
       program.defs
   in
@@ -399,6 +447,7 @@ let reject_cycles defs =
 type global_type = { global_type_params : string list; global_typ : typ }
 
 type type_ctx = {
+  type_aliases : type_alias list;
   globals : (string * global_type) list;
   capabilities : string list;
   locals : (string * typ) list;
@@ -430,6 +479,33 @@ let instantiate_type name params typ args =
 
 let lookup_global ctx n =
   assoc_opt n ctx.globals
+
+let rec subst_named_type_params vars = function
+  | TUnit -> TUnit
+  | TBool -> TBool
+  | TNat -> TNat
+  | TString -> TString
+  | TFun (a, b) -> TFun (subst_named_type_params vars a, subst_named_type_params vars b)
+  | TRecord fields ->
+      TRecord (sort_fields (List.map (fun (n, t) -> (n, subst_named_type_params vars t)) fields))
+  | TVariant cases ->
+      TVariant (sort_fields (List.map (fun (n, t) -> (n, subst_named_type_params vars t)) cases))
+  | TList t -> TList (subst_named_type_params vars t)
+  | TView t -> TView (subst_named_type_params vars t)
+  | TProcess t -> TProcess (subst_named_type_params vars t)
+  | TVar i -> TVar i
+  | TForall (arity, body) -> TForall (arity, subst_named_type_params vars body)
+  | TNamed (n, []) -> Option.value (assoc_opt n vars) ~default:(TNamed (n, []))
+  | TNamed (n, args) -> TNamed (n, List.map (subst_named_type_params vars) args)
+
+let unfold_type ctx = function
+  | TNamed (n, args) -> (
+      match alias_by_name ctx.type_aliases n with
+      | None -> TNamed (n, args)
+      | Some alias ->
+          let vars = bind_type_params alias args in
+          subst_named_type_params vars alias.type_body)
+  | t -> t
 
 let lookup_type ctx n =
   match assoc_opt n ctx.locals with
@@ -521,14 +597,14 @@ let rec infer ctx = function
         fields;
       TRecord (sort_fields (List.map (fun (n, t, _) -> (n, t)) fields))
   | EField (e, field) -> (
-      match infer ctx e with
+      match unfold_type ctx (infer ctx e) with
       | TRecord fields -> (
           match assoc_opt field fields with
           | Some t -> t
           | None -> fail ("unknown record field: " ^ field))
       | t -> fail ("field access on non-record: " ^ string_of_typ t))
   | EVariant (ty, con, e) -> (
-      match ty with
+      match unfold_type ctx ty with
       | TVariant cases -> (
           match assoc_opt con cases with
           | Some payload_ty ->
@@ -550,7 +626,7 @@ let rec infer ctx = function
       | Some _ -> fail ("definition is not polymorphic: " ^ name)
       | None -> fail ("unknown polymorphic definition: " ^ name ^ "." ^ suggestion ctx name))
   | ECase (scrut, branches) -> (
-      match infer ctx scrut with
+      match unfold_type ctx (infer ctx scrut) with
       | TBool -> infer_bool_case ctx branches
       | TVariant cases -> infer_variant_case ctx cases branches
       | t -> fail ("case on unsupported type: " ^ string_of_typ t))
@@ -708,7 +784,7 @@ let rec infer_elab ctx expr =
        ERecord (sort_fields (List.map (fun (n, _, e) -> (n, e)) fields)))
   | EField (e, field) -> (
       let t, e = infer_elab ctx e in
-      match t with
+      match unfold_type ctx t with
       | TRecord fields -> (
           match assoc_opt field fields with
           | Some field_ty -> (field_ty, EField (e, field))
@@ -727,7 +803,7 @@ let rec infer_elab ctx expr =
       | None -> fail ("unknown polymorphic definition: " ^ name ^ "." ^ suggestion ctx name))
   | ECase (scrut, branches) -> (
       let scrut_ty, scrut = infer_elab ctx scrut in
-      match scrut_ty with
+      match unfold_type ctx scrut_ty with
       | TBool ->
           let ty, branches = infer_bool_case_elab ctx branches in
           (ty, ECase (scrut, branches))
@@ -811,7 +887,7 @@ let rec infer_elab ctx expr =
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
 and check_elab ctx expected expr =
-  match (expected, expr) with
+  match (unfold_type ctx expected, expr) with
   | TVariant _, EVariantInferred (con, e) ->
       let _, e = elaborate_variant_payload ctx expected con e in
       (expected, EVariant (expected, con, e))
@@ -875,7 +951,7 @@ and check_elab ctx expected expr =
   | _, ECase (scrut, branches) ->
       let scrut_ty, scrut = infer_elab ctx scrut in
       let branches =
-        match scrut_ty with
+        match unfold_type ctx scrut_ty with
         | TBool -> check_bool_case_elab ctx expected branches
         | TVariant cases -> check_variant_case_elab ctx cases expected branches
         | t -> fail ("case on unsupported type: " ^ string_of_typ t)
@@ -887,7 +963,7 @@ and check_elab ctx expected expr =
       (expected, expr)
 
 and elaborate_variant_payload ctx ty con e =
-  match ty with
+  match unfold_type ctx ty with
   | TVariant cases -> (
       match assoc_opt con cases with
       | Some payload_ty ->
@@ -1279,7 +1355,13 @@ let rec type_to_graph_json = function
           json_field "arity" (string_of_int arity);
           json_field "body" (type_to_graph_json body);
         ]
-  | TNamed (n, _) -> fail ("unresolved type alias in graph type: " ^ n)
+  | TNamed (n, args) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Named");
+          json_field "name" (json_string n);
+          json_field "args" (json_array type_to_graph_json args);
+        ]
 
 let req_to_graph_json req =
   let tag, fields =
@@ -1529,6 +1611,8 @@ let rec type_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom i ] -> TVar (int_of_string i)
   | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom arity; body ] ->
       TForall (int_of_string arity, type_of_canonical_sexp body)
+  | Sexp.List (Sexp.Atom "Named" :: Sexp.Atom n :: args) ->
+      TNamed (n, List.map type_of_canonical_sexp args)
   | Sexp.List (Sexp.Atom "Record" :: fields) ->
       TRecord
         (sort_fields
@@ -1689,7 +1773,9 @@ let check_program (program : program) =
   let globals =
     List.map (fun d -> (d.name, { global_type_params = d.type_params; global_typ = d.typ })) program.defs
   in
-  let ctx = { globals; capabilities = program.capabilities; locals = [] } in
+  let ctx =
+    { type_aliases = program.type_aliases; globals; capabilities = program.capabilities; locals = [] }
+  in
   let defs =
     List.map
       (fun d ->
