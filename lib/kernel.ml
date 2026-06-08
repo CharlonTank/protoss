@@ -324,6 +324,13 @@ let rec expand_expr_types recursive_names aliases vars = function
         ( expand_expr_types recursive_names aliases vars n,
           expand_expr_types recursive_names aliases vars z,
           expand_expr_types recursive_names aliases vars step )
+  | EFoldVariant (target, result, scrut, branches) ->
+      EFoldVariant
+        ( expand_type recursive_names aliases vars [] target,
+          expand_type recursive_names aliases vars [] result,
+          expand_expr_types recursive_names aliases vars scrut,
+          List.map (expand_branch_types recursive_names aliases vars) branches )
+  | ERecur e -> ERecur (expand_expr_types recursive_names aliases vars e)
   | ENil t -> ENil (expand_type recursive_names aliases vars [] t)
   | ECons (t, head, tail) ->
       ECons
@@ -414,6 +421,13 @@ let collect_deps defs =
             | BVariant (_, x, b) -> expr (x :: bound) a b)
           (expr bound acc e) branches
     | EFoldNat (n, z, step) -> expr bound (expr bound (expr bound acc n) z) step
+    | EFoldVariant (_, _, scrut, branches) ->
+        List.fold_left
+          (fun a -> function
+            | BBool (_, b) -> expr bound a b
+            | BVariant (_, x, b) -> expr (x :: bound) a b)
+          (expr bound acc scrut) branches
+    | ERecur e -> expr bound acc e
     | ECons (_, head, tail) -> expr bound (expr bound acc head) tail
     | EFoldList (xs, z, step) -> expr bound (expr bound (expr bound acc xs) z) step
     | EText e | EColumn e | ERow e -> expr bound acc e
@@ -446,12 +460,45 @@ let reject_cycles defs =
 
 type global_type = { global_type_params : string list; global_typ : typ }
 
+type fold_scope = {
+  fold_target : typ;
+  fold_result : typ;
+  fold_allowed : expr list;
+}
+
 type type_ctx = {
   type_aliases : type_alias list;
   globals : (string * global_type) list;
   capabilities : string list;
   locals : (string * typ) list;
+  fold_scope : fold_scope option;
 }
+
+let rec recur_root_name = function
+  | EName n -> Some n
+  | EField (e, _) -> recur_root_name e
+  | _ -> None
+
+let shadow_fold_scope scope name =
+  match scope with
+  | None -> None
+  | Some s ->
+      Some
+        {
+          s with
+          fold_allowed =
+            List.filter
+              (fun e ->
+                match recur_root_name e with
+                | Some root -> not (String.equal root name)
+                | None -> true)
+              s.fold_allowed;
+        }
+
+let bind_local ctx name typ =
+  { ctx with locals = (name, typ) :: ctx.locals; fold_scope = shadow_fold_scope ctx.fold_scope name }
+
+let bind_lambda ctx name typ = { ctx with locals = (name, typ) :: ctx.locals; fold_scope = None }
 
 let rec subst_type args = function
   | TUnit -> TUnit
@@ -507,6 +554,54 @@ let unfold_type ctx = function
           subst_named_type_params vars alias.type_body)
   | t -> t
 
+let rec expr_equal a b =
+  match (a, b) with
+  | EName a, EName b -> String.equal a b
+  | EField (a, fa), EField (b, fb) -> String.equal fa fb && expr_equal a b
+  | _ -> false
+
+let direct_recur_terms ctx target payload_name payload_ty =
+  let base = if equal_typ target payload_ty then [ EName payload_name ] else [] in
+  match unfold_type ctx payload_ty with
+  | TRecord fields ->
+      base
+      @ (fields
+        |> List.filter_map (fun (field, field_ty) ->
+               if equal_typ target field_ty then Some (EField (EName payload_name, field)) else None))
+  | _ -> base
+
+let branch_names branches =
+  List.map
+    (function
+      | BVariant (con, _, _) -> con
+      | BBool _ -> fail "Bool branch in foldVariant")
+    branches
+
+let check_variant_branch_coverage cases branches where =
+  let branches = branch_names branches in
+  let seen = Hashtbl.create 8 in
+  List.iter
+    (fun con ->
+      if Hashtbl.mem seen con then fail (where ^ " duplicate branch: " ^ con);
+      Hashtbl.add seen con ())
+    branches;
+  let case_names = List.map fst cases in
+  List.iter
+    (fun con ->
+      if not (List.exists (String.equal con) branches) then
+        fail (where ^ " missing branch: " ^ con))
+    case_names;
+  List.iter
+    (fun con ->
+      if not (List.exists (String.equal con) case_names) then
+        fail (where ^ " unknown branch: " ^ con))
+    branches
+
+let recur_scope ctx =
+  match ctx.fold_scope with
+  | Some scope -> scope
+  | None -> fail "recur outside foldVariant"
+
 let lookup_type ctx n =
   match assoc_opt n ctx.locals with
   | Some t -> Some t
@@ -560,6 +655,19 @@ let rec contains_process_type = function
 
 let is_process_type = function TProcess _ -> true | _ -> false
 
+let fold_branch_ctx ctx target result payload_name payload_ty =
+  {
+    ctx with
+    locals = (payload_name, payload_ty) :: ctx.locals;
+    fold_scope =
+      Some
+        {
+          fold_target = target;
+          fold_result = result;
+          fold_allowed = direct_recur_terms ctx target payload_name payload_ty;
+        };
+  }
+
 let rec infer ctx = function
   | EUnit -> TUnit
   | EBool _ -> TBool
@@ -570,7 +678,7 @@ let rec infer ctx = function
       | Some t -> t
       | None -> fail ("unknown name: " ^ n ^ "." ^ suggestion ctx n))
   | ELambda (x, t, body) ->
-      TFun (t, infer { ctx with locals = (x, t) :: ctx.locals } body)
+      TFun (t, infer (bind_lambda ctx x t) body)
   | EApp (f, arg) -> (
       match infer ctx f with
       | TFun (a, b) ->
@@ -580,7 +688,7 @@ let rec infer ctx = function
       | t -> fail ("application of non-function: " ^ string_of_typ t))
   | ELet (x, e, body) ->
       let t = infer ctx e in
-      let body_ty = infer { ctx with locals = (x, t) :: ctx.locals } body in
+      let body_ty = infer (bind_local ctx x t) body in
       if is_process_type t && not (is_process_type body_ty) then
         fail
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
@@ -635,6 +743,30 @@ let rec infer ctx = function
       let result_ty = infer ctx zero in
       require_type (TFun (result_ty, result_ty)) (infer ctx step) "foldNat step";
       result_ty
+  | EFoldVariant (target, result, scrut, branches) ->
+      require_type target (infer ctx scrut) "foldVariant scrutinee";
+      (match unfold_type ctx target with
+      | TVariant cases ->
+          check_variant_branch_coverage cases branches "foldVariant";
+          List.iter
+            (function
+              | BBool _ -> assert false
+              | BVariant (con, x, body) ->
+                  let payload_ty = Option.get (assoc_opt con cases) in
+                  let body_ty =
+                    infer (fold_branch_ctx ctx target result x payload_ty) body
+                  in
+                  require_type result body_ty ("foldVariant branch " ^ con))
+            branches;
+          result
+      | t -> fail ("foldVariant target must be Variant, got " ^ string_of_typ t))
+  | ERecur arg ->
+      let scope = recur_scope ctx in
+      if not (List.exists (expr_equal arg) scope.fold_allowed) then
+        fail ("recur argument is not a direct structural subterm: " ^ string_of_expr arg);
+      let actual = infer { ctx with fold_scope = None } arg in
+      require_type scope.fold_target actual "recur argument";
+      scope.fold_result
   | ENil t -> TList t
   | ECons (t, head, tail) ->
       require_type t (infer ctx head) "Cons head";
@@ -694,7 +826,7 @@ let rec infer ctx = function
       match infer ctx p with
       | TProcess a ->
           require_type a annotation "bind annotation";
-          let body_ty = infer { ctx with locals = (x, a) :: ctx.locals } body in
+          let body_ty = infer (bind_local ctx x a) body in
           (match body_ty with
           | TProcess _ -> body_ty
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
@@ -739,7 +871,7 @@ and infer_variant_case ctx cases branches =
       | BBool _ -> assert false
       | BVariant (con, x, body) ->
           let payload_ty = Option.get (assoc_opt con cases) in
-          let ty = infer { ctx with locals = (x, payload_ty) :: ctx.locals } body in
+          let ty = infer (bind_local ctx x payload_ty) body in
           (match !result with
           | None -> result := Some ty
           | Some expected -> require_type expected ty "Variant case branches"))
@@ -751,7 +883,7 @@ let rec infer_elab ctx expr =
   | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ | ENil _ ->
       (infer ctx expr, expr)
   | ELambda (x, t, body) ->
-      let body_ty, body = infer_elab { ctx with locals = (x, t) :: ctx.locals } body in
+      let body_ty, body = infer_elab (bind_lambda ctx x t) body in
       (TFun (t, body_ty), ELambda (x, t, body))
   | EApp (f, arg) -> (
       let fn_ty, f = infer_elab ctx f in
@@ -762,7 +894,7 @@ let rec infer_elab ctx expr =
       | t -> fail ("application of non-function: " ^ string_of_typ t))
   | ELet (x, e, body) ->
       let t, e = infer_elab ctx e in
-      let body_ty, body = infer_elab { ctx with locals = (x, t) :: ctx.locals } body in
+      let body_ty, body = infer_elab (bind_local ctx x t) body in
       if is_process_type t && not (is_process_type body_ty) then
         fail
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
@@ -816,6 +948,31 @@ let rec infer_elab ctx expr =
       let result_ty, zero = infer_elab ctx zero in
       let _, step = check_elab ctx (TFun (result_ty, result_ty)) step in
       (result_ty, EFoldNat (n, zero, step))
+  | EFoldVariant (target, result, scrut, branches) ->
+      let _, scrut = check_elab ctx target scrut in
+      let branches =
+        match unfold_type ctx target with
+        | TVariant cases ->
+            check_variant_branch_coverage cases branches "foldVariant";
+            List.map
+              (function
+                | BBool _ -> assert false
+                | BVariant (con, x, body) ->
+                    let payload_ty = Option.get (assoc_opt con cases) in
+                    let _, body =
+                      check_elab (fold_branch_ctx ctx target result x payload_ty) result body
+                    in
+                    BVariant (con, x, body))
+              branches
+        | t -> fail ("foldVariant target must be Variant, got " ^ string_of_typ t)
+      in
+      (result, EFoldVariant (target, result, scrut, branches))
+  | ERecur arg ->
+      let scope = recur_scope ctx in
+      if not (List.exists (expr_equal arg) scope.fold_allowed) then
+        fail ("recur argument is not a direct structural subterm: " ^ string_of_expr arg);
+      let _, arg = check_elab { ctx with fold_scope = None } scope.fold_target arg in
+      (scope.fold_result, ERecur arg)
   | ECons (t, head, tail) ->
       let _, head = check_elab ctx t head in
       let _, tail = check_elab ctx (TList t) tail in
@@ -880,7 +1037,7 @@ let rec infer_elab ctx expr =
       (match p_ty with
       | TProcess a ->
           require_type a annotation "bind annotation";
-          let body_ty, body = infer_elab { ctx with locals = (x, a) :: ctx.locals } body in
+          let body_ty, body = infer_elab (bind_local ctx x a) body in
           (match body_ty with
           | TProcess _ -> (body_ty, EBind (p, x, annotation, body))
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
@@ -897,7 +1054,7 @@ and check_elab ctx expected expr =
       (expected, EVariant (expected, con, e))
   | TFun (expected_arg, expected_body), ELambda (x, actual_arg, body) ->
       require_type expected_arg actual_arg "lambda parameter";
-      let _, body = check_elab { ctx with locals = (x, actual_arg) :: ctx.locals } expected_body body in
+      let _, body = check_elab (bind_lambda ctx x actual_arg) expected_body body in
       (expected, ELambda (x, actual_arg, body))
   | TRecord expected_fields, ERecord fields ->
       let field_names = List.map fst fields in
@@ -942,7 +1099,7 @@ and check_elab ctx expected expr =
       | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
   | _, ELet (x, e, body) ->
       let t, e = infer_elab ctx e in
-      let _, body = check_elab { ctx with locals = (x, t) :: ctx.locals } expected body in
+      let _, body = check_elab (bind_local ctx x t) expected body in
       if is_process_type t && not (is_process_type expected) then
         fail
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
@@ -1033,7 +1190,7 @@ and check_variant_case_elab ctx cases expected branches =
       | BBool _ -> assert false
       | BVariant (con, x, body) ->
           let payload_ty = Option.get (assoc_opt con cases) in
-          let _, body = check_elab { ctx with locals = (x, payload_ty) :: ctx.locals } expected body in
+          let _, body = check_elab (bind_local ctx x payload_ty) expected body in
           BVariant (con, x, body))
     branches
 
@@ -1053,6 +1210,8 @@ type cterm =
   | CInst of string * typ list
   | CCase of cterm * cbranch list
   | CFoldNat of cterm * cterm * cterm
+  | CFoldVariant of typ * typ * cterm * cbranch list
+  | CRecur of cterm
   | CNil of typ
   | CCons of typ * cterm * cterm
   | CFoldList of cterm * cterm * cterm
@@ -1098,6 +1257,10 @@ let rec canonical_expr env = function
   | ECase (e, branches) -> CCase (canonical_expr env e, canonical_branches env branches)
   | EFoldNat (n, z, step) ->
       CFoldNat (canonical_expr env n, canonical_expr env z, canonical_expr env step)
+  | EFoldVariant (target, result, scrut, branches) ->
+      CFoldVariant
+        (target, result, canonical_expr env scrut, canonical_branches env branches)
+  | ERecur e -> CRecur (canonical_expr env e)
   | ENil t -> CNil t
   | ECons (t, head, tail) -> CCons (t, canonical_expr env head, canonical_expr env tail)
   | EFoldList (xs, z, step) ->
@@ -1159,6 +1322,12 @@ let rec cterm_to_string = function
   | CFoldNat (n, z, step) ->
       "(foldNat " ^ cterm_to_string n ^ " " ^ cterm_to_string z ^ " "
       ^ cterm_to_string step ^ ")"
+  | CFoldVariant (target, result, scrut, branches) ->
+      "(foldVariant " ^ type_to_canonical target ^ " " ^ type_to_canonical result ^ " "
+      ^ cterm_to_string scrut ^ " "
+      ^ String.concat " " (List.map cbranch_to_string branches)
+      ^ ")"
+  | CRecur e -> "(recur " ^ cterm_to_string e ^ ")"
   | CNil t -> "(Nil " ^ type_to_canonical t ^ ")"
   | CCons (t, head, tail) ->
       "(Cons " ^ type_to_canonical t ^ " " ^ cterm_to_string head ^ " " ^ cterm_to_string tail
@@ -1234,6 +1403,12 @@ let rec cterm_to_canonical_v2 def_id_of = function
   | CFoldNat (n, z, step) ->
       "(foldNat " ^ cterm_to_canonical_v2 def_id_of n ^ " " ^ cterm_to_canonical_v2 def_id_of z
       ^ " " ^ cterm_to_canonical_v2 def_id_of step ^ ")"
+  | CFoldVariant (target, result, scrut, branches) ->
+      "(foldVariant " ^ type_to_canonical target ^ " " ^ type_to_canonical result ^ " "
+      ^ cterm_to_canonical_v2 def_id_of scrut ^ " "
+      ^ String.concat " " (List.map (cbranch_to_canonical_v2 def_id_of) branches)
+      ^ ")"
+  | CRecur e -> "(recur " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
   | CNil t -> "(Nil " ^ type_to_canonical t ^ ")"
   | CCons (t, head, tail) ->
       "(Cons " ^ type_to_canonical t ^ " " ^ cterm_to_canonical_v2 def_id_of head ^ " "
@@ -1488,6 +1663,21 @@ let rec cterm_to_graph_json def_id_of = function
           json_field "zero" (cterm_to_graph_json def_id_of zero);
           json_field "step" (cterm_to_graph_json def_id_of step);
         ]
+  | CFoldVariant (target, result, scrutinee, branches) ->
+      json_obj
+        [
+          json_field "tag" (json_string "FoldVariant");
+          json_field "targetType" (type_to_graph_json target);
+          json_field "resultType" (type_to_graph_json result);
+          json_field "scrutinee" (cterm_to_graph_json def_id_of scrutinee);
+          json_field "branches" (json_array (cbranch_to_graph_json def_id_of) branches);
+        ]
+  | CRecur e ->
+      json_obj
+        [
+          json_field "tag" (json_string "Recur");
+          json_field "value" (cterm_to_graph_json def_id_of e);
+        ]
   | CNil typ ->
       json_obj [ json_field "tag" (json_string "Nil"); json_field "type" (type_to_graph_json typ) ]
   | CCons (typ, head, tail) ->
@@ -1681,6 +1871,13 @@ let rec cterm_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "foldNat"; n; zero; step ] ->
       CFoldNat
         (cterm_of_canonical_sexp n, cterm_of_canonical_sexp zero, cterm_of_canonical_sexp step)
+  | Sexp.List (Sexp.Atom "foldVariant" :: target :: result :: scrutinee :: branches) ->
+      CFoldVariant
+        ( type_of_canonical_sexp target,
+          type_of_canonical_sexp result,
+          cterm_of_canonical_sexp scrutinee,
+          List.map cbranch_of_canonical_sexp branches )
+  | Sexp.List [ Sexp.Atom "recur"; e ] -> CRecur (cterm_of_canonical_sexp e)
   | Sexp.List [ Sexp.Atom "Nil"; typ ] -> CNil (type_of_canonical_sexp typ)
   | Sexp.List [ Sexp.Atom "Cons"; typ; head; tail ] ->
       CCons (type_of_canonical_sexp typ, cterm_of_canonical_sexp head, cterm_of_canonical_sexp tail)
@@ -1774,7 +1971,13 @@ let check_program (program : program) =
     List.map (fun d -> (d.name, { global_type_params = d.type_params; global_typ = d.typ })) program.defs
   in
   let ctx =
-    { type_aliases = program.type_aliases; globals; capabilities = program.capabilities; locals = [] }
+    {
+      type_aliases = program.type_aliases;
+      globals;
+      capabilities = program.capabilities;
+      locals = [];
+      fold_scope = None;
+    }
   in
   let defs =
     List.map
@@ -1893,6 +2096,10 @@ let rec shift amount cutoff = function
   | CCase (e, branches) -> CCase (shift amount cutoff e, List.map (shift_branch amount cutoff) branches)
   | CFoldNat (n, zero, step) ->
       CFoldNat (shift amount cutoff n, shift amount cutoff zero, shift amount cutoff step)
+  | CFoldVariant (target, result, scrut, branches) ->
+      CFoldVariant
+        (target, result, shift amount cutoff scrut, List.map (shift_branch amount cutoff) branches)
+  | CRecur e -> CRecur (shift amount cutoff e)
   | CNil t -> CNil t
   | CCons (t, head, tail) -> CCons (t, shift amount cutoff head, shift amount cutoff tail)
   | CFoldList (xs, zero, step) ->
@@ -1931,6 +2138,13 @@ let rec subst index replacement = function
   | CFoldNat (n, zero, step) ->
       CFoldNat
         (subst index replacement n, subst index replacement zero, subst index replacement step)
+  | CFoldVariant (target, result, scrut, branches) ->
+      CFoldVariant
+        ( target,
+          result,
+          subst index replacement scrut,
+          List.map (subst_branch index replacement) branches )
+  | CRecur e -> CRecur (subst index replacement e)
   | CNil t -> CNil t
   | CCons (t, head, tail) -> CCons (t, subst index replacement head, subst index replacement tail)
   | CFoldList (xs, zero, step) ->
@@ -1974,6 +2188,13 @@ let rec subst_type_in_cterm args = function
   | CFoldNat (n, zero, step) ->
       CFoldNat
         (subst_type_in_cterm args n, subst_type_in_cterm args zero, subst_type_in_cterm args step)
+  | CFoldVariant (target, result, scrut, branches) ->
+      CFoldVariant
+        ( subst_type args target,
+          subst_type args result,
+          subst_type_in_cterm args scrut,
+          List.map (subst_type_in_branch args) branches )
+  | CRecur e -> CRecur (subst_type_in_cterm args e)
   | CNil t -> CNil (subst_type args t)
   | CCons (t, head, tail) ->
       CCons (subst_type args t, subst_type_in_cterm args head, subst_type_in_cterm args tail)
@@ -2059,6 +2280,61 @@ let rec normalize_cterm checked = function
           in
           loop count (normalize_cterm checked zero)
       | n -> CFoldNat (n, normalize_cterm checked zero, normalize_cterm checked step))
+  | CFoldVariant (target, result, scrut, branches) ->
+      let rec fold value =
+        match normalize_cterm checked value with
+        | CVariant (_, con, payload) -> (
+            match
+              List.find_map
+                (function
+                  | CBVariant (con', body) when String.equal con con' -> Some body
+                  | _ -> None)
+                branches
+            with
+            | Some body -> normalize_cterm checked (rewrite_recur (subst_top payload body))
+            | None -> CFoldVariant (target, result, CVariant (target, con, payload), branches))
+        | other -> CFoldVariant (target, result, other, branches)
+      and rewrite_recur = function
+        | CRecur e -> fold e
+        | CUnit -> CUnit
+        | CBool b -> CBool b
+        | CNat n -> CNat n
+        | CString s -> CString s
+        | CVar i -> CVar i
+        | CGlobal n -> CGlobal n
+        | CLambda (t, body) -> CLambda (t, rewrite_recur body)
+        | CApp (f, x) -> CApp (rewrite_recur f, rewrite_recur x)
+        | CLet (e, body) -> CLet (rewrite_recur e, rewrite_recur body)
+        | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, rewrite_recur e)) fields)
+        | CField (e, field) -> CField (rewrite_recur e, field)
+        | CVariant (t, con, e) -> CVariant (t, con, rewrite_recur e)
+        | CInst (name, args) -> CInst (name, args)
+        | CCase (e, branches) ->
+            CCase (rewrite_recur e, List.map rewrite_recur_branch branches)
+        | CFoldNat (n, zero, step) ->
+            CFoldNat (rewrite_recur n, rewrite_recur zero, rewrite_recur step)
+        | CFoldVariant _ as nested -> normalize_cterm checked nested
+        | CNil t -> CNil t
+        | CCons (t, head, tail) -> CCons (t, rewrite_recur head, rewrite_recur tail)
+        | CFoldList (xs, zero, step) ->
+            CFoldList (rewrite_recur xs, rewrite_recur zero, rewrite_recur step)
+        | CText e -> CText (rewrite_recur e)
+        | CImage (src, alt) -> CImage (rewrite_recur src, rewrite_recur alt)
+        | CButton (label, msg) -> CButton (rewrite_recur label, rewrite_recur msg)
+        | CInput (value, handler) -> CInput (rewrite_recur value, rewrite_recur handler)
+        | CColumn children -> CColumn (rewrite_recur children)
+        | CRow children -> CRow (rewrite_recur children)
+        | CListView (items, render) -> CListView (rewrite_recur items, rewrite_recur render)
+        | CWhenView (cond, view) -> CWhenView (rewrite_recur cond, rewrite_recur view)
+        | CDone e -> CDone (rewrite_recur e)
+        | CRequest req -> CRequest req
+        | CBind (p, t, body) -> CBind (rewrite_recur p, t, rewrite_recur body)
+      and rewrite_recur_branch = function
+        | CBBool (b, e) -> CBBool (b, rewrite_recur e)
+        | CBVariant (con, e) -> CBVariant (con, rewrite_recur e)
+      in
+      fold scrut
+  | CRecur _ -> fail "recur outside foldVariant"
   | CCons (t, head, tail) ->
       CCons (t, normalize_cterm checked head, normalize_cterm checked tail)
   | CFoldList (xs, zero, step) -> (

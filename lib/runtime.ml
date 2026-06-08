@@ -44,6 +44,7 @@ type eval_state = {
   cache_scope : string;
   mutable trace : string list;
   trace_cache : bool;
+  mutable recur_stack : (value -> value) list;
 }
 
 let rec value_to_string = function
@@ -279,6 +280,29 @@ let rec eval_cterm st env = function
           in
           loop count (eval_cterm st env zero)
       | v -> fail ("foldNat on non-Nat runtime value: " ^ value_to_string v))
+  | Kernel.CFoldVariant (_, _, scrut, branches) ->
+      let rec fold value =
+        match value with
+        | VVariant (_, con, payload) ->
+            let body =
+              branches
+              |> List.find_map (function
+                   | Kernel.CBVariant (con', body) when String.equal con con' -> Some body
+                   | _ -> None)
+            in
+            let body = Kernel.option_or_fail ("missing foldVariant branch at runtime: " ^ con) body in
+            let previous = st.recur_stack in
+            st.recur_stack <- fold :: previous;
+            Fun.protect
+              ~finally:(fun () -> st.recur_stack <- previous)
+              (fun () -> eval_cterm st (payload :: env) body)
+        | v -> fail ("foldVariant on non-Variant runtime value: " ^ value_to_string v)
+      in
+      fold (eval_cterm st env scrut)
+  | Kernel.CRecur e -> (
+      match st.recur_stack with
+      | fold :: _ -> fold (eval_cterm st env e)
+      | [] -> fail "recur outside foldVariant at runtime")
   | Kernel.CNil t -> VList (t, [])
   | Kernel.CCons (t, head, tail) -> (
       match eval_cterm st env tail with
@@ -411,6 +435,7 @@ let state ?(trace_cache = false) ?cache_dir ?cache_scope checked =
     cache_scope;
     trace = [];
     trace_cache;
+    recur_stack = [];
   }
 
 let eval_entry ?(trace_cache = false) ?cache_dir ?cache_scope checked entry =

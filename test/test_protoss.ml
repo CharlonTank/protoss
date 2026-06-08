@@ -436,13 +436,55 @@ let () =
   let mirrored, _ = Runtime.normalize_def recursive_tree "mirrored" in
   assert_equal "recursive Tree rebuild"
     "Node {left = Leaf 2, right = Leaf 1}" (Runtime.value_to_string mirrored);
+  let size, _ = Runtime.normalize_def recursive_tree "size" in
+  assert_equal "recursive Tree foldVariant size" "2" (Runtime.value_to_string size);
+  let mirrored_fold, _ = Runtime.normalize_def recursive_tree "mirroredFold" in
+  assert_equal "recursive Tree foldVariant rebuild"
+    "Node {left = Leaf 2, right = Leaf 1}" (Runtime.value_to_string mirrored_fold);
   assert_true "recursive type appears as nominal canonical type"
     (contains_substring (Kernel.serialize_checked_program recursive_tree) "(Named Tree Nat)");
+  assert_true "recursive foldVariant appears in canonical program"
+    (contains_substring (Kernel.serialize_checked_program recursive_tree) "(foldVariant");
   assert_equal "recursive Tree graph roundtrip" (Kernel.serialize_checked_program recursive_tree)
     (Canonical_ir.graph_to_program (Canonical_ir.serialize_graph recursive_tree));
   expect_check_error "(type Bad Bad)\n(def bad Bad unit)";
   expect_check_error "(record Bad (next Bad))\n(def bad Bad unit)";
   expect_check_error "(variant Bad (Apply (-> Bad Nat)))\n(def bad Bad unit)";
+  let tree_base =
+    "(variant Tree (params A) \
+     (Leaf A) \
+     (Node (Record (left (Tree A)) (right (Tree A)))))\n\
+     (def leaf (Tree Nat) (variant Leaf 1))\n\
+     (def tree (Tree Nat) \
+       (variant Node (record (left leaf) (right (variant Leaf 2)))))\n"
+  in
+  expect_check_error (tree_base ^ "(def bad Nat (recur tree))");
+  expect_check_error
+    (tree_base
+    ^ "(def bad Nat \
+        (foldVariant (Tree Nat) Nat tree \
+          (Leaf n 1) \
+          (Node pair (recur tree))))");
+  expect_check_error
+    (tree_base
+    ^ "(def bad Nat \
+        (foldVariant (Tree Nat) Nat tree \
+          (Leaf n 1) \
+          (Node pair (recur (variant Leaf 0)))))");
+  expect_check_error
+    (tree_base
+    ^ "(def bad Nat \
+        (foldVariant (Tree Nat) Nat tree \
+          (Leaf n 1) \
+          (Node pair \
+            (let (pair (record (left leaf) (right leaf))) \
+              (recur (get pair left))))))");
+  expect_check_error
+    (tree_base
+    ^ "(def bad (-> Nat Nat) \
+        (foldVariant (Tree Nat) (-> Nat Nat) tree \
+          (Leaf n (lambda (x Nat) x)) \
+          (Node pair (lambda (x Nat) (recur (get pair left))))))");
 
   let kernel_nf = Kernel.normalize_checked_def norm "two" in
   assert_equal "kernel pure normalizer" "2" (Kernel.cterm_to_string kernel_nf);

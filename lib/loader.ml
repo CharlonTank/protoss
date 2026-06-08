@@ -153,6 +153,10 @@ let rec expr_type_refs = function
   | EInst (_, args) -> List.concat_map type_refs args
   | ECase (e, branches) -> expr_type_refs e @ List.concat_map branch_type_refs branches
   | EFoldNat (n, z, step) -> expr_type_refs n @ expr_type_refs z @ expr_type_refs step
+  | EFoldVariant (target, result, scrut, branches) ->
+      type_refs target @ type_refs result @ expr_type_refs scrut
+      @ List.concat_map branch_type_refs branches
+  | ERecur e -> expr_type_refs e
   | ENil t -> type_refs t
   | ECons (t, head, tail) -> type_refs t @ expr_type_refs head @ expr_type_refs tail
   | EFoldList (xs, z, step) -> expr_type_refs xs @ expr_type_refs z @ expr_type_refs step

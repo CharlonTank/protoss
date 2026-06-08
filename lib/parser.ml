@@ -109,6 +109,14 @@ let rec parse_expr = function
       ECase (parse_expr scrut, List.map parse_branch branches)
   | Sexp.List [ Sexp.Atom "foldNat"; n; z; step ] ->
       EFoldNat (parse_expr n, parse_expr z, parse_expr step)
+  | Sexp.List (Sexp.Atom "foldVariant" :: target :: result :: scrut :: branches) ->
+      if branches = [] then fail "foldVariant requires at least one branch";
+      EFoldVariant
+        ( parse_type target,
+          parse_type result,
+          parse_expr scrut,
+          List.map parse_branch branches )
+  | Sexp.List [ Sexp.Atom "recur"; e ] -> ERecur (parse_expr e)
   | Sexp.List [ Sexp.Atom "Nil"; ty ] -> ENil (parse_type ty)
   | Sexp.List [ Sexp.Atom "Cons"; ty; head; tail ] ->
       ECons (parse_type ty, parse_expr head, parse_expr tail)
@@ -282,6 +290,13 @@ let rec qualify_expr local_defs local_types type_params bound = function
         ( qualify_expr local_defs local_types type_params bound n,
           qualify_expr local_defs local_types type_params bound z,
           qualify_expr local_defs local_types type_params bound step )
+  | EFoldVariant (target, result, scrut, branches) ->
+      EFoldVariant
+        ( qualify_type local_types type_params target,
+          qualify_type local_types type_params result,
+          qualify_expr local_defs local_types type_params bound scrut,
+          List.map (qualify_branch local_defs local_types type_params bound) branches )
+  | ERecur e -> ERecur (qualify_expr local_defs local_types type_params bound e)
   | ENil t -> ENil (qualify_type local_types type_params t)
   | ECons (t, head, tail) ->
       ECons

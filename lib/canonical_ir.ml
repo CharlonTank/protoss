@@ -147,6 +147,13 @@ let rec term_of_graph_json obj =
         ( term_of_graph_json (json_field "index" obj),
           term_of_graph_json (json_field "zero" obj),
           term_of_graph_json (json_field "step" obj) )
+  | "FoldVariant" ->
+      Kernel.CFoldVariant
+        ( type_of_graph_json (json_field "targetType" obj),
+          type_of_graph_json (json_field "resultType" obj),
+          term_of_graph_json (json_field "scrutinee" obj),
+          List.map branch_of_graph_json (json_array_field "branches" obj) )
+  | "Recur" -> Kernel.CRecur (term_of_graph_json (json_field "value" obj))
   | "Nil" -> Kernel.CNil (type_of_graph_json (json_field "type" obj))
   | "Cons" ->
       Kernel.CCons

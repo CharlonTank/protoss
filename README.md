@@ -11,6 +11,7 @@ What works now:
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Named records and variants also work as alias syntax: `(record Model (name String))`, `(record Pair (params A B) (first A) (second B))`, and `(variant Maybe (params A) (None Unit) (Some A))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
 - Named variants may be recursively self-referential when recursive occurrences are guarded by a variant constructor, for example a finite `Tree A` with `Leaf A` and `Node (Tree A) (Tree A)`. Unguarded recursive type aliases are rejected.
+- Recursive named variants can be consumed with `foldVariant`; branch-local `recur` is accepted only for direct structural subterms of the current constructor payload, and non-structural recursion is rejected.
 - Polymorphic value definitions work with explicit type application: `(defpoly id (params A) (-> A A) (lambda (x A) x))` and `((inst id Nat) 4)`. Type parameters are canonicalized as indexed variables, so their names do not affect hashes.
 - The shipped prelude includes polymorphic `List.map`, `List.length`, `Maybe.map`, `Maybe.withDefault`, and `Result.map`, plus monomorphic Nat/Bool/String helpers.
 - Variant constructors can infer their variant type from an expected context, for example `(def value (Maybe Nat) (variant Some 4))`; the inferred form hashes like the explicit `(variant (Maybe Nat) Some 4)`.
@@ -70,6 +71,7 @@ dune exec protoss -- check examples/app.protoss
 dune exec protoss -- check examples/inferred_variants.protoss
 dune exec protoss -- check examples/polymorphic_defs.protoss
 dune exec protoss -- check examples/recursive_tree.protoss
+dune exec protoss -- nf examples/recursive_tree.protoss
 dune exec protoss -- check examples/stdlib_generics.protoss
 dune exec protoss -- check examples/structural_recursion.protoss
 dune exec protoss -- check examples/modules/app.protoss

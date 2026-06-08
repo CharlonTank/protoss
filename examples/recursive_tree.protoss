@@ -21,6 +21,18 @@
         (Leaf n n)
         (Node nested 0)))))
 
+(def add (-> Nat (-> Nat Nat))
+  (lambda (a Nat)
+    (lambda (b Nat)
+      (foldNat a b (lambda (x Nat) (succ x))))))
+
+(def size Nat
+  (foldVariant (Tree Nat) Nat tree
+    (Leaf n 1)
+    (Node pair
+      ((add (recur (get pair left)))
+        (recur (get pair right))))))
+
 (def mirrored (Tree Nat)
   (case tree
     (Leaf n (variant Leaf n))
@@ -29,3 +41,12 @@
         (record
           (left (get pair right))
           (right (get pair left)))))))
+
+(def mirroredFold (Tree Nat)
+  (foldVariant (Tree Nat) (Tree Nat) tree
+    (Leaf n (variant Leaf n))
+    (Node pair
+      (variant Node
+        (record
+          (left (recur (get pair right)))
+          (right (recur (get pair left))))))))

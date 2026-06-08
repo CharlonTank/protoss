@@ -37,6 +37,8 @@ type expr =
   | EInst of string * typ list
   | ECase of expr * branch list
   | EFoldNat of expr * expr * expr
+  | EFoldVariant of typ * typ * expr * branch list
+  | ERecur of expr
   | ENil of typ
   | ECons of typ * expr * expr
   | EFoldList of expr * expr * expr
@@ -204,6 +206,13 @@ let rec string_of_expr_with_params params = function
   | EFoldNat (n, z, step) ->
       "(foldNat " ^ string_of_expr_with_params params n ^ " "
       ^ string_of_expr_with_params params z ^ " " ^ string_of_expr_with_params params step ^ ")"
+  | EFoldVariant (target, result, scrut, branches) ->
+      "(foldVariant " ^ string_of_typ_with_params params target ^ " "
+      ^ string_of_typ_with_params params result ^ " "
+      ^ string_of_expr_with_params params scrut ^ " "
+      ^ String.concat " " (List.map (string_of_branch_with_params params) branches)
+      ^ ")"
+  | ERecur e -> "(recur " ^ string_of_expr_with_params params e ^ ")"
   | ENil t -> "(Nil " ^ string_of_typ_with_params params t ^ ")"
   | ECons (t, head, tail) ->
       "(Cons " ^ string_of_typ_with_params params t ^ " "
