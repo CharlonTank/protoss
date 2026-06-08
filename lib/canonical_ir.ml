@@ -444,12 +444,23 @@ let parse_graph input =
   if not (String.equal canonical_version Kernel.canonical_version) then
     fail ("canonical graph canonicalVersion mismatch: " ^ canonical_version);
   validate_hash_metadata "canonical graph" graph;
-  let caps =
+  let declared_caps =
     json_array_field "capabilities" graph
     |> List.map (function Json.String s -> s | _ -> fail "canonical graph capability must be string")
-    |> List.sort_uniq String.compare
   in
+  let caps = List.sort_uniq String.compare declared_caps in
+  if declared_caps <> caps then fail "canonical graph capabilities not canonical";
   Kernel.validate_capabilities caps;
+  let declared_capability_refs = json_string_array_field "capabilityRefs" graph in
+  let expected_capability_refs =
+    caps
+    |> List.map (fun cap ->
+           match Kernel.capability_ref cap with
+           | Some ref -> ref
+           | None -> fail ("canonical graph capabilityRefs unknown capability: " ^ cap))
+  in
+  if declared_capability_refs <> expected_capability_refs then
+    fail "canonical graph capabilityRefs mismatch";
   let expected_descriptors = Json.parse (Kernel.capabilities_to_graph_json caps) in
   let descriptors = json_field "capabilityDescriptors" graph in
   if descriptors <> expected_descriptors then fail "canonical graph capabilityDescriptors mismatch";

@@ -3047,6 +3047,14 @@ let checked_to_graph_json checked =
         json_field "termCanonical" (json_string canonical_payload);
       ]
   in
+  let declared_capabilities = List.sort_uniq String.compare checked.program.capabilities in
+  let declared_capability_refs =
+    declared_capabilities
+    |> List.map (fun cap ->
+           match capability_ref cap with
+           | Some ref -> ref
+           | None -> fail ("unknown capability in canonical graph: " ^ cap))
+  in
   json_obj
     [
       json_field "version" (json_string canonical_graph_version);
@@ -3054,8 +3062,8 @@ let checked_to_graph_json checked =
       json_field "hashAlgorithm" (json_string hash_algorithm);
       json_field "hashPrefix" (json_string hash_prefix);
       json_field "programHash" (json_string (hash_program checked));
-      json_field "capabilities"
-        (json_array json_string (List.sort_uniq String.compare checked.program.capabilities));
+      json_field "capabilities" (json_array json_string declared_capabilities);
+      json_field "capabilityRefs" (json_array json_string declared_capability_refs);
       json_field "capabilityDescriptors" (capabilities_to_graph_json checked.program.capabilities);
       json_field "defs" (json_array def_json defs);
       json_field "nodeGraph"

@@ -384,6 +384,7 @@ let () =
   assert_equal "canonical graph program hash" (Kernel.hash_program formatted_a)
     (json_string_field "programHash" graph);
   assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
+  assert_true "canonical graph empty capability refs" (json_array_field "capabilityRefs" graph = []);
   assert_true "canonical graph empty capability descriptors"
     (json_array_field "capabilityDescriptors" graph = []);
   let node_graph = json_field "nodeGraph" graph in
@@ -441,6 +442,14 @@ let () =
    with Kernel.Error msg ->
      assert_true "canonical graph rejects missing deps"
        (contains_substring msg "canonical graph missing field: deps"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once graph_json "\"capabilityRefs\": []" "\"capabilityRefsMissing\": []"));
+     fail "canonical graph missing capability refs should be rejected"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects missing capability refs"
+       (contains_substring msg "canonical graph missing field: capabilityRefs"));
   (try
      ignore
        (Canonical_ir.parse_graph
@@ -1363,6 +1372,18 @@ let () =
   in
   assert_equal "process graph capability descriptor ref" human_capability_ref
     (json_string_field "ref" human_descriptor);
+  assert_equal "process graph capability refs" human_capability_ref
+    (String.concat "," (json_string_array_field "capabilityRefs" process_graph));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once (Canonical_ir.serialize_graph process)
+             ("\"capabilityRefs\": [" ^ Ast.quote human_capability_ref ^ "]")
+             "\"capabilityRefs\": [\"p2:bad\"]"));
+     fail "canonical graph should reject corrupt program capability refs"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects corrupt program capability refs"
+       (contains_substring msg "canonical graph capabilityRefs mismatch"));
   assert_equal "process graph capability descriptor name" "Human.ask"
     (json_string_field "name" human_descriptor);
   let human_requests = json_array_field "requests" human_descriptor in
@@ -1480,6 +1501,31 @@ let () =
   let multi_cap_graph_json = Canonical_ir.serialize_graph multi_cap_process in
   ignore (Canonical_ir.parse_graph multi_cap_graph_json);
   let multi_cap_graph = Json.parse multi_cap_graph_json in
+  assert_equal "graph multi top-level capability refs"
+    (clock_capability_ref ^ "," ^ human_capability_ref)
+    (String.concat "," (json_string_array_field "capabilityRefs" multi_cap_graph));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once multi_cap_graph_json
+             "\"capabilities\": [\"Clock.read\", \"Human.ask\"]"
+             "\"capabilities\": [\"Human.ask\", \"Clock.read\"]"));
+     fail "canonical graph should reject unsorted program capabilities"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects unsorted program capabilities"
+       (contains_substring msg "canonical graph capabilities not canonical"));
+  (try
+     ignore
+       (Canonical_ir.parse_graph
+          (replace_once multi_cap_graph_json
+             ("\"capabilityRefs\": [" ^ Ast.quote clock_capability_ref ^ ", "
+            ^ Ast.quote human_capability_ref ^ "]")
+             ("\"capabilityRefs\": [" ^ Ast.quote human_capability_ref ^ ", "
+            ^ Ast.quote clock_capability_ref ^ "]")));
+     fail "canonical graph should reject unsorted program capability refs"
+   with Kernel.Error msg ->
+     assert_true "canonical graph rejects unsorted program capability refs"
+       (contains_substring msg "canonical graph capabilityRefs mismatch"));
   assert_equal "graph multi capability scope refs"
     (clock_capability_ref ^ "," ^ human_capability_ref)
     (String.concat ","
