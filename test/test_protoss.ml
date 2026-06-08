@@ -185,6 +185,22 @@ let () =
     "(def xs (List Nat) (Cons Nat 1 (Nil Nat)))\n\
      (def bad Nat (foldList xs 0 (lambda x (lambda acc ((prim.String.eq \"a\") \"a\")))))";
   expect_check_error "(def bad Nat (lambda x x))";
+  let inferred_let =
+    check "(def main Nat (let (inc (-> Nat Nat) (lambda x (succ x))) (inc 4)))"
+  in
+  let annotated_let =
+    check "(def main Nat (let (inc (lambda (x Nat) (succ x))) (inc 4)))"
+  in
+  assert_equal "annotated let inferred lambda hash" (Kernel.hash_program annotated_let)
+    (Kernel.hash_program inferred_let);
+  let inferred_let_value, _ = Runtime.normalize_def inferred_let "main" in
+  assert_equal "annotated let inferred lambda normalizes" "5"
+    (Runtime.value_to_string inferred_let_value);
+  expect_check_error
+    "(def bad Nat (let (inc (-> Nat Nat) (lambda x true)) (inc 4)))";
+  expect_check_error
+    "(capabilities Human.ask)\n\
+     (def bad Nat (let (p (Process String) (Human.ask \"x\")) 0))";
 
   let formatted_a = check "(def main Nat (succ 1))" in
   let formatted_b = check "  ; formatting is not canonical\n\n(def   main   Nat\n  (succ   1))" in
@@ -837,6 +853,18 @@ let () =
   let inferred_patch_value, _ = Runtime.eval_entry inferred_patch_checked "inc" in
   let inferred_patch_applied = Runtime.apply inferred_patch_checked inferred_patch_value (Runtime.VNat 1) in
   assert_equal "patch inferred lambda applies" "2" (Runtime.value_to_string inferred_patch_applied);
+  let inferred_let_patch_store = temp_dir "patch-inferred-let" in
+  let inferred_let_patch =
+    patch_file "protoss-inferred-let-patch.json"
+      "{ \"op\":\"AddDef\", \"name\":\"five\", \"deps\":[], \
+       \"type\":\"Nat\", \
+       \"expr\":{\"source\":\"(let (inc (-> Nat Nat) (lambda x (succ x))) (inc 4))\"} }"
+  in
+  ignore (Patch.apply inferred_let_patch_store inferred_let_patch);
+  let inferred_let_patch_checked = Store.load_program inferred_let_patch_store |> Kernel.check_program in
+  let inferred_let_patch_value, _ = Runtime.normalize_def inferred_let_patch_checked "five" in
+  assert_equal "patch inferred let normalizes" "5"
+    (Runtime.value_to_string inferred_let_patch_value);
   let before = count_objects store in
   let ledger = temp_dir "patch-ledger" in
   let _ =

@@ -31,6 +31,7 @@ type expr =
   | ELambdaInfer of string * expr
   | EApp of expr * expr
   | ELet of string * expr * expr
+  | ELetAnnot of string * typ * expr * expr
   | ERecord of (string * expr) list
   | EField of expr * string
   | EVariant of typ * string * expr
@@ -183,6 +184,10 @@ let rec string_of_expr_with_params params = function
       "(" ^ string_of_expr_with_params params f ^ " " ^ string_of_expr_with_params params x ^ ")"
   | ELet (x, e, body) ->
       "(let (" ^ x ^ " " ^ string_of_expr_with_params params e ^ ") "
+      ^ string_of_expr_with_params params body ^ ")"
+  | ELetAnnot (x, t, e, body) ->
+      "(let (" ^ x ^ " " ^ string_of_typ_with_params params t ^ " "
+      ^ string_of_expr_with_params params e ^ ") "
       ^ string_of_expr_with_params params body ^ ")"
   | ERecord fields ->
       "(record "

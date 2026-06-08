@@ -147,6 +147,7 @@ let rec expr_type_refs = function
   | ELambdaInfer (_, body) -> expr_type_refs body
   | EApp (f, x) -> expr_type_refs f @ expr_type_refs x
   | ELet (_, e, body) -> expr_type_refs e @ expr_type_refs body
+  | ELetAnnot (_, t, e, body) -> type_refs t @ expr_type_refs e @ expr_type_refs body
   | ERecord fields -> List.concat_map (fun (_, e) -> expr_type_refs e) fields
   | EField (e, _) -> expr_type_refs e
   | EVariant (t, _, e) -> type_refs t @ expr_type_refs e

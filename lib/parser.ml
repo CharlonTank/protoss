@@ -94,6 +94,8 @@ let rec parse_expr = function
       | `Inferred x -> ELambdaInfer (x, parse_expr body))
   | Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom x; e ]; body ] ->
       ELet (x, parse_expr e, parse_expr body)
+  | Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom x; ty; e ]; body ] ->
+      ELetAnnot (x, parse_type ty, parse_expr e, parse_expr body)
   | Sexp.List (Sexp.Atom "record" :: fields) ->
       let fields =
         List.map
@@ -268,6 +270,12 @@ let rec qualify_expr local_defs local_types type_params bound = function
   | ELet (x, e, body) ->
       ELet
         ( x,
+          qualify_expr local_defs local_types type_params bound e,
+          qualify_expr local_defs local_types type_params (x :: bound) body )
+  | ELetAnnot (x, t, e, body) ->
+      ELetAnnot
+        ( x,
+          qualify_type local_types type_params t,
           qualify_expr local_defs local_types type_params bound e,
           qualify_expr local_defs local_types type_params (x :: bound) body )
   | ERecord fields ->

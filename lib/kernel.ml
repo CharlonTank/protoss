@@ -310,6 +310,12 @@ let rec expand_expr_types recursive_names aliases vars = function
   | EApp (f, x) -> EApp (expand_expr_types recursive_names aliases vars f, expand_expr_types recursive_names aliases vars x)
   | ELet (x, e, body) ->
       ELet (x, expand_expr_types recursive_names aliases vars e, expand_expr_types recursive_names aliases vars body)
+  | ELetAnnot (x, t, e, body) ->
+      ELetAnnot
+        ( x,
+          expand_type recursive_names aliases vars [] t,
+          expand_expr_types recursive_names aliases vars e,
+          expand_expr_types recursive_names aliases vars body )
   | ERecord fields ->
       ERecord
         (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types recursive_names aliases vars e)) fields))
@@ -414,7 +420,8 @@ let collect_deps defs =
         else acc
     | ELambda (x, _, body) | ELambdaInfer (x, body) -> expr (x :: bound) acc body
     | EApp (f, x) -> expr bound (expr bound acc f) x
-    | ELet (x, e, body) -> expr (x :: bound) (expr bound acc e) body
+    | ELet (x, e, body) | ELetAnnot (x, _, e, body) ->
+        expr (x :: bound) (expr bound acc e) body
     | ERecord fields -> List.fold_left (fun a (_, e) -> expr bound a e) acc fields
     | EField (e, _) -> expr bound acc e
     | EVariant (_, _, e) | EVariantInferred (_, e) -> expr bound acc e
@@ -702,6 +709,15 @@ let rec infer ctx = function
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
       body_ty
+  | ELetAnnot (x, annotation, e, body) ->
+      let actual = infer ctx e in
+      require_type annotation actual "let annotation";
+      let body_ty = infer (bind_local ctx x annotation) body in
+      if is_process_type annotation && not (is_process_type body_ty) then
+        fail
+          ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
+         ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
+      body_ty
   | ERecord fields ->
       let fields = List.map (fun (n, e) -> (n, infer ctx e, e)) fields in
       List.iter
@@ -913,6 +929,14 @@ let rec infer_elab ctx expr =
       let t, e = infer_elab ctx e in
       let body_ty, body = infer_elab (bind_local ctx x t) body in
       if is_process_type t && not (is_process_type body_ty) then
+        fail
+          ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
+         ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
+      (body_ty, ELet (x, e, body))
+  | ELetAnnot (x, annotation, e, body) ->
+      let _, e = check_elab ctx annotation e in
+      let body_ty, body = infer_elab (bind_local ctx x annotation) body in
+      if is_process_type annotation && not (is_process_type body_ty) then
         fail
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
@@ -1134,6 +1158,14 @@ and check_elab ctx expected expr =
           ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
          ^ string_of_typ expected ^ ", expression " ^ string_of_expr body);
       (expected, ELet (x, e, body))
+  | _, ELetAnnot (x, annotation, e, body) ->
+      let _, e = check_elab ctx annotation e in
+      let _, body = check_elab (bind_local ctx x annotation) expected body in
+      if is_process_type annotation && not (is_process_type expected) then
+        fail
+          ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
+         ^ string_of_typ expected ^ ", expression " ^ string_of_expr body);
+      (expected, ELet (x, e, body))
   | TProcess _, EBind (p, x, annotation, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
@@ -1291,6 +1323,7 @@ let rec canonical_expr env = function
   | ELambdaInfer _ -> fail "unelaborated unannotated lambda in canonicalization"
   | EApp (f, x) -> CApp (canonical_expr env f, canonical_expr env x)
   | ELet (x, e, body) -> CLet (canonical_expr env e, canonical_expr (x :: env) body)
+  | ELetAnnot _ -> fail "unelaborated annotated let in canonicalization"
   | ERecord fields ->
       CRecord (sort_fields (List.map (fun (n, e) -> (n, canonical_expr env e)) fields))
   | EField (e, field) -> CField (canonical_expr env e, field)
