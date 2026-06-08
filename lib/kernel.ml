@@ -247,6 +247,7 @@ let rec expand_expr_types aliases = function
   | ERecord fields -> ERecord (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types aliases e)) fields))
   | EField (e, field) -> EField (expand_expr_types aliases e, field)
   | EVariant (t, con, e) -> EVariant (expand_type aliases [] [] t, con, expand_expr_types aliases e)
+  | EVariantInferred (con, e) -> EVariantInferred (con, expand_expr_types aliases e)
   | ECase (e, branches) -> ECase (expand_expr_types aliases e, List.map (expand_branch_types aliases) branches)
   | EFoldNat (n, z, step) ->
       EFoldNat (expand_expr_types aliases n, expand_expr_types aliases z, expand_expr_types aliases step)
@@ -310,7 +311,7 @@ let collect_deps defs =
     | ELet (x, e, body) -> expr (x :: bound) (expr bound acc e) body
     | ERecord fields -> List.fold_left (fun a (_, e) -> expr bound a e) acc fields
     | EField (e, _) -> expr bound acc e
-    | EVariant (_, _, e) -> expr bound acc e
+    | EVariant (_, _, e) | EVariantInferred (_, e) -> expr bound acc e
     | ECase (e, branches) ->
         List.fold_left
           (fun a -> function
@@ -462,6 +463,8 @@ let rec infer ctx = function
               ty
           | None -> fail ("unknown variant constructor: " ^ con))
       | _ -> fail "variant expression must carry a Variant type")
+  | EVariantInferred (con, _) ->
+      fail ("variant constructor " ^ con ^ " requires an expected Variant type")
   | ECase (scrut, branches) -> (
       match infer ctx scrut with
       | TBool -> infer_bool_case ctx branches
@@ -583,6 +586,291 @@ and infer_variant_case ctx cases branches =
     branches;
   option_or_fail "empty Variant case" !result
 
+let rec infer_elab ctx expr =
+  match expr with
+  | EUnit | EBool _ | ENat _ | EString _ | EName _ | ERequest _ | ENil _ ->
+      (infer ctx expr, expr)
+  | ELambda (x, t, body) ->
+      let body_ty, body = infer_elab { ctx with locals = (x, t) :: ctx.locals } body in
+      (TFun (t, body_ty), ELambda (x, t, body))
+  | EApp (f, arg) -> (
+      let fn_ty, f = infer_elab ctx f in
+      match fn_ty with
+      | TFun (a, b) ->
+          let _, arg = check_elab ctx a arg in
+          (b, EApp (f, arg))
+      | t -> fail ("application of non-function: " ^ string_of_typ t))
+  | ELet (x, e, body) ->
+      let t, e = infer_elab ctx e in
+      let body_ty, body = infer_elab { ctx with locals = (x, t) :: ctx.locals } body in
+      if is_process_type t && not (is_process_type body_ty) then
+        fail
+          ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
+         ^ string_of_typ body_ty ^ ", expression " ^ string_of_expr body);
+      (body_ty, ELet (x, e, body))
+  | ERecord fields ->
+      let fields =
+        List.map
+          (fun (n, e) ->
+            let t, e = infer_elab ctx e in
+            if contains_process_type t then
+              fail
+                ("Process used as pure record field " ^ n ^ ": got " ^ string_of_typ t
+               ^ ", expression " ^ string_of_expr e);
+            (n, t, e))
+          fields
+      in
+      (TRecord (sort_fields (List.map (fun (n, t, _) -> (n, t)) fields)),
+       ERecord (sort_fields (List.map (fun (n, _, e) -> (n, e)) fields)))
+  | EField (e, field) -> (
+      let t, e = infer_elab ctx e in
+      match t with
+      | TRecord fields -> (
+          match assoc_opt field fields with
+          | Some field_ty -> (field_ty, EField (e, field))
+          | None -> fail ("unknown record field: " ^ field))
+      | t -> fail ("field access on non-record: " ^ string_of_typ t))
+  | EVariant (ty, con, e) ->
+      let _, e = elaborate_variant_payload ctx ty con e in
+      (ty, EVariant (ty, con, e))
+  | EVariantInferred (con, _) ->
+      fail ("variant constructor " ^ con ^ " requires an expected Variant type")
+  | ECase (scrut, branches) -> (
+      let scrut_ty, scrut = infer_elab ctx scrut in
+      match scrut_ty with
+      | TBool ->
+          let ty, branches = infer_bool_case_elab ctx branches in
+          (ty, ECase (scrut, branches))
+      | TVariant cases ->
+          let ty, branches = infer_variant_case_elab ctx cases branches in
+          (ty, ECase (scrut, branches))
+      | t -> fail ("case on unsupported type: " ^ string_of_typ t))
+  | EFoldNat (n, zero, step) ->
+      let _, n = check_elab ctx TNat n in
+      let result_ty, zero = infer_elab ctx zero in
+      let _, step = check_elab ctx (TFun (result_ty, result_ty)) step in
+      (result_ty, EFoldNat (n, zero, step))
+  | ECons (t, head, tail) ->
+      let _, head = check_elab ctx t head in
+      let _, tail = check_elab ctx (TList t) tail in
+      (TList t, ECons (t, head, tail))
+  | EFoldList (xs, zero, step) -> (
+      let xs_ty, xs = infer_elab ctx xs in
+      match xs_ty with
+      | TList item_ty ->
+          let result_ty, zero = infer_elab ctx zero in
+          let _, step = check_elab ctx (TFun (item_ty, TFun (result_ty, result_ty))) step in
+          (result_ty, EFoldList (xs, zero, step))
+      | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
+  | EText e ->
+      let _, e = check_elab ctx TString e in
+      (TView TUnit, EText e)
+  | EImage (src, alt) ->
+      let _, src = check_elab ctx TString src in
+      let _, alt = check_elab ctx TString alt in
+      (TView TUnit, EImage (src, alt))
+  | EButton (label, msg) ->
+      let _, label = check_elab ctx TString label in
+      let msg_ty, msg = infer_elab ctx msg in
+      (TView msg_ty, EButton (label, msg))
+  | EInput (value, handler) -> (
+      let _, value = check_elab ctx TString value in
+      let handler_ty, handler = infer_elab ctx handler in
+      match handler_ty with
+      | TFun (TString, msg_ty) -> (TView msg_ty, EInput (value, handler))
+      | t -> fail ("input handler must be String -> msg, got " ^ string_of_typ t))
+  | EColumn children ->
+      let children_ty, children = infer_elab ctx children in
+      (match children_ty with
+      | TList (TView msg_ty) -> (TView msg_ty, EColumn children)
+      | t -> fail ("column expects List (View msg), got " ^ string_of_typ t))
+  | ERow children ->
+      let children_ty, children = infer_elab ctx children in
+      (match children_ty with
+      | TList (TView msg_ty) -> (TView msg_ty, ERow children)
+      | t -> fail ("row expects List (View msg), got " ^ string_of_typ t))
+  | EListView (items, render) -> (
+      let items_ty, items = infer_elab ctx items in
+      match items_ty with
+      | TList item_ty -> (
+          let render_ty, render = infer_elab ctx render in
+          match render_ty with
+          | TFun (arg_ty, TView msg_ty) ->
+              require_type item_ty arg_ty "list renderer";
+              (TView msg_ty, EListView (items, render))
+          | t -> fail ("list renderer must return View msg, got " ^ string_of_typ t))
+      | t -> fail ("list expects List input, got " ^ string_of_typ t))
+  | EWhenView (cond, view) ->
+      let _, cond = check_elab ctx TBool cond in
+      let view_ty, view = infer_elab ctx view in
+      (match view_ty with
+      | TView _ as t -> (t, EWhenView (cond, view))
+      | t -> fail ("when expects View msg, got " ^ string_of_typ t))
+  | EDone e ->
+      let t, e = infer_elab ctx e in
+      (TProcess t, EDone e)
+  | EBind (p, x, annotation, body) ->
+      let p_ty, p = infer_elab ctx p in
+      (match p_ty with
+      | TProcess a ->
+          require_type a annotation "bind annotation";
+          let body_ty, body = infer_elab { ctx with locals = (x, a) :: ctx.locals } body in
+          (match body_ty with
+          | TProcess _ -> (body_ty, EBind (p, x, annotation, body))
+          | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
+      | t -> fail ("bind on non-process: " ^ string_of_typ t))
+
+and check_elab ctx expected expr =
+  match (expected, expr) with
+  | TVariant _, EVariantInferred (con, e) ->
+      let _, e = elaborate_variant_payload ctx expected con e in
+      (expected, EVariant (expected, con, e))
+  | TVariant _, EVariant (explicit_ty, con, e) ->
+      require_type expected explicit_ty "variant expected type";
+      let _, e = elaborate_variant_payload ctx expected con e in
+      (expected, EVariant (expected, con, e))
+  | TFun (expected_arg, expected_body), ELambda (x, actual_arg, body) ->
+      require_type expected_arg actual_arg "lambda parameter";
+      let _, body = check_elab { ctx with locals = (x, actual_arg) :: ctx.locals } expected_body body in
+      (expected, ELambda (x, actual_arg, body))
+  | TRecord expected_fields, ERecord fields ->
+      let field_names = List.map fst fields in
+      List.iter
+        (fun (name, _) ->
+          if not (List.exists (String.equal name) field_names) then
+            fail ("record missing field: " ^ name))
+        expected_fields;
+      List.iter
+        (fun name ->
+          if assoc_opt name expected_fields = None then fail ("unknown record field: " ^ name))
+        field_names;
+      let fields =
+        List.map
+          (fun (name, expected_ty) ->
+            let expr = option_or_fail ("record missing field: " ^ name) (assoc_opt name fields) in
+            let _, expr = check_elab ctx expected_ty expr in
+            (name, expr))
+          (sort_fields expected_fields)
+      in
+      (expected, ERecord fields)
+  | TProcess expected_value, EDone e ->
+      let _, e = check_elab ctx expected_value e in
+      (expected, EDone e)
+  | TList item_ty, ECons (actual_item_ty, head, tail) ->
+      require_type item_ty actual_item_ty "Cons type";
+      let _, head = check_elab ctx item_ty head in
+      let _, tail = check_elab ctx expected tail in
+      (expected, ECons (actual_item_ty, head, tail))
+  | _, EFoldNat (n, zero, step) ->
+      let _, n = check_elab ctx TNat n in
+      let _, zero = check_elab ctx expected zero in
+      let _, step = check_elab ctx (TFun (expected, expected)) step in
+      (expected, EFoldNat (n, zero, step))
+  | _, EFoldList (xs, zero, step) -> (
+      let xs_ty, xs = infer_elab ctx xs in
+      match xs_ty with
+      | TList item_ty ->
+          let _, zero = check_elab ctx expected zero in
+          let _, step = check_elab ctx (TFun (item_ty, TFun (expected, expected))) step in
+          (expected, EFoldList (xs, zero, step))
+      | t -> fail ("foldList target must be List, got " ^ string_of_typ t))
+  | _, ELet (x, e, body) ->
+      let t, e = infer_elab ctx e in
+      let _, body = check_elab { ctx with locals = (x, t) :: ctx.locals } expected body in
+      if is_process_type t && not (is_process_type expected) then
+        fail
+          ("Process used as pure value in let " ^ x ^ ": expected Process flow, got "
+         ^ string_of_typ expected ^ ", expression " ^ string_of_expr body);
+      (expected, ELet (x, e, body))
+  | _, ECase (scrut, branches) ->
+      let scrut_ty, scrut = infer_elab ctx scrut in
+      let branches =
+        match scrut_ty with
+        | TBool -> check_bool_case_elab ctx expected branches
+        | TVariant cases -> check_variant_case_elab ctx cases expected branches
+        | t -> fail ("case on unsupported type: " ^ string_of_typ t)
+      in
+      (expected, ECase (scrut, branches))
+  | _ ->
+      let actual, expr = infer_elab ctx expr in
+      require_type expected actual "expected context";
+      (expected, expr)
+
+and elaborate_variant_payload ctx ty con e =
+  match ty with
+  | TVariant cases -> (
+      match assoc_opt con cases with
+      | Some payload_ty ->
+          let _, e = check_elab ctx payload_ty e in
+          if contains_process_type payload_ty then
+            fail
+              ("Process used as pure variant payload " ^ con ^ ": got "
+             ^ string_of_typ payload_ty ^ ", expression " ^ string_of_expr e);
+          (ty, e)
+      | None -> fail ("unknown variant constructor: " ^ con))
+  | _ -> fail "variant expression must carry a Variant type"
+
+and infer_bool_case_elab ctx branches =
+  let true_branch = ref None and false_branch = ref None in
+  List.iter
+    (function
+      | BBool (true, e) -> true_branch := Some e
+      | BBool (false, e) -> false_branch := Some e
+      | BVariant _ -> fail "variant branch in Bool case")
+    branches;
+  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
+  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  let ty, t_expr = infer_elab ctx t_expr in
+  let _, f_expr = check_elab ctx ty f_expr in
+  (ty, [ BBool (true, t_expr); BBool (false, f_expr) ])
+
+and check_bool_case_elab ctx expected branches =
+  let true_branch = ref None and false_branch = ref None in
+  List.iter
+    (function
+      | BBool (true, e) -> true_branch := Some e
+      | BBool (false, e) -> false_branch := Some e
+      | BVariant _ -> fail "variant branch in Bool case")
+    branches;
+  let t_expr = option_or_fail "Bool case missing true branch" !true_branch in
+  let f_expr = option_or_fail "Bool case missing false branch" !false_branch in
+  let _, t_expr = check_elab ctx expected t_expr in
+  let _, f_expr = check_elab ctx expected f_expr in
+  [ BBool (true, t_expr); BBool (false, f_expr) ]
+
+and infer_variant_case_elab ctx cases branches =
+  let ty = infer_variant_case ctx cases branches in
+  let branches = check_variant_case_elab ctx cases ty branches in
+  (ty, branches)
+
+and check_variant_case_elab ctx cases expected branches =
+  let branch_names =
+    List.map
+      (function
+        | BVariant (con, _, _) -> con
+        | BBool _ -> fail "Bool branch in Variant case")
+      branches
+  in
+  let case_names = List.map fst cases in
+  List.iter
+    (fun con ->
+      if not (List.exists (String.equal con) branch_names) then
+        fail ("Variant case missing branch: " ^ con))
+    case_names;
+  List.iter
+    (fun con ->
+      if not (List.exists (String.equal con) case_names) then
+        fail ("unknown Variant branch: " ^ con))
+    branch_names;
+  List.map
+    (function
+      | BBool _ -> assert false
+      | BVariant (con, x, body) ->
+          let payload_ty = Option.get (assoc_opt con cases) in
+          let _, body = check_elab { ctx with locals = (x, payload_ty) :: ctx.locals } expected body in
+          BVariant (con, x, body))
+    branches
+
 type cterm =
   | CUnit
   | CBool of bool
@@ -636,6 +924,7 @@ let rec canonical_expr env = function
       CRecord (sort_fields (List.map (fun (n, e) -> (n, canonical_expr env e)) fields))
   | EField (e, field) -> CField (canonical_expr env e, field)
   | EVariant (t, con, e) -> CVariant (t, con, canonical_expr env e)
+  | EVariantInferred (con, _) -> fail ("unelaborated variant constructor in canonicalization: " ^ con)
   | ECase (e, branches) -> CCase (canonical_expr env e, canonical_branches env branches)
   | EFoldNat (n, z, step) ->
       CFoldNat (canonical_expr env n, canonical_expr env z, canonical_expr env step)
@@ -1276,19 +1565,21 @@ let check_program (program : program) =
   reject_cycles program.defs;
   let globals = List.map (fun d -> (d.name, d.typ)) program.defs in
   let ctx = { globals; capabilities = program.capabilities; locals = [] } in
-  List.iter
-    (fun d ->
-      let actual =
-        try infer ctx d.body with
-        | Error msg ->
+  let defs =
+    List.map
+      (fun d ->
+        try
+          let actual, body = check_elab ctx d.typ d.body in
+          if not (equal_typ d.typ actual) then
             fail
-              ("definition " ^ d.name ^ ": " ^ msg ^ ", expression " ^ string_of_expr d.body)
-      in
-      if not (equal_typ d.typ actual) then
-        fail
-          ("definition " ^ d.name ^ ": expected " ^ string_of_typ d.typ ^ ", got "
-         ^ string_of_typ actual ^ ", expression " ^ string_of_expr d.body))
-    program.defs;
+              ("definition " ^ d.name ^ ": expected " ^ string_of_typ d.typ ^ ", got "
+             ^ string_of_typ actual ^ ", expression " ^ string_of_expr d.body);
+          { d with body }
+        with Error msg ->
+          fail ("definition " ^ d.name ^ ": " ^ msg ^ ", expression " ^ string_of_expr d.body))
+      program.defs
+  in
+  let program = { program with defs } in
   let cterms = Hashtbl.create 32 in
   List.iter (fun d -> Hashtbl.add cterms d.name (canonical_expr [] d.body)) program.defs;
   let defs_by_name = Hashtbl.create 32 in

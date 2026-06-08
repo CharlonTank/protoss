@@ -306,6 +306,7 @@ let rec expr_type_refs = function
   | ERecord fields -> List.concat_map (fun (_, e) -> expr_type_refs e) fields
   | EField (e, _) -> expr_type_refs e
   | EVariant (t, _, e) -> type_refs t @ expr_type_refs e
+  | EVariantInferred (_, e) -> expr_type_refs e
   | ECase (e, branches) -> expr_type_refs e @ List.concat_map branch_type_refs branches
   | EFoldNat (n, z, step) -> expr_type_refs n @ expr_type_refs z @ expr_type_refs step
   | ENil t -> type_refs t

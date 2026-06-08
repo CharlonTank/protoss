@@ -293,16 +293,16 @@ let check store_root patch_path =
       (current.defs, []) patches
   in
   let program =
-	    {
-	      imports = [];
-	      capabilities =
-	        List.sort_uniq String.compare
-	          (current.capabilities @ List.concat (List.map (fun p -> p.capabilities) patches));
-	      module_name = None;
-	      exports = None;
-	      type_aliases = current.type_aliases;
-	      defs;
-	    }
+    {
+      imports = [];
+      capabilities =
+        List.sort_uniq String.compare
+          (current.capabilities @ List.concat (List.map (fun p -> p.capabilities) patches));
+      module_name = None;
+      exports = None;
+      type_aliases = current.type_aliases;
+      defs;
+    }
   in
   let checked =
     try Kernel.check_program program with Kernel.Error msg -> fail msg

@@ -99,6 +99,8 @@ let rec parse_expr = function
   | Sexp.List [ Sexp.Atom "get"; e; Sexp.Atom field ] -> EField (parse_expr e, field)
   | Sexp.List [ Sexp.Atom "variant"; ty; Sexp.Atom con; e ] ->
       EVariant (parse_type ty, con, parse_expr e)
+  | Sexp.List [ Sexp.Atom "variant"; Sexp.Atom con; e ] ->
+      EVariantInferred (con, parse_expr e)
   | Sexp.List (Sexp.Atom "case" :: scrut :: branches) ->
       ECase (parse_expr scrut, List.map parse_branch branches)
   | Sexp.List [ Sexp.Atom "foldNat"; n; z; step ] ->
@@ -243,6 +245,7 @@ let rec qualify_expr local_defs local_types bound = function
   | EField (e, field) -> EField (qualify_expr local_defs local_types bound e, field)
   | EVariant (t, con, e) ->
       EVariant (qualify_type local_types [] t, con, qualify_expr local_defs local_types bound e)
+  | EVariantInferred (con, e) -> EVariantInferred (con, qualify_expr local_defs local_types bound e)
   | ECase (e, branches) ->
       ECase
         ( qualify_expr local_defs local_types bound e,

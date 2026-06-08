@@ -31,6 +31,7 @@ type expr =
   | ERecord of (string * expr) list
   | EField of expr * string
   | EVariant of typ * string * expr
+  | EVariantInferred of string * expr
   | ECase of expr * branch list
   | EFoldNat of expr * expr * expr
   | ENil of typ
@@ -170,6 +171,7 @@ let rec string_of_expr = function
   | EField (e, field) -> "(get " ^ string_of_expr e ^ " " ^ field ^ ")"
   | EVariant (t, con, e) ->
       "(variant " ^ string_of_typ t ^ " " ^ con ^ " " ^ string_of_expr e ^ ")"
+  | EVariantInferred (con, e) -> "(variant " ^ con ^ " " ^ string_of_expr e ^ ")"
   | ECase (e, branches) ->
       "(case " ^ string_of_expr e ^ " "
       ^ String.concat " " (List.map string_of_branch branches)

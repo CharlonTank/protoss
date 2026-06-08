@@ -315,6 +315,12 @@ let () =
        (def value (Maybe Nat) (variant (Maybe Nat) Some 4))\n\
        (def out Nat (case value (None _ 0) (Some n n)))"
   in
+  let maybe_inferred_ctor =
+    check
+      "(type Maybe (A) (Variant (None Unit) (Some A)))\n\
+       (def value (Maybe Nat) (variant Some 4))\n\
+       (def out Nat (case value (None _ 0) (Some n n)))"
+  in
   let maybe_variant_decl =
     check
       "(variant Maybe (params A) (None Unit) (Some A))\n\
@@ -329,10 +335,35 @@ let () =
   in
   assert_equal "parametric type alias transparent hash" (Kernel.hash_program maybe_expanded)
     (Kernel.hash_program maybe_alias);
+  assert_equal "inferred variant constructor transparent hash" (Kernel.hash_program maybe_expanded)
+    (Kernel.hash_program maybe_inferred_ctor);
   assert_equal "named variant transparent hash" (Kernel.hash_program maybe_expanded)
     (Kernel.hash_program maybe_variant_decl);
   let maybe_out, _ = Runtime.normalize_def maybe_alias "out" in
   assert_equal "parametric type alias runtime" "4" (Runtime.value_to_string maybe_out);
+  let inferred_ctor_contexts =
+    check
+      "(variant Maybe (params A) (None Unit) (Some A))\n\
+       (record Box (value (Maybe Nat)))\n\
+       (def mkSome (-> Nat (Maybe Nat)) (lambda (n Nat) (variant Some n)))\n\
+       (def boxed Box (record (value (variant Some 1))))\n\
+       (def selected (Maybe Nat) (case true (true (variant Some 2)) (false (variant None unit))))\n\
+       (def folded (Maybe Nat) \
+       (foldNat 1 (variant None unit) (lambda (acc (Maybe Nat)) (variant Some 3))))"
+  in
+  let selected, _ = Runtime.normalize_def inferred_ctor_contexts "selected" in
+  assert_equal "inferred variant in case branch" "Some 2" (Runtime.value_to_string selected);
+  let folded, _ = Runtime.normalize_def inferred_ctor_contexts "folded" in
+  assert_equal "inferred variant in fold" "Some 3" (Runtime.value_to_string folded);
+  expect_check_error
+    "(variant Maybe (params A) (None Unit) (Some A))\n(def bad Nat (variant Some 1))";
+  expect_check_error
+    "(variant Maybe (params A) (None Unit) (Some A))\n(def bad (Maybe Nat) (variant Nope 1))";
+  expect_check_error
+    "(variant Maybe (params A) (None Unit) (Some A))\n(def bad (Maybe Nat) (variant Some true))";
+  expect_check_error
+    "(variant Maybe (params A) (None Unit) (Some A))\n\
+     (def bad (Maybe Nat) (variant (Variant (None Unit) (Some Bool)) Some true))";
   let result_pair =
     check
       "(variant Result (params E A) (Err E) (Ok A))\n\

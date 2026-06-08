@@ -10,6 +10,7 @@ What works now:
 - `defrec` supports only structural Nat/List recursion and desugars to `foldNat` or `foldList`; malformed or self-recursive definitions are rejected.
 - Web apps are checked by convention: `init : Process Model`, `update : Msg -> Model -> Process Model`, and `view : Model -> View Msg`.
 - Source-level type aliases work with `(type Name Type)` and parametric aliases like `(type Maybe (A) (Variant (None Unit) (Some A)))`. Named records and variants also work as alias syntax: `(record Model (name String))`, `(record Pair (params A B) (first A) (second B))`, and `(variant Maybe (params A) (None Unit) (Some A))`. Aliases are expanded before canonical hashing, so alias names do not affect DefIds or program hashes.
+- Variant constructors can infer their variant type from an expected context, for example `(def value (Maybe Nat) (variant Some 4))`; the inferred form hashes like the explicit `(variant (Maybe Nat) Some 4)`.
 - Source-level modules work with `(module Name)` and `(export symbol ...)`. Module-local definitions and type aliases are namespace-qualified, and imports may only reference exported symbols directly.
 - `View msg` is a typed canonical UI type. Supported constructors are `text`, `image`, `button`, `input`, `column`, `row`, `list`, and `when`.
 - UI/message mismatches are rejected statically by the typechecker.
@@ -63,6 +64,7 @@ dune exec protoss -- hash examples/alpha_a.protoss
 dune exec protoss -- hash examples/alpha_b.protoss
 dune exec protoss -- canon --version
 dune exec protoss -- check examples/app.protoss
+dune exec protoss -- check examples/inferred_variants.protoss
 dune exec protoss -- check examples/structural_recursion.protoss
 dune exec protoss -- check examples/modules/app.protoss
 dune exec protoss -- project build examples/workspace --stats
