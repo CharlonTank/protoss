@@ -1753,23 +1753,33 @@ let graphs_store store =
     |> String.concat "\n"
     |> fun s -> if s = "" then "" else s ^ "\n"
 
-let read_store_graph store graph_hash =
-  let path = Store.graph_path store graph_hash in
-  if not (Sys.file_exists path) then fail ("graph not found: " ^ graph_hash);
-  let graph_json = read_file path in
+let validate_store_graph_json context graph_json =
   let checked =
     try Canonical_ir.checked_of_graph graph_json with
-    | Kernel.Error msg -> fail ("invalid stored canonical graph " ^ graph_hash ^ ": " ^ msg)
+    | Kernel.Error msg -> fail ("invalid stored canonical graph " ^ context ^ ": " ^ msg)
   in
   let expected_graph_json = Kernel.checked_to_graph_json checked in
   if not (String.equal graph_json expected_graph_json) then
-    fail ("stored canonical graph is not exact canonical JSON: " ^ graph_hash);
+    fail ("stored canonical graph is not exact canonical JSON: " ^ context);
   let expected_graph_hash = Kernel.checked_to_graph_content_hash checked in
+  (expected_graph_hash, graph_json, checked)
+
+let read_store_graph store graph_hash =
+  let path = Store.graph_path store graph_hash in
+  if not (Sys.file_exists path) then fail ("graph not found: " ^ graph_hash);
+  let expected_graph_hash, graph_json, checked =
+    validate_store_graph_json graph_hash (read_file path)
+  in
   if not (String.equal graph_hash expected_graph_hash) then
     fail
       ("stored canonical graph hash mismatch: requested " ^ graph_hash ^ ", content "
      ^ expected_graph_hash);
   (graph_json, checked)
+
+let put_store_graph store graph_json =
+  let graph_hash, graph_json, _checked = validate_store_graph_json "<input>" graph_json in
+  Store.write_graph store graph_hash graph_json;
+  graph_hash
 
 let graph_store store graph_hash = fst (read_store_graph store graph_hash)
 

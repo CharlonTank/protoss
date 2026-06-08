@@ -38,7 +38,7 @@ let usage () =
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
      \       protoss cache stats <dir>\n\
-     \       protoss store list|get|deps|roots|graphs|graph|stats [args]";
+     \       protoss store list|get|deps|roots|graphs|graph|graph-put|stats [args]";
   exit 2
 
 let parse_and_check file =
@@ -359,6 +359,13 @@ let command_store = function
         (Protoss.Workspace.graph_store
            (Protoss.Workspace.store_of_arg project_or_store)
            graph_hash)
+  | [ "graph-put"; project_or_store; graph_file ] ->
+      let graph_hash =
+        Protoss.Workspace.put_store_graph
+          (Protoss.Workspace.store_of_arg project_or_store)
+          (Protoss.Store.read_file graph_file)
+      in
+      print_endline graph_hash
   | [ "stats"; root ] ->
       let objects, defs, canonical = Protoss.Store.stats root in
       Printf.printf "objects=%d\ndefs=%d\ncanonical=%d\n" objects defs canonical

@@ -2307,6 +2307,19 @@ let () =
     (Kernel.hash_program store_graph_checked);
   let store_graph_value, _ = Runtime.eval_entry store_graph_checked "appMain" in
   assert_equal "project checked store graph eval" "44" (Runtime.value_to_string store_graph_value);
+  let graph_put_store = temp_dir "workspace-graph-put-store" in
+  assert_equal "project put store graph hash" store_graph_hash
+    (Workspace.put_store_graph graph_put_store (Store.read_file store_graph_path));
+  assert_equal "project put store graph content" (Store.read_file store_graph_path)
+    (Workspace.graph_store graph_put_store store_graph_hash);
+  let graph_put_invalid_store = temp_dir "workspace-graph-put-invalid-store" in
+  (try
+     ignore (Workspace.put_store_graph graph_put_invalid_store (Store.read_file store_graph_path ^ "\n"));
+     fail "graph-put should reject non-exact canonical JSON"
+   with Workspace.Error msg ->
+     assert_true "graph-put reports non-exact canonical JSON"
+       (contains_substring msg "stored canonical graph is not exact canonical JSON"));
+  assert_true "graph-put invalid does not create store" (not (Sys.file_exists graph_put_invalid_store));
   let store_graph_invariants = Invariants.check_store_graph build_a.store store_graph_hash in
   assert_equal "project store graph invariants hash" (Kernel.hash_program build_a.Workspace.checked)
     store_graph_invariants.Invariants.program_hash;
