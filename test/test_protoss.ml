@@ -2050,6 +2050,54 @@ let () =
   assert_equal "stdlib Protoss.parseText foldNat expr"
     "Ok [PDDef {expr = PEFoldNat {step = PELambda {body = PEApply {args = [PEVar \"acc\"], fn = PEVar \"succ\"}, param = {name = \"acc\", typ = PTName \"Nat\"}}, target = PEVar \"n\", zero = PEVar \"0\"}, name = \"two\", typ = PTName \"Nat\"}]"
     (Runtime.value_to_string protoss_parsed_fold_nat_expr);
+  let protoss_parsed_get_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedGetExpr"
+  in
+  assert_equal "stdlib Protoss.parseText get expr"
+    "Ok [PDDef {expr = PEField {field = \"name\", target = PEVar \"user\"}, name = \"userName\", typ = PTName \"String\"}]"
+    (Runtime.value_to_string protoss_parsed_get_expr);
+  let protoss_parsed_inst_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedInstExpr"
+  in
+  assert_equal "stdlib Protoss.parseText inst expr"
+    "Ok [PDDef {expr = PEInst {name = \"id\", typeArgs = [PTName \"Nat\"]}, name = \"idNat\", typ = PTName \"Id\"}]"
+    (Runtime.value_to_string protoss_parsed_inst_expr);
+  let protoss_parsed_fold_list_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedFoldListExpr"
+  in
+  assert_equal "stdlib Protoss.parseText foldList expr"
+    "Ok [PDDef {expr = PEFoldList {step = PELambda {body = PELambda {body = PEApply {args = [PEVar \"acc\"], fn = PEVar \"succ\"}, param = {name = \"acc\", typ = PTName \"Nat\"}}, param = {name = \"x\", typ = PTName \"Nat\"}}, target = PEVar \"xs\", zero = PEVar \"0\"}, name = \"len\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_fold_list_expr);
+  let protoss_parsed_case_list_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedCaseListExpr"
+  in
+  assert_equal "stdlib Protoss.parseText caseList expr"
+    "Ok [PDDef {expr = PECaseList {consBody = PEVar \"head\", head = \"head\", nilBody = PEVar \"0\", tail = \"tail\", target = PEVar \"xs\"}, name = \"headOrZero\", typ = PTName \"Nat\"}]"
+    (Runtime.value_to_string protoss_parsed_case_list_expr);
+  let protoss_parsed_done_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDoneExpr"
+  in
+  assert_equal "stdlib Protoss.parseText done expr"
+    "Ok [PDDef {expr = PEDone PEString \"ok\", name = \"p\", typ = PTApply {args = [PTName \"String\"], name = \"Process\"}}]"
+    (Runtime.value_to_string protoss_parsed_done_expr);
+  let protoss_parsed_bind_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBindExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bind expr"
+    "Ok [PDDef {expr = PEBind {body = PEDone PEVar \"answer\", param = \"answer\", process = PERequest PRAskHuman \"Name?\", typ = PTName \"String\"}, name = \"p\", typ = PTApply {args = [PTName \"String\"], name = \"Process\"}}]"
+    (Runtime.value_to_string protoss_parsed_bind_expr);
+  let protoss_parsed_request_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedRequestExpr"
+  in
+  assert_equal "stdlib Protoss.parseText request expr"
+    "Ok [PDDef {expr = PERequest PRAskHuman \"Name?\", name = \"p\", typ = PTApply {args = [PTName \"String\"], name = \"Process\"}}]"
+    (Runtime.value_to_string protoss_parsed_request_expr);
+  let protoss_parsed_clock_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedClockExpr"
+  in
+  assert_equal "stdlib Protoss.parseText clock expr"
+    "Ok [PDDef {expr = PERequest PRClockRead unit, name = \"now\", typ = PTApply {args = [PTName \"String\"], name = \"Process\"}}]"
+    (Runtime.value_to_string protoss_parsed_clock_expr);
   let protoss_parsed_bad_expression, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadExpression"
   in
@@ -2078,6 +2126,28 @@ let () =
   assert_equal "stdlib Protoss.parseText bad foldNat expr"
     "Err \"expected foldNat step\""
     (Runtime.value_to_string protoss_parsed_bad_fold_nat_expr);
+  let protoss_parsed_bad_get_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadGetExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad get expr" "Err \"expected get field\""
+    (Runtime.value_to_string protoss_parsed_bad_get_expr);
+  let protoss_parsed_bad_case_list_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadCaseListExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad caseList expr"
+    "Err \"expected caseList Cons branch\""
+    (Runtime.value_to_string protoss_parsed_bad_case_list_expr);
+  let protoss_parsed_bad_bind_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadBindExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad bind expr" "Err \"expected bind lambda\""
+    (Runtime.value_to_string protoss_parsed_bad_bind_expr);
+  let protoss_parsed_bad_request_expr, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadRequestExpr"
+  in
+  assert_equal "stdlib Protoss.parseText bad request expr"
+    "Err \"expected string literal\""
+    (Runtime.value_to_string protoss_parsed_bad_request_expr);
   let protoss_parsed_bad_tag, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadTag"
   in

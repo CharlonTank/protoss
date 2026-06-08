@@ -449,6 +449,30 @@
 (def protossParsedFoldNatExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def two Nat (foldNat n 0 (lambda (acc Nat) (succ acc))))"))
 
+(def protossParsedGetExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def userName String (get user name))"))
+
+(def protossParsedInstExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def idNat Id (inst id Nat))"))
+
+(def protossParsedFoldListExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def len Nat (foldList xs 0 (lambda (x Nat) (lambda (acc Nat) (succ acc)))))"))
+
+(def protossParsedCaseListExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def headOrZero Nat (caseList xs (Nil 0) (Cons head tail head)))"))
+
+(def protossParsedDoneExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def p (Process String) (done \"ok\"))"))
+
+(def protossParsedBindExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def p (Process String) (bind (Human.ask \"Name?\") (lambda (answer String) (done answer))))"))
+
+(def protossParsedRequestExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def p (Process String) (Human.ask \"Name?\"))"))
+
+(def protossParsedClockExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def now (Process String) (Clock.read))"))
+
 (def protossParsedBadExpression (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Unit ())"))
 
@@ -463,6 +487,18 @@
 
 (def protossParsedBadFoldNatExpr (Result String (List ProtossDecl))
   (Protoss.parseText "(def bad Nat (foldNat n 0))"))
+
+(def protossParsedBadGetExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad String (get user))"))
+
+(def protossParsedBadCaseListExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad Nat (caseList xs (Nil 0)))"))
+
+(def protossParsedBadBindExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad (Process String) (bind p answer))"))
+
+(def protossParsedBadRequestExpr (Result String (List ProtossDecl))
+  (Protoss.parseText "(def bad (Process String) (Human.ask prompt))"))
 
 (def protossParsedBadTag (Result String (List ProtossDecl))
   (Protoss.parseText "(let x String \"Ada\")"))
