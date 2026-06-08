@@ -1741,6 +1741,33 @@ let () =
   in
   assert_equal "stdlib String.charAt miss" "None unit"
     (Runtime.value_to_string greeting_char_missing);
+  let digit_char, _ = Runtime.normalize_def stdlib_generics "digitChar" in
+  assert_equal "stdlib String.isDigit hit" "true" (Runtime.value_to_string digit_char);
+  let non_digit_char, _ = Runtime.normalize_def stdlib_generics "nonDigitChar" in
+  assert_equal "stdlib String.isDigit miss" "false" (Runtime.value_to_string non_digit_char);
+  let whitespace_char, _ = Runtime.normalize_def stdlib_generics "whitespaceChar" in
+  assert_equal "stdlib String.isWhitespace" "true"
+    (Runtime.value_to_string whitespace_char);
+  let delimiter_char, _ = Runtime.normalize_def stdlib_generics "delimiterChar" in
+  assert_equal "stdlib String.isDelimiter" "true" (Runtime.value_to_string delimiter_char);
+  let atom_char, _ = Runtime.normalize_def stdlib_generics "atomChar" in
+  assert_equal "stdlib String.isAtomChar hit" "true" (Runtime.value_to_string atom_char);
+  let atom_char_rejected, _ = Runtime.normalize_def stdlib_generics "atomCharRejected" in
+  assert_equal "stdlib String.isAtomChar reject" "false"
+    (Runtime.value_to_string atom_char_rejected);
+  let cursor_start_char, _ = Runtime.normalize_def stdlib_generics "cursorStartChar" in
+  assert_equal "stdlib TextCursor.current start" "Some \"A\""
+    (Runtime.value_to_string cursor_start_char);
+  let cursor_next_char, _ = Runtime.normalize_def stdlib_generics "cursorNextChar" in
+  assert_equal "stdlib TextCursor.current next" "Some \"d\""
+    (Runtime.value_to_string cursor_next_char);
+  let cursor_remaining, _ = Runtime.normalize_def stdlib_generics "cursorRemaining" in
+  assert_equal "stdlib TextCursor.remaining" "\"da Lovelace\""
+    (Runtime.value_to_string cursor_remaining);
+  let cursor_peek, _ = Runtime.normalize_def stdlib_generics "cursorPeek" in
+  assert_equal "stdlib TextCursor.peekIs" "true" (Runtime.value_to_string cursor_peek);
+  let cursor_done, _ = Runtime.normalize_def stdlib_generics "cursorDone" in
+  assert_equal "stdlib TextCursor.isDone" "true" (Runtime.value_to_string cursor_done);
   let pred_zero, _ = Runtime.normalize_def stdlib_generics "predZero" in
   assert_equal "stdlib Nat.pred zero" "0" (Runtime.value_to_string pred_zero);
   let pred_three, _ = Runtime.normalize_def stdlib_generics "predThree" in

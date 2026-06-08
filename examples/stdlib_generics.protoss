@@ -44,6 +44,45 @@
 (def greetingCharMissing (Maybe String)
   ((String.charAt greeting) 99))
 
+(def digitChar Bool
+  (String.isDigit "7"))
+
+(def nonDigitChar Bool
+  (String.isDigit "x"))
+
+(def whitespaceChar Bool
+  (String.isWhitespace " "))
+
+(def delimiterChar Bool
+  (String.isDelimiter "("))
+
+(def atomChar Bool
+  (String.isAtomChar "x"))
+
+(def atomCharRejected Bool
+  (String.isAtomChar ")"))
+
+(def cursorStart TextCursor
+  (TextCursor.start greeting))
+
+(def cursorStartChar (Maybe String)
+  (TextCursor.current cursorStart))
+
+(def cursorNext TextCursor
+  (TextCursor.advance cursorStart))
+
+(def cursorNextChar (Maybe String)
+  (TextCursor.current cursorNext))
+
+(def cursorRemaining String
+  (TextCursor.remaining cursorNext))
+
+(def cursorPeek Bool
+  ((TextCursor.peekIs cursorStart) "A"))
+
+(def cursorDone Bool
+  (TextCursor.isDone ((TextCursor.at greeting) (String.length greeting))))
+
 (def predZero Nat
   (Nat.pred 0))
 

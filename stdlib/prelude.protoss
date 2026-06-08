@@ -1,4 +1,4 @@
-; Protoss stdlib v0.18. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.19. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -9,6 +9,7 @@
 (type Set (A) (List A))
 (record SourceSpan (line Nat) (column Nat))
 (record Diagnostic (span SourceSpan) (message String))
+(record TextCursor (source String) (offset Nat))
 (variant Sexp
   (SAtom String)
   (SString String)
@@ -21,7 +22,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.18")
+(def Stdlib.version String "v0.19")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -149,6 +150,50 @@
   (lambda (value String)
     (Bool.not (String.isEmpty value))))
 
+(def String.whitespaceChars (List String)
+  (Cons String " "
+    (Cons String "\n"
+      (Cons String "\t"
+        (Cons String "\r" (Nil String))))))
+
+(def String.digitChars (List String)
+  (Cons String "0"
+    (Cons String "1"
+      (Cons String "2"
+        (Cons String "3"
+          (Cons String "4"
+            (Cons String "5"
+              (Cons String "6"
+                (Cons String "7"
+                  (Cons String "8"
+                    (Cons String "9" (Nil String))))))))))))
+
+(def String.delimiterChars (List String)
+  (Cons String " "
+    (Cons String "\n"
+      (Cons String "\t"
+        (Cons String "\r"
+          (Cons String "("
+            (Cons String ")"
+              (Cons String "\""
+                (Cons String ";" (Nil String))))))))))
+
+(def String.isWhitespace (-> String Bool)
+  (lambda (ch String)
+    ((((inst List.member String) String.eqString) ch) String.whitespaceChars)))
+
+(def String.isDigit (-> String Bool)
+  (lambda (ch String)
+    ((((inst List.member String) String.eqString) ch) String.digitChars)))
+
+(def String.isDelimiter (-> String Bool)
+  (lambda (ch String)
+    ((((inst List.member String) String.eqString) ch) String.delimiterChars)))
+
+(def String.isAtomChar (-> String Bool)
+  (lambda (ch String)
+    ((Bool.and (String.nonEmpty ch)) (Bool.not (String.isDelimiter ch)))))
+
 (def String.join (-> String (-> (List String) String))
   (lambda (separator String)
     (lambda (items (List String))
@@ -158,6 +203,38 @@
             (case (String.isEmpty acc)
               (true item)
               (false ((String.concat item) ((String.concat separator) acc))))))))))
+
+(def TextCursor.at (-> String (-> Nat TextCursor))
+  (lambda (source String)
+    (lambda (offset Nat)
+      (record (source source) (offset offset)))))
+
+(def TextCursor.start (-> String TextCursor)
+  (lambda (source String)
+    ((TextCursor.at source) 0)))
+
+(def TextCursor.current (-> TextCursor (Maybe String))
+  (lambda (cursor TextCursor)
+    ((String.charAt (get cursor source)) (get cursor offset))))
+
+(def TextCursor.advance (-> TextCursor TextCursor)
+  (lambda (cursor TextCursor)
+    ((TextCursor.at (get cursor source)) (succ (get cursor offset)))))
+
+(def TextCursor.remaining (-> TextCursor String)
+  (lambda (cursor TextCursor)
+    ((String.drop (get cursor source)) (get cursor offset))))
+
+(def TextCursor.isDone (-> TextCursor Bool)
+  (lambda (cursor TextCursor)
+    ((Nat.gte (get cursor offset)) (String.length (get cursor source)))))
+
+(def TextCursor.peekIs (-> TextCursor (-> String Bool))
+  (lambda (cursor TextCursor)
+    (lambda (expected String)
+      (case (TextCursor.current cursor)
+        (None false)
+        (Some ch ((String.eqString ch) expected))))))
 
 (def SourceSpan.at (-> Nat (-> Nat SourceSpan))
   (lambda (line Nat)
