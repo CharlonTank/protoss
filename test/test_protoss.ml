@@ -174,6 +174,26 @@ let () =
   assert_true "canonical graph has defs" (List.length (json_array_field "defs" graph) = 1);
   assert_true "canonical graph empty capability descriptors"
     (json_array_field "capabilityDescriptors" graph = []);
+  let node_graph = json_field "nodeGraph" graph in
+  assert_equal "canonical node graph version" Kernel.canonical_node_graph_version
+    (json_string_field "version" node_graph);
+  assert_equal "canonical node graph root hash" (Kernel.hash_program formatted_a)
+    (json_string_field "rootProgramHash" node_graph);
+  assert_true "canonical node graph has typed nodes"
+    (List.length (json_array_field "nodes" node_graph) >= 3);
+  let node_defs = json_array_field "defs" node_graph in
+  assert_true "canonical def has node refs"
+    (match json_array_field "defs" graph with
+    | def :: _ ->
+        String.length (json_string_field "typeRef" def) > 3
+        && String.length (json_string_field "termRef" def) > 3
+    | [] -> false);
+  assert_true "canonical node graph def refs"
+    (match node_defs with
+    | def :: _ ->
+        String.length (json_string_field "typeRef" def) > 3
+        && String.length (json_string_field "termRef" def) > 3
+    | [] -> false);
   assert_equal "canonical graph to program roundtrip" program_canonical
     (Canonical_ir.graph_to_program graph_json);
   let graph_caps, graph_defs = Canonical_ir.parse_graph graph_json in
@@ -190,7 +210,24 @@ let () =
           (replace_once graph_json (Kernel.hash_program formatted_a) "p1:00000000000000000000000000000000"));
      fail "canonical graph program hash mismatch should be rejected"
    with Kernel.Error _ -> ());
+  (try
+     ignore (Canonical_ir.parse_graph (replace_once graph_json "\"kind\": \"Type\"" "\"kind\": \"Term\""));
+     fail "canonical node graph mismatch should be rejected"
+   with Kernel.Error _ -> ());
   let duplicate_def_ids = check "(def a Nat 1)\n(def b Nat 1)" in
+  let duplicate_graph = Json.parse (Canonical_ir.serialize_graph duplicate_def_ids) in
+  let duplicate_node_defs = json_array_field "defs" (json_field "nodeGraph" duplicate_graph) in
+  let ref_for field name =
+    duplicate_node_defs
+    |> List.find_opt (fun def -> String.equal (json_string_field "name" def) name)
+    |> function
+    | Some def -> json_string_field field def
+    | None -> fail ("missing node def ref: " ^ name)
+  in
+  assert_equal "canonical node graph shares type nodes" (ref_for "typeRef" "a")
+    (ref_for "typeRef" "b");
+  assert_equal "canonical node graph shares term nodes" (ref_for "termRef" "a")
+    (ref_for "termRef" "b");
   assert_equal "canonical graph allows shared DefIds"
     (Kernel.serialize_checked_program duplicate_def_ids)
     (Canonical_ir.graph_to_program (Canonical_ir.serialize_graph duplicate_def_ids));

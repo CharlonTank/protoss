@@ -1471,6 +1471,8 @@ let serialize_program caps defs =
 
 let canonical_graph_version = "protoss-canon-graph-v1"
 
+let canonical_node_graph_version = "protoss-canon-node-graph-v1"
+
 let json_string = Ast.quote
 
 let json_field name value = json_string name ^ ": " ^ value
@@ -1480,6 +1482,16 @@ let json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
 let json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
 
 let json_bool b = if b then "true" else "false"
+
+let canonical_node_id kind canonical =
+  hash_string ("canonical-node-v1:" ^ kind ^ ":" ^ canonical)
+
+let type_node_id typ = canonical_node_id "Type" (type_to_canonical typ)
+
+let term_node_id def_id_of term =
+  canonical_node_id "Term" (cterm_to_canonical_v2 def_id_of term)
+
+let uniq_strings xs = List.sort_uniq String.compare xs
 
 let rec type_to_graph_json = function
   | TUnit -> json_obj [ json_field "tag" (json_string "Unit") ]
@@ -1768,6 +1780,211 @@ and cbranch_to_graph_json def_id_of = function
           json_field "body" (cterm_to_graph_json def_id_of body);
         ]
 
+let type_node_tag = function
+  | TUnit -> "Unit"
+  | TBool -> "Bool"
+  | TNat -> "Nat"
+  | TString -> "String"
+  | TFun _ -> "Fun"
+  | TRecord _ -> "Record"
+  | TVariant _ -> "Variant"
+  | TList _ -> "List"
+  | TView _ -> "View"
+  | TProcess _ -> "Process"
+  | TVar _ -> "TypeVar"
+  | TForall _ -> "Forall"
+  | TNamed _ -> "Named"
+
+let cterm_node_tag = function
+  | CUnit -> "Unit"
+  | CBool _ -> "Bool"
+  | CNat _ -> "Nat"
+  | CString _ -> "String"
+  | CVar _ -> "Var"
+  | CGlobal n when is_builtin n -> "Builtin"
+  | CGlobal _ -> "Ref"
+  | CLambda _ -> "Lambda"
+  | CApp _ -> "App"
+  | CLet _ -> "Let"
+  | CRecord _ -> "Record"
+  | CField _ -> "Field"
+  | CVariant _ -> "Variant"
+  | CInst _ -> "Inst"
+  | CCase _ -> "Case"
+  | CFoldNat _ -> "FoldNat"
+  | CFoldVariant _ -> "FoldVariant"
+  | CRecur _ -> "Recur"
+  | CNil _ -> "Nil"
+  | CCons _ -> "Cons"
+  | CFoldList _ -> "FoldList"
+  | CText _ -> "Text"
+  | CImage _ -> "Image"
+  | CButton _ -> "Button"
+  | CInput _ -> "Input"
+  | CColumn _ -> "Column"
+  | CRow _ -> "Row"
+  | CListView _ -> "ListView"
+  | CWhenView _ -> "WhenView"
+  | CDone _ -> "Done"
+  | CRequest _ -> "Request"
+  | CBind _ -> "Bind"
+
+let type_node_edges = function
+  | TUnit | TBool | TNat | TString | TVar _ -> []
+  | TFun (a, b) -> [ type_node_id a; type_node_id b ]
+  | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_node_id t)
+  | TList t | TView t | TProcess t -> [ type_node_id t ]
+  | TForall (_, body) -> [ type_node_id body ]
+  | TNamed (_, args) -> List.map type_node_id args
+
+let cbranch_body_edges def_id_of = function
+  | CBBool (_, body) | CBVariant (_, body) -> [ term_node_id def_id_of body ]
+
+let cterm_node_edges def_id_of = function
+  | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ -> []
+  | CLambda (typ, body) -> [ type_node_id typ; term_node_id def_id_of body ]
+  | CApp (f, arg) -> [ term_node_id def_id_of f; term_node_id def_id_of arg ]
+  | CLet (value, body) -> [ term_node_id def_id_of value; term_node_id def_id_of body ]
+  | CRecord fields -> List.map (fun (_, value) -> term_node_id def_id_of value) fields
+  | CField (record, _) -> [ term_node_id def_id_of record ]
+  | CVariant (typ, _, payload) -> [ type_node_id typ; term_node_id def_id_of payload ]
+  | CInst (_, args) -> List.map type_node_id args
+  | CCase (scrutinee, branches) ->
+      term_node_id def_id_of scrutinee :: List.concat_map (cbranch_body_edges def_id_of) branches
+  | CFoldNat (index, zero, step) ->
+      [ term_node_id def_id_of index; term_node_id def_id_of zero; term_node_id def_id_of step ]
+  | CFoldVariant (target, result, scrutinee, branches) ->
+      type_node_id target :: type_node_id result :: term_node_id def_id_of scrutinee
+      :: List.concat_map (cbranch_body_edges def_id_of) branches
+  | CRecur value -> [ term_node_id def_id_of value ]
+  | CNil typ -> [ type_node_id typ ]
+  | CCons (typ, head, tail) ->
+      [ type_node_id typ; term_node_id def_id_of head; term_node_id def_id_of tail ]
+  | CFoldList (list, zero, step) ->
+      [ term_node_id def_id_of list; term_node_id def_id_of zero; term_node_id def_id_of step ]
+  | CText value | CColumn value | CRow value | CDone value ->
+      [ term_node_id def_id_of value ]
+  | CImage (src, alt) | CButton (src, alt) | CInput (src, alt)
+  | CListView (src, alt) | CWhenView (src, alt) ->
+      [ term_node_id def_id_of src; term_node_id def_id_of alt ]
+  | CBind (process, typ, body) ->
+      [ term_node_id def_id_of process; type_node_id typ; term_node_id def_id_of body ]
+
+let canonical_node_json id kind tag canonical payload edges =
+  json_obj
+    [
+      json_field "id" (json_string id);
+      json_field "kind" (json_string kind);
+      json_field "tag" (json_string tag);
+      json_field "canonical" (json_string canonical);
+      json_field "payload" payload;
+      json_field "edgeRefs" (json_array json_string (uniq_strings edges));
+    ]
+
+let canonical_node_graph_json program_hash def_id_of defs =
+  let nodes = Hashtbl.create 128 in
+  let rec add_type typ =
+    let canonical = type_to_canonical typ in
+    let id = type_node_id typ in
+    if not (Hashtbl.mem nodes id) then (
+      add_type_children typ;
+      Hashtbl.add nodes id
+        (canonical_node_json id "Type" (type_node_tag typ) canonical (type_to_graph_json typ)
+           (type_node_edges typ)))
+  and add_type_children = function
+    | TUnit | TBool | TNat | TString | TVar _ -> ()
+    | TFun (a, b) ->
+        add_type a;
+        add_type b
+    | TRecord fields | TVariant fields -> List.iter (fun (_, t) -> add_type t) fields
+    | TList t | TView t | TProcess t | TForall (_, t) -> add_type t
+    | TNamed (_, args) -> List.iter add_type args
+  in
+  let rec add_term term =
+    let canonical = cterm_to_canonical_v2 def_id_of term in
+    let id = term_node_id def_id_of term in
+    if not (Hashtbl.mem nodes id) then (
+      add_term_children term;
+      Hashtbl.add nodes id
+        (canonical_node_json id "Term" (cterm_node_tag term) canonical
+           (cterm_to_graph_json def_id_of term) (cterm_node_edges def_id_of term)))
+  and add_branch = function
+    | CBBool (_, body) | CBVariant (_, body) -> add_term body
+  and add_term_children = function
+    | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ -> ()
+    | CLambda (typ, body) ->
+        add_type typ;
+        add_term body
+    | CApp (f, arg) | CImage (f, arg) | CButton (f, arg) | CInput (f, arg)
+    | CListView (f, arg) | CWhenView (f, arg) ->
+        add_term f;
+        add_term arg
+    | CLet (value, body) ->
+        add_term value;
+        add_term body
+    | CRecord fields -> List.iter (fun (_, value) -> add_term value) fields
+    | CField (record, _) -> add_term record
+    | CVariant (typ, _, payload) ->
+        add_type typ;
+        add_term payload
+    | CInst (_, args) -> List.iter add_type args
+    | CCase (scrutinee, branches) ->
+        add_term scrutinee;
+        List.iter add_branch branches
+    | CFoldNat (index, zero, step) ->
+        add_term index;
+        add_term zero;
+        add_term step
+    | CFoldVariant (target, result, scrutinee, branches) ->
+        add_type target;
+        add_type result;
+        add_term scrutinee;
+        List.iter add_branch branches
+    | CRecur value -> add_term value
+    | CNil typ -> add_type typ
+    | CCons (typ, head, tail) ->
+        add_type typ;
+        add_term head;
+        add_term tail
+    | CFoldList (list, zero, step) ->
+        add_term list;
+        add_term zero;
+        add_term step
+    | CText value | CColumn value | CRow value | CDone value -> add_term value
+    | CBind (process, typ, body) ->
+        add_term process;
+        add_type typ;
+        add_term body
+  in
+  List.iter
+    (fun (d : canonical_def) ->
+      add_type d.ctyp;
+      add_term d.cbody)
+    defs;
+  let node_json =
+    nodes |> Hashtbl.to_seq |> List.of_seq |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+    |> List.map snd
+  in
+  let def_refs =
+    defs
+    |> List.sort (fun a b -> String.compare a.cname b.cname)
+    |> List.map (fun d ->
+           json_obj
+             [
+               json_field "name" (json_string d.cname);
+               json_field "defId" (json_string d.cdef_id);
+               json_field "typeRef" (json_string (type_node_id d.ctyp));
+               json_field "termRef" (json_string (term_node_id def_id_of d.cbody));
+             ])
+  in
+  json_obj
+    [
+      json_field "version" (json_string canonical_node_graph_version);
+      json_field "rootProgramHash" (json_string program_hash);
+      json_field "defs" ("[" ^ String.concat ", " def_refs ^ "]");
+      json_field "nodes" ("[" ^ String.concat ", " node_json ^ "]");
+    ]
+
 let single_sexp input =
   match Sexp.parse input with
   | [ x ] -> x
@@ -2055,6 +2272,8 @@ let checked_to_graph_json checked =
         json_field "name" (json_string d.def.name);
         json_field "defId" (json_string d.def_id);
         json_field "hash" (json_string d.hash);
+        json_field "typeRef" (json_string (type_node_id d.def.typ));
+        json_field "termRef" (json_string (term_node_id def_id_of d.cterm));
         json_field "type" (type_to_graph_json d.def.typ);
         json_field "typeCanonical" (json_string (type_to_canonical d.def.typ));
         json_field "deps"
@@ -2073,6 +2292,8 @@ let checked_to_graph_json checked =
         (json_array json_string (List.sort_uniq String.compare checked.program.capabilities));
       json_field "capabilityDescriptors" (capabilities_to_graph_json checked.program.capabilities);
       json_field "defs" (json_array def_json defs);
+      json_field "nodeGraph"
+        (canonical_node_graph_json (hash_program checked) def_id_of (canonical_defs_of_checked checked));
     ]
   ^ "\n"
 

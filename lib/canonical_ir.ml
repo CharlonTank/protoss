@@ -29,6 +29,8 @@ let json_array_field name obj =
   | Some xs -> xs
   | None -> fail ("canonical graph field must be array: " ^ name)
 
+let json_optional_field name obj = Json.field name obj
+
 let json_bool_field name obj =
   match json_field name obj with
   | Json.Bool b -> b
@@ -38,6 +40,12 @@ let json_nat_field name obj =
   match json_field name obj with
   | Json.Num n when n >= 0 -> n
   | _ -> fail ("canonical graph field must be natural number: " ^ name)
+
+let json_string_array_field name obj =
+  json_array_field name obj
+  |> List.map (function
+       | Json.String s -> s
+       | _ -> fail ("canonical graph field must be string array: " ^ name))
 
 let ensure_unique what names =
   let seen = Hashtbl.create 16 in
@@ -215,6 +223,73 @@ let def_of_graph_json obj =
     fail ("canonical graph def hash mismatch: " ^ name);
   { Kernel.cname = name; cdef_id = def_id; ctyp = typ; cbody = body }
 
+let validate_node_payload id kind canonical payload =
+  match kind with
+  | "Type" ->
+      let typ = Kernel.type_of_canonical_sexp (Kernel.single_sexp canonical) in
+      let expected = Json.parse (Kernel.type_to_graph_json typ) in
+      if payload <> expected then fail ("canonical node payload mismatch: " ^ id)
+  | "Term" ->
+      let term = Kernel.cterm_of_canonical_sexp (Kernel.single_sexp canonical) in
+      let expected = Json.parse (Kernel.cterm_to_graph_json (fun x -> x) term) in
+      if payload <> expected then fail ("canonical node payload mismatch: " ^ id)
+  | _ -> fail ("unknown canonical node kind: " ^ kind)
+
+let validate_node_graph graph program_hash defs =
+  match json_optional_field "nodeGraph" graph with
+  | None -> ()
+  | Some node_graph ->
+      let version = json_string_field "version" node_graph in
+      if not (String.equal version Kernel.canonical_node_graph_version) then
+        fail ("canonical node graph version mismatch: " ^ version);
+      let root_hash = json_string_field "rootProgramHash" node_graph in
+      if not (String.equal root_hash program_hash) then
+        fail ("canonical node graph rootProgramHash mismatch: " ^ root_hash);
+      let node_defs = json_array_field "defs" node_graph in
+      let nodes = json_array_field "nodes" node_graph in
+      let node_ids = List.map (json_string_field "id") nodes in
+      ensure_unique "node" node_ids;
+      let node_by_id id =
+        List.find_opt (fun node -> String.equal (json_string_field "id" node) id) nodes
+      in
+      List.iter
+        (fun node ->
+          let id = json_string_field "id" node in
+          let kind = json_string_field "kind" node in
+          let canonical = json_string_field "canonical" node in
+          let expected_id = Kernel.canonical_node_id kind canonical in
+          if not (String.equal id expected_id) then fail ("canonical node id mismatch: " ^ id);
+          validate_node_payload id kind canonical (json_field "payload" node);
+          List.iter
+            (fun edge ->
+              if node_by_id edge = None then fail ("canonical node missing edge target: " ^ edge))
+            (json_string_array_field "edgeRefs" node))
+        nodes;
+      ensure_unique "node def" (List.map (json_string_field "name") node_defs);
+      List.iter
+        (fun (d : Kernel.canonical_def) ->
+          let node_def =
+            match
+              List.find_opt (fun obj -> String.equal (json_string_field "name" obj) d.cname)
+                node_defs
+            with
+            | Some obj -> obj
+            | None -> fail ("canonical node graph missing def ref: " ^ d.cname)
+          in
+          if not (String.equal (json_string_field "defId" node_def) d.cdef_id) then
+            fail ("canonical node graph defId mismatch: " ^ d.cname);
+          let type_ref = json_string_field "typeRef" node_def in
+          let term_ref = json_string_field "termRef" node_def in
+          if not (String.equal type_ref (Kernel.type_node_id d.ctyp)) then
+            fail ("canonical node graph typeRef mismatch: " ^ d.cname);
+          if not (String.equal term_ref (Kernel.term_node_id (fun x -> x) d.cbody)) then
+            fail ("canonical node graph termRef mismatch: " ^ d.cname);
+          if node_by_id type_ref = None then
+            fail ("canonical node graph missing type node: " ^ type_ref);
+          if node_by_id term_ref = None then
+            fail ("canonical node graph missing term node: " ^ term_ref))
+        defs
+
 let parse_graph input =
   let graph = try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg) in
   let version = json_string_field "version" graph in
@@ -238,6 +313,7 @@ let parse_graph input =
   let program_hash = json_string_field "programHash" graph in
   if not (String.equal program_hash (Kernel.hash_string canonical)) then
     fail ("canonical graph programHash mismatch: " ^ program_hash);
+  validate_node_graph graph program_hash defs;
   (caps, defs)
 
 let graph_to_program input =
