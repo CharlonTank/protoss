@@ -876,6 +876,27 @@ let () =
   assert_equal "match Record normalizes" "3" (Runtime.value_to_string record_match_out);
   assert_true "match Record has no canonical match node"
     (not (contains_substring (Kernel.serialize_checked_program record_match) "match"));
+  let tuple_sugar =
+    check
+      "(def pair (Tuple Nat String) (tuple 3 \"Ada\"))\n\
+       (def out Nat (match pair ((tuple count name) count)))"
+  in
+  let tuple_explicit =
+    check
+      "(def pair (Record (_1 Nat) (_2 String)) (record (_1 3) (_2 \"Ada\")))\n\
+       (def out Nat (letRecord pair ((_1 count) (_2 name)) count))"
+  in
+  assert_equal "tuple sugar hashes as canonical record"
+    (Kernel.hash_program tuple_explicit)
+    (Kernel.hash_program tuple_sugar);
+  let tuple_out, _ = Runtime.normalize_def tuple_sugar "out" in
+  assert_equal "tuple match normalizes" "3" (Runtime.value_to_string tuple_out);
+  assert_true "tuple is surface-only canonical syntax"
+    (not (contains_substring (Kernel.serialize_checked_program tuple_sugar) "Tuple"));
+  assert_true "tuple match has no canonical match node"
+    (not (contains_substring (Kernel.serialize_checked_program tuple_sugar) "match"));
+  expect_parse_error "(def bad (Tuple Nat) (tuple 1))";
+  expect_parse_error "(def bad Nat (match (tuple 1 2) ((tuple a a) a)))";
   let record_destructure_fresh =
     check
       "(def out Nat \

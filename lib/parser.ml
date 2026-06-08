@@ -38,6 +38,15 @@ let ensure_unique what xs =
       Hashtbl.add seen n ())
     xs
 
+let tuple_field_name index = "_" ^ string_of_int (index + 1)
+
+let ensure_tuple_arity what xs =
+  if List.length xs < 2 then fail (what ^ " requires at least two elements")
+
+let tuple_fields xs =
+  ensure_tuple_arity "tuple" xs;
+  List.mapi (fun index value -> (tuple_field_name index, value)) xs
+
 let rec parse_type = function
   | Sexp.Atom "Unit" -> TUnit
   | Sexp.Atom "Bool" -> TBool
@@ -49,6 +58,9 @@ let rec parse_type = function
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> TVar (int_of_string n)
   | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom n; t ] -> TForall (int_of_string n, parse_type t)
   | Sexp.List [ Sexp.Atom "->"; a; b ] -> TFun (parse_type a, parse_type b)
+  | Sexp.List (Sexp.Atom "Tuple" :: elems) ->
+      ensure_tuple_arity "Tuple type" elems;
+      TRecord (tuple_fields (List.map parse_type elems))
   | Sexp.List (Sexp.Atom "Record" :: fields) ->
       let fields =
         List.map
@@ -144,6 +156,8 @@ let rec parse_expr = function
       in
       ensure_unique "record field" (List.map fst fields);
       ERecord (sort_fields fields)
+  | Sexp.List (Sexp.Atom "tuple" :: elems) ->
+      ERecord (sort_fields (tuple_fields (List.map parse_expr elems)))
   | Sexp.List [ Sexp.Atom "get"; e; Sexp.Atom field ] -> EField (parse_expr e, field)
   | Sexp.List [ Sexp.Atom "variant"; ty; Sexp.Atom con; e ] ->
       EVariant (parse_type ty, con, parse_expr e)
@@ -216,12 +230,34 @@ let rec parse_expr = function
       List.fold_left (fun acc arg -> EApp (acc, parse_expr arg)) (parse_expr f) args
 
 and parse_match_expr scrut branches =
-  match parse_match_record scrut branches with
+  match parse_match_tuple scrut branches with
   | Some expr -> expr
   | None -> (
-      match parse_match_list scrut branches with
+      match parse_match_record scrut branches with
       | Some expr -> expr
-      | None -> ECase (parse_expr scrut, List.map parse_branch branches))
+      | None -> (
+          match parse_match_list scrut branches with
+          | Some expr -> expr
+          | None -> ECase (parse_expr scrut, List.map parse_branch branches)))
+
+and parse_match_tuple scrut = function
+  | [ Sexp.List [ Sexp.List (Sexp.Atom "tuple" :: binders); body ] ] ->
+      ensure_tuple_arity "tuple match" binders;
+      let binders = List.map name binders in
+      ensure_unique "tuple match binder" binders;
+      Some
+        (ELetRecord
+           ( parse_expr scrut,
+             tuple_fields binders,
+             parse_expr body ))
+  | branches
+    when List.exists
+           (function
+             | Sexp.List (Sexp.List (Sexp.Atom "tuple" :: _) :: _) -> true
+             | _ -> false)
+           branches ->
+      fail "tuple match syntax is (match tupleExpr ((tuple a b ...) body))"
+  | _ -> None
 
 and parse_match_record scrut = function
   | [ Sexp.List [ Sexp.List (Sexp.Atom "record" :: fields); body ] ] ->

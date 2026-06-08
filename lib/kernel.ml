@@ -234,7 +234,20 @@ let req_to_canonical = function
       "(ServerRequest " ^ Ast.quote route ^ " " ^ Ast.quote payload ^ ")"
 
 let builtin_type_names =
-  [ "Unit"; "Bool"; "Nat"; "String"; "List"; "View"; "Process"; "Record"; "Variant"; "->"; "Fun" ]
+  [
+    "Unit";
+    "Bool";
+    "Nat";
+    "String";
+    "List";
+    "View";
+    "Process";
+    "Record";
+    "Variant";
+    "Tuple";
+    "->";
+    "Fun";
+  ]
 
 let check_duplicate_names defs =
   let seen = Hashtbl.create 32 in

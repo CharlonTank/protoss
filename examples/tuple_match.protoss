@@ -1,0 +1,7 @@
+(def pair (Tuple Nat String) (tuple 3 "Ada"))
+
+(def first Nat (match pair ((tuple n label) n)))
+
+(type NamedPair (A B) (Tuple A B))
+(def named (NamedPair String Nat) (tuple "score" 9))
+(def score Nat (match named ((tuple label value) value)))
