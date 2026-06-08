@@ -1566,6 +1566,53 @@ let () =
    with Loader.Error msg ->
      assert_true "loader defrec error has exact line"
        (contains_substring msg (bad_defrec_file ^ ":2:1: definition count")));
+  let bad_alias_file = Filename.concat import_root "bad_alias.protoss" in
+  write_file bad_alias_file
+    "; ignored comment mentioning (type Loop Nat)\n\n(type Loop Loop)\n(def bad Loop 0)\n";
+  (try
+     ignore (Loader.check_file bad_alias_file);
+     fail "loader recursive alias error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader recursive alias error has exact line"
+       (contains_substring msg
+          (bad_alias_file
+         ^ ":3:1: recursive type alias must be guarded by a Variant constructor: Loop")));
+  let duplicate_alias_file = Filename.concat import_root "duplicate_alias.protoss" in
+  write_file duplicate_alias_file "(type A Nat)\n\n(type A Bool)\n(def x A 0)\n";
+  (try
+     ignore (Loader.check_file duplicate_alias_file);
+     fail "loader duplicate alias error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader duplicate alias error points at duplicate"
+       (contains_substring msg (duplicate_alias_file ^ ":3:1: duplicate type alias: A")));
+  let cyclic_alias_file = Filename.concat import_root "cyclic_alias.protoss" in
+  write_file cyclic_alias_file "\n(type A B)\n(type B A)\n(def bad A 0)\n";
+  (try
+     ignore (Loader.check_file cyclic_alias_file);
+     fail "loader cyclic alias error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader cyclic alias error has exact line"
+       (contains_substring msg (cyclic_alias_file ^ ":2:1: cyclic type alias: A -> B -> A")));
+  let bad_alias_arity_file = Filename.concat import_root "bad_alias_arity.protoss" in
+  write_file bad_alias_arity_file
+    "(type Pair (A B) (Record (left A) (right B)))\n\
+     (def bad (Pair Nat) (record (left 0) (right 1)))\n";
+  (try
+     ignore (Loader.check_file bad_alias_arity_file);
+     fail "loader alias arity error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader alias arity error has exact line"
+       (contains_substring msg
+          (bad_alias_arity_file ^ ":1:1: type alias Pair expects 2 argument(s), got 1")));
+  let duplicate_alias_param_file = Filename.concat import_root "duplicate_alias_param.protoss" in
+  write_file duplicate_alias_param_file "(type Box (A A) A)\n(def bad (Box Nat) 0)\n";
+  (try
+     ignore (Loader.check_file duplicate_alias_param_file);
+     fail "loader duplicate alias param error should be localized"
+   with Loader.Error msg ->
+     assert_true "loader duplicate alias param error has exact line"
+       (contains_substring msg
+          (duplicate_alias_param_file ^ ":1:1: duplicate type parameter A in alias Box")));
 
   expect_check_error "(def loop Nat loop)";
   expect_check_error "(def a Nat b)\n(def b Nat a)";

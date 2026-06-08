@@ -35,7 +35,9 @@ let is_delim c = is_space c || c = '(' || c = ')' || c = ';' || c = '"'
 
 let def_keywords = [ "def"; "defcap"; "defpoly"; "defpolycap"; "defrec" ]
 
-let is_def_keyword keyword = List.exists (String.equal keyword) def_keywords
+let type_keywords = [ "type"; "alias"; "record"; "variant" ]
+
+let is_named_keyword keywords keyword = List.exists (String.equal keyword) keywords
 
 let skip_spaces source i =
   let len = String.length source in
@@ -84,59 +86,165 @@ let line_col source offset =
   done;
   (!line, !col)
 
-let find_def_offset source name =
+let find_named_form_offsets keywords source name =
   let len = String.length source in
-  let rec loop i =
-    if i >= len then None
+  let rec loop depth i acc =
+    if i >= len then List.rev acc
     else
       match source.[i] with
-      | '"' -> loop (skip_string source i)
-      | ';' -> loop (skip_comment source i)
+      | '"' -> loop depth (skip_string source i) acc
+      | ';' -> loop depth (skip_comment source i) acc
       | '(' -> (
-          let keyword_start = skip_spaces source (i + 1) in
-          match atom_at source keyword_start with
-          | Some (keyword, after_keyword) when is_def_keyword keyword -> (
-              let name_start = skip_spaces source after_keyword in
-              match atom_at source name_start with
-              | Some (candidate, _) when String.equal candidate name -> Some i
-              | _ -> loop (i + 1))
-          | _ -> loop (i + 1))
-      | _ -> loop (i + 1)
+          let acc =
+            if depth = 0 then
+              let keyword_start = skip_spaces source (i + 1) in
+              match atom_at source keyword_start with
+              | Some (keyword, after_keyword) when is_named_keyword keywords keyword -> (
+                  let name_start = skip_spaces source after_keyword in
+                  match atom_at source name_start with
+                  | Some (candidate, _) when String.equal candidate name -> i :: acc
+                  | _ -> acc)
+              | _ -> acc
+            else acc
+          in
+          loop (depth + 1) (i + 1) acc)
+      | ')' -> loop (max 0 (depth - 1)) (i + 1) acc
+      | _ -> loop depth (i + 1) acc
   in
-  loop 0
+  loop 0 0 []
+
+let find_named_form_offset keywords source name =
+  match find_named_form_offsets keywords source name with
+  | offset :: _ -> Some offset
+  | [] -> None
+
+let find_named_form_last_offset keywords source name =
+  match List.rev (find_named_form_offsets keywords source name) with
+  | offset :: _ -> Some offset
+  | [] -> None
+
+let find_def_offset source name = find_named_form_offset def_keywords source name
+
+let find_type_alias_offset source name = find_named_form_offset type_keywords source name
+
+let location_for_offset path source offset =
+  let line, col = line_col source offset in
+  path ^ ":" ^ string_of_int line ^ ":" ^ string_of_int col
+
+let symbol_location path source name =
+  match find_def_offset source name with
+  | Some offset -> Some (location_for_offset path source offset)
+  | None -> (
+      match find_type_alias_offset source name with
+      | Some offset -> Some (location_for_offset path source offset)
+      | None -> None)
+
+let symbol_location_last path source name =
+  match find_named_form_last_offset def_keywords source name with
+  | Some offset -> Some (location_for_offset path source offset)
+  | None -> (
+      match find_named_form_last_offset type_keywords source name with
+      | Some offset -> Some (location_for_offset path source offset)
+      | None -> None)
 
 let def_locations path source defs =
   List.map
     (fun d ->
-      let line, col =
-        match find_def_offset source d.name with
-        | Some offset -> line_col source offset
-        | None -> (1, 1)
+      let loc =
+        match symbol_location path source d.name with Some loc -> loc | None -> path ^ ":1:1"
       in
-      (d.name, path ^ ":" ^ string_of_int line ^ ":" ^ string_of_int col))
+      (d.name, loc))
     defs
+
+let type_alias_locations path source aliases =
+  List.map
+    (fun a ->
+      let loc =
+        match symbol_location path source a.type_name with
+        | Some loc -> loc
+        | None -> path ^ ":1:1"
+      in
+      (a.type_name, loc))
+    aliases
 
 let has_prefix prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
+
+let drop_prefix prefix s =
+  let lp = String.length prefix in
+  if has_prefix prefix s then Some (String.sub s lp (String.length s - lp)) else None
 
 let take_until_colon s =
   match String.index_opt s ':' with
   | Some i -> Some (String.sub s 0 i)
   | None -> None
 
-let extract_error_def_name msg =
-  if has_prefix "definition " msg then
-    let rest = String.sub msg 11 (String.length msg - 11) in
-    take_until_colon rest
-  else if has_prefix "duplicate definition: " msg then
-    Some (String.sub msg 22 (String.length msg - 22))
-  else if has_prefix "definition shadows builtin: " msg then
-    Some (String.sub msg 28 (String.length msg - 28))
-  else None
+let take_until_space s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len || is_space s.[i] then i else loop (i + 1)
+  in
+  let i = loop 0 in
+  if i = 0 then None else Some (String.sub s 0 i)
+
+let split_words s =
+  s |> String.split_on_char ' ' |> List.filter (fun w -> not (String.equal w ""))
+
+let extract_duplicate_type_parameter_owner msg =
+  match split_words msg with
+  | [ "duplicate"; "type"; "parameter"; _param; "in"; ("alias" | "definition"); owner ] ->
+      Some owner
+  | _ -> None
+
+let extract_error_symbol_name msg =
+  match drop_prefix "definition " msg with
+  | Some rest -> take_until_colon rest
+  | None -> (
+      match drop_prefix "duplicate definition: " msg with
+      | Some name -> Some name
+      | None -> (
+          match drop_prefix "definition shadows builtin: " msg with
+          | Some name -> Some name
+          | None -> (
+              match drop_prefix "type alias shadows builtin type: " msg with
+              | Some name -> Some name
+              | None -> (
+                  match drop_prefix "duplicate type alias: " msg with
+                  | Some name -> Some name
+                  | None -> (
+                      match
+                        drop_prefix
+                          "recursive type alias must be guarded by a Variant constructor: "
+                          msg
+                      with
+                      | Some name -> Some name
+                      | None -> (
+                          match drop_prefix "cyclic type alias: " msg with
+                          | Some rest -> take_until_space rest
+                          | None -> (
+                              match drop_prefix "type alias " msg with
+                              | Some rest -> take_until_space rest
+                              | None -> (
+                                  match drop_prefix "unknown recursive type alias: " msg with
+                                  | Some name -> Some name
+                                  | None -> extract_duplicate_type_parameter_owner msg))))))))
+
+let is_duplicate_symbol_error msg =
+  has_prefix "duplicate definition: " msg || has_prefix "duplicate type alias: " msg
+
+let locate_source_error path source msg =
+  match extract_error_symbol_name msg with
+  | Some name -> (
+      let loc =
+        if is_duplicate_symbol_error msg then symbol_location_last path source name
+        else symbol_location path source name
+      in
+      match loc with Some loc -> loc ^ ": " ^ msg | None -> locate path msg)
+  | None -> locate path msg
 
 let locate_kernel_error locations fallback_path msg =
-  match extract_error_def_name msg with
+  match extract_error_symbol_name msg with
   | Some name -> (
       match List.find_opt (fun (n, _) -> String.equal n name) locations with
       | Some (_, loc) -> loc ^ ": " ^ msg
@@ -277,7 +385,7 @@ let rec load_file_with_locations ?(stack = []) path =
   let source = try read_file path with Sys_error msg -> fail (locate path msg) in
   let parsed =
     try Parser.parse_string source with
-    | Parser.Error msg -> fail (locate path msg)
+    | Parser.Error msg -> fail (locate_source_error path source msg)
   in
   let base = dirname path in
   let imported, direct_imports =
@@ -303,7 +411,9 @@ let rec load_file_with_locations ?(stack = []) path =
   let local = local_symbols parsed in
   {
     program;
-    locations = imported.locations @ def_locations path source parsed.defs;
+    locations =
+      imported.locations @ def_locations path source parsed.defs
+      @ type_alias_locations path source parsed.type_aliases;
     public_symbols = public_symbols parsed;
     all_symbols = sort_uniq (imported.all_symbols @ local);
   }
