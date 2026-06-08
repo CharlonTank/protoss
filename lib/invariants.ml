@@ -43,10 +43,28 @@ type package_result = {
   lock_hash : string;
   build_id : string;
   store : string;
+  interface_hash : string;
+  interface_exports : int;
+  interface_type_hashes : int;
   imported_packages : int;
 }
 
 let fail = Kernel.fail
+
+let json_field name obj =
+  match Json.field name obj with
+  | Some value -> value
+  | None -> fail ("package invariant missing JSON field: " ^ name)
+
+let json_string_field name obj =
+  match Json.string (json_field name obj) with
+  | Some value -> value
+  | None -> fail ("package invariant JSON field must be string: " ^ name)
+
+let json_array_field name obj =
+  match Json.array (json_field name obj) with
+  | Some value -> value
+  | None -> fail ("package invariant JSON field must be array: " ^ name)
 
 let validate_checked source checked =
   let canonical = Kernel.serialize_checked_program checked in
@@ -205,13 +223,46 @@ let check_package project =
      ^ package.lock_hash);
   if not (String.equal "Audit OK\n" (Workspace.audit manifest)) then
     fail ("package invariant audit failed: " ^ root);
+  let interface =
+    try Json.parse (Workspace.package_interface_json manifest)
+    with Json.Error msg -> fail ("package invariant interface JSON invalid: " ^ msg)
+  in
+  let require_field name expected =
+    let actual = json_string_field name interface in
+    if not (String.equal expected actual) then
+      fail
+        ("package invariant interface " ^ name ^ " mismatch: expected " ^ expected ^ ", got "
+       ^ actual)
+  in
+  require_field "format" "protoss-package-interface-v1";
+  require_field "packageRef" package.package_ref;
+  require_field "lockHash" package.lock_hash;
+  require_field "buildId" package.build_id;
+  let interface_hash = json_string_field "interfaceHash" interface in
+  let exports = json_array_field "exports" interface in
+  let validated_type_hashes =
+    exports
+    |> List.fold_left
+         (fun count export ->
+           let name = json_string_field "name" export in
+           let canonical = json_string_field "typeCanonical" export in
+           let type_hash = json_string_field "typeHash" export in
+           if not (String.equal type_hash (Kernel.hash_string canonical)) then
+             fail ("package invariant interface type hash mismatch: " ^ name);
+           count + 1)
+         0
+  in
+  let imports = json_array_field "imports" interface in
   {
     project = root;
     package_ref = package.package_ref;
     lock_hash = package.lock_hash;
     build_id = package.build_id;
     store = package.store;
-    imported_packages = List.length (Workspace.package_imports manifest);
+    interface_hash;
+    interface_exports = List.length exports;
+    interface_type_hashes = validated_type_hashes;
+    imported_packages = List.length imports;
   }
 
 let describe_file (result : file_result) =
@@ -244,5 +295,8 @@ let describe_ledger (result : ledger_result) =
 let describe_package (result : package_result) =
   "Invariants OK\nkind=package\nproject=" ^ result.project ^ "\npackage_ref="
   ^ result.package_ref ^ "\nlock_hash=" ^ result.lock_hash ^ "\nbuild_id="
-  ^ result.build_id ^ "\nstore=" ^ result.store ^ "\nimported_packages="
+  ^ result.build_id ^ "\nstore=" ^ result.store ^ "\ninterface_hash="
+  ^ result.interface_hash ^ "\ninterface_exports="
+  ^ string_of_int result.interface_exports ^ "\ninterface_type_hashes="
+  ^ string_of_int result.interface_type_hashes ^ "\nimported_packages="
   ^ string_of_int result.imported_packages ^ "\n"

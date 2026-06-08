@@ -1731,6 +1731,14 @@ let () =
     (json_string_field "typeHash" public_box_export);
   assert_equal "project package interface json deterministic" package_interface_json
     (Workspace.package_interface_json manifest_a);
+  let package_invariants = Invariants.check_package ws_a in
+  assert_equal "package invariant interface hash" interface_hash
+    package_invariants.Invariants.interface_hash;
+  assert_true "package invariant counts interface exports"
+    (package_invariants.Invariants.interface_exports > 0);
+  assert_equal "package invariant validates all interface type hashes"
+    (string_of_int package_invariants.Invariants.interface_exports)
+    (string_of_int package_invariants.Invariants.interface_type_hashes);
   assert_equal "project package audit" "Audit OK\n" (Workspace.audit manifest_a);
   let package_again = Workspace.write_package manifest_a in
   assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
@@ -1802,6 +1810,11 @@ let () =
     consumer_package_invariants.Invariants.package_ref;
   assert_equal "package invariant imported count" "1"
     (string_of_int consumer_package_invariants.Invariants.imported_packages);
+  assert_true "package invariant imported interface exports"
+    (consumer_package_invariants.Invariants.interface_exports > 0);
+  assert_equal "package invariant imported type hash count"
+    (string_of_int consumer_package_invariants.Invariants.interface_exports)
+    (string_of_int consumer_package_invariants.Invariants.interface_type_hashes);
   let import_math_path = Filename.concat ws_a "src/math.protoss" in
   let import_math_before = Store.read_file import_math_path in
   let consumer_dot_before_import_drift = snapshot (Filename.concat consumer_ws ".protoss") in

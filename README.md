@@ -29,7 +29,7 @@ What works now:
 - `Process` supports `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`, and `ServerRequest` request payloads. Capabilities are checked against the kernel catalog and exported with typed request/response signatures. Typed resume rejects wrong response tags.
 - Ledger commands support inspect, replay, and diff over deterministic WorldRefs/EventRefs. Request events record and validate `capability`, `request-tag`, `request-payload-type`, `response-type`, request/continuation ids, suspended request payload, and `cap-scope` before insertion and during inspection. Resume events record `response-type` and validate the typed host response against the suspended request before insertion and during inspection.
 - `invariants` runs executable checks over canonicalization, graph round-trip, graph-first loading, normalization, alpha-stability, typed `Process` resume, and typed ledger request/resume events.
-- `invariants package <project>` checks package lock consistency, package descriptor freshness, imported package freshness, package refs, and audit.
+- `invariants package <project>` checks package lock consistency, package descriptor freshness, package interface JSON, exported canonical type hashes, imported package freshness, package refs, and audit.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 
 Main commands:
