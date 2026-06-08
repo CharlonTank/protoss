@@ -118,6 +118,22 @@ let request_signature_of_req req =
 
 let type_text typ = Ast.string_of_typ typ
 
+let kernel_request_signature signature =
+  {
+    Kernel.request_tag = signature.tag;
+    request_payload_type = signature.payload_type;
+    response_type = signature.response_type;
+  }
+
+let capability_ref signature =
+  match Kernel.capability_ref signature.capability with
+  | Some ref -> ref
+  | None -> failwith ("unknown capability: " ^ signature.capability)
+
+let request_signature_ref signature =
+  Kernel.capability_request_signature_ref signature.capability
+    (kernel_request_signature signature)
+
 let validate_request_signature_fields event fields request =
   let signature =
     match request_payload_signature request with
@@ -137,7 +153,9 @@ let validate_request_signature_fields event fields request =
     | None -> failwith ("maltyped event " ^ event ^ ": missing " ^ name)
   in
   require_equal "capability" signature.capability;
+  require_equal "capability-ref" (capability_ref signature);
   require_equal "request-tag" signature.tag;
+  require_equal "request-signature-ref" (request_signature_ref signature);
   require_equal "request-payload-type" (type_text signature.payload_type);
   require_equal "response-type" (type_text signature.response_type);
   signature
@@ -193,7 +211,9 @@ let record_request root world req suspended request_id continuation_id cap_scope
   ignore (init root);
   add_event root world
     ("kind=request\nrequest-id=" ^ request_id ^ "\nrequest=" ^ request_payload req
-   ^ "\ncapability=" ^ signature.capability ^ "\nrequest-tag=" ^ signature.tag
+   ^ "\ncapability=" ^ signature.capability ^ "\ncapability-ref="
+   ^ capability_ref signature ^ "\nrequest-tag=" ^ signature.tag
+   ^ "\nrequest-signature-ref=" ^ request_signature_ref signature
    ^ "\nrequest-payload-type=" ^ type_text signature.payload_type
    ^ "\nresponse-type=" ^ type_text signature.response_type
    ^ "\ncontinuation-id=" ^ continuation_id ^ "\ncap-scope="
@@ -269,12 +289,13 @@ let validate_resume_response root event resume response =
     failwith ("maltyped event " ^ event ^ ": suspended continuation-id mismatch");
   (try ignore (Runtime.response_value suspended.Runtime.req response)
    with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": invalid response: " ^ msg));
-  type_text signature.response_type
+  (type_text signature.response_type, request_signature_ref signature)
 
 let record_resume root world event response result =
-  let response_type = validate_resume_response root "<new>" event response in
+  let response_type, signature_ref = validate_resume_response root "<new>" event response in
   add_event root world
-    ("kind=resume\nresume=" ^ event ^ "\nresponse-type=" ^ response_type ^ "\nresponse="
+    ("kind=resume\nresume=" ^ event ^ "\nrequest-signature-ref=" ^ signature_ref
+   ^ "\nresponse-type=" ^ response_type ^ "\nresponse="
    ^ String.escaped response ^ "\nresult=" ^ String.escaped result)
 
 let validate_event root event content =
@@ -293,7 +314,9 @@ let validate_event root event content =
           "request-id";
           "request";
           "capability";
+          "capability-ref";
           "request-tag";
+          "request-signature-ref";
           "request-payload-type";
           "response-type";
           "continuation-id";
@@ -333,17 +356,24 @@ let validate_event root event content =
            ^ Runtime.continuation_id suspended ^ ", got " ^ continuation_id)
       | None -> assert false)
   | Some "resume" ->
-      List.iter need [ "resume"; "response"; "result" ];
+      List.iter need [ "resume"; "request-signature-ref"; "response-type"; "response"; "result" ];
       let resume = Option.value (field "resume" fields) ~default:"" in
       let response = Option.value (field "response" fields) ~default:"" |> Scanf.unescaped in
-      let response_type = validate_resume_response root event resume response in
+      let response_type, signature_ref = validate_resume_response root event resume response in
       (match field "response-type" fields with
-      | None -> ()
       | Some declared when String.equal declared response_type -> ()
       | Some declared ->
           failwith
             ("maltyped event " ^ event ^ ": response-type mismatch: expected "
-           ^ response_type ^ ", got " ^ declared))
+           ^ response_type ^ ", got " ^ declared)
+      | None -> assert false);
+      (match field "request-signature-ref" fields with
+      | Some declared when String.equal declared signature_ref -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": request-signature-ref mismatch: expected "
+           ^ signature_ref ^ ", got " ^ declared)
+      | None -> assert false)
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
   fields

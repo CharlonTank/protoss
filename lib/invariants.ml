@@ -32,7 +32,9 @@ type ledger_result = {
   request_id : string;
   continuation_id : string;
   capability : string;
+  capability_ref : string;
   request_tag : string;
+  request_signature_ref : string;
   response_type : string;
   result : string;
 }
@@ -194,7 +196,9 @@ let check_ledger_process_checked ?ledger source checked entry response =
         request_id = Runtime.request_id suspended;
         continuation_id = Runtime.continuation_id suspended;
         capability = field "capability";
+        capability_ref = field "capability-ref";
         request_tag = field "request-tag";
+        request_signature_ref = field "request-signature-ref";
         response_type = field "response-type";
         result = result_text;
       }
@@ -302,8 +306,10 @@ let describe_ledger (result : ledger_result) =
   ^ result.program_hash ^ "\nrequest_event=" ^ result.request_event
   ^ "\nresume_event=" ^ result.resume_event ^ "\nrequest_id="
   ^ result.request_id ^ "\ncontinuation_id=" ^ result.continuation_id
-  ^ "\ncapability=" ^ result.capability ^ "\nrequest_tag="
-  ^ result.request_tag ^ "\nresponse_type=" ^ result.response_type
+  ^ "\ncapability=" ^ result.capability ^ "\ncapability_ref="
+  ^ result.capability_ref ^ "\nrequest_tag=" ^ result.request_tag
+  ^ "\nrequest_signature_ref=" ^ result.request_signature_ref
+  ^ "\nresponse_type=" ^ result.response_type
   ^ "\nresult=" ^ result.result ^ "\n"
 
 let describe_package (result : package_result) =

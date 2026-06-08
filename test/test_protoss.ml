@@ -1097,11 +1097,21 @@ let () =
   let process_descriptors = json_array_field "capabilityDescriptors" process_graph in
   assert_true "process graph capability descriptor count" (List.length process_descriptors = 1);
   let human_descriptor = List.hd process_descriptors in
+  let human_capability_ref =
+    match Kernel.req_capability_ref (Ast.AskHuman "") with
+    | Some ref -> ref
+    | None -> fail "missing Human.ask capability ref"
+  in
+  let human_signature_ref = Kernel.req_signature_ref (Ast.AskHuman "") in
+  assert_equal "process graph capability descriptor ref" human_capability_ref
+    (json_string_field "ref" human_descriptor);
   assert_equal "process graph capability descriptor name" "Human.ask"
     (json_string_field "name" human_descriptor);
   let human_requests = json_array_field "requests" human_descriptor in
   assert_true "process graph capability request count" (List.length human_requests = 1);
   let ask_request = List.hd human_requests in
+  assert_equal "process graph request signature ref" human_signature_ref
+    (json_string_field "ref" ask_request);
   assert_equal "process graph request tag" "AskHuman" (json_string_field "tag" ask_request);
   assert_equal "process graph response type" "String"
     (json_string_field "tag" (json_field "responseType" ask_request));
@@ -1228,8 +1238,12 @@ let () =
     ledger_invariants.Invariants.result;
   assert_equal "invariants ledger capability" "Human.ask"
     ledger_invariants.Invariants.capability;
+  assert_equal "invariants ledger capability ref" human_capability_ref
+    ledger_invariants.Invariants.capability_ref;
   assert_equal "invariants ledger request tag" "AskHuman"
     ledger_invariants.Invariants.request_tag;
+  assert_equal "invariants ledger request signature ref" human_signature_ref
+    ledger_invariants.Invariants.request_signature_ref;
   assert_equal "invariants ledger response type" "String"
     ledger_invariants.Invariants.response_type;
   let process_graph_dir = temp_dir "invariants-process-graph" in
@@ -1730,9 +1744,14 @@ let () =
   assert_true "project package interface json capability descriptor count"
     (List.length package_capability_descriptors = 1);
   let package_capability_descriptor = List.hd package_capability_descriptors in
+  assert_equal "project package interface json capability descriptor ref"
+    human_capability_ref
+    (json_string_field "ref" package_capability_descriptor);
   assert_equal "project package interface json capability descriptor name" "Human.ask"
     (json_string_field "name" package_capability_descriptor);
   let package_capability_requests = json_array_field "requests" package_capability_descriptor in
+  assert_equal "project package interface json capability request ref" human_signature_ref
+    (json_string_field "ref" (List.hd package_capability_requests));
   assert_equal "project package interface json capability request tag" "AskHuman"
     (json_string_field "tag" (List.hd package_capability_requests));
   let package_interface_exports = json_array_field "exports" package_interface_obj in
@@ -2222,10 +2241,21 @@ let () =
   let web_capability_descriptors = json_array_field "capabilityDescriptors" web_capabilities in
   assert_true "web capability descriptor count" (List.length web_capability_descriptors = 1);
   let local_storage_descriptor = List.hd web_capability_descriptors in
+  let local_storage_ref =
+    match Kernel.capability_ref "Local.storage" with
+    | Some ref -> ref
+    | None -> fail "missing Local.storage capability ref"
+  in
+  assert_equal "web capability descriptor ref" local_storage_ref
+    (json_string_field "ref" local_storage_descriptor);
   assert_equal "web capability descriptor name" "Local.storage"
     (json_string_field "name" local_storage_descriptor);
-  assert_true "web capability request signatures"
-    (List.length (json_array_field "requests" local_storage_descriptor) = 2);
+  let local_storage_requests = json_array_field "requests" local_storage_descriptor in
+  assert_true "web capability request signatures" (List.length local_storage_requests = 2);
+  assert_true "web capability request refs"
+    (List.for_all
+       (fun request -> contains_substring (json_string_field "ref" request) "p2:")
+       local_storage_requests);
   let web_dist_b = temp_dir "web-dist-b" in
   ignore (Web.build ~out:web_dist_b todo);
   List.iter
@@ -2331,8 +2361,12 @@ let () =
   let inspected_request_event = Ledger.inspect_event ledger_root event in
   assert_true "ledger request records capability signature"
     (contains_substring inspected_request_event "capability=Human.ask");
+  assert_true "ledger request records capability ref"
+    (contains_substring inspected_request_event ("capability-ref=" ^ human_capability_ref));
   assert_true "ledger request records request tag"
     (contains_substring inspected_request_event "request-tag=AskHuman");
+  assert_true "ledger request records signature ref"
+    (contains_substring inspected_request_event ("request-signature-ref=" ^ human_signature_ref));
   assert_true "ledger request records response type"
     (contains_substring inspected_request_event "response-type=String");
   assert_true "ledger world inspectable" (String.length (Ledger.inspect_world ledger_root next_world) > 0);
@@ -2343,8 +2377,19 @@ let () =
     (String.length (Ledger.inspect_event ledger_root resume_event) > 0);
   assert_true "ledger resume records response type"
     (contains_substring (Ledger.inspect_event ledger_root resume_event) "response-type=String");
+  assert_true "ledger resume records signature ref"
+    (contains_substring (Ledger.inspect_event ledger_root resume_event)
+       ("request-signature-ref=" ^ human_signature_ref));
   assert_true "ledger resume world inspectable"
     (String.length (Ledger.inspect_world ledger_root resume_world) > 0);
+  let bad_resume_signature_ref_event = "p2:bad-resume-signature-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_signature_ref_event)
+    ("world=x\nkind=resume\nresume=" ^ event
+   ^ "\nrequest-signature-ref=p2:bad\nresponse-type=String\nresponse=String:Ada\nresult=Done \"Ada\"\n");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_resume_signature_ref_event);
+     fail "ledger resume event with bad signature ref should be rejected"
+   with Failure _ -> ());
   let before_bad_resume = snapshot ledger_root in
   (try
      ignore (Ledger.record_resume ledger_root next_world event "Nat:1" "bad");
@@ -2399,23 +2444,50 @@ let () =
      ignore (Ledger.inspect_event ledger_root bad_signature_event);
      fail "ledger request event with bad signature should be rejected"
    with Failure _ -> ());
+  let bad_capability_ref_event = "p2:bad-capability-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_capability_ref_event)
+    (replace_once inspected_request_event ("capability-ref=" ^ human_capability_ref)
+       "capability-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_capability_ref_event);
+     fail "ledger request event with bad capability ref should be rejected"
+   with Failure _ -> ());
+  let bad_request_signature_ref_event = "p2:bad-request-signature-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_request_signature_ref_event)
+    (replace_once inspected_request_event ("request-signature-ref=" ^ human_signature_ref)
+       "request-signature-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_request_signature_ref_event);
+     fail "ledger request event with bad request signature ref should be rejected"
+   with Failure _ -> ());
   let bad_resume_event = "p2:bad-resume-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_event)
     ("world=x\nkind=resume\nresume=" ^ event
+   ^ "\nrequest-signature-ref=" ^ human_signature_ref
    ^ "\nresponse-type=String\nresponse=Nat:1\nresult=bad\n");
   (try
      ignore (Ledger.inspect_event ledger_root bad_resume_event);
      fail "ledger resume event with wrong response type should be rejected"
    with Failure _ -> ());
   let mismatched_request_event = "p2:mismatched-request-event" in
+  let http_capability_ref =
+    match Kernel.req_capability_ref (Ast.HttpGet "") with
+    | Some ref -> ref
+    | None -> fail "missing Http.get capability ref"
+  in
+  let http_signature_ref = Kernel.req_signature_ref (Ast.HttpGet "") in
   Store.write_file_atomic (Ledger.event_path ledger_root mismatched_request_event)
     ("world=x\nkind=request\nrequest-id=req\nrequest=HttpGet:https://example.invalid\n\
-      capability=Http.get\nrequest-tag=HttpGet\nrequest-payload-type=(Record (url String))\n\
+      capability=Http.get\ncapability-ref="
+    ^ http_capability_ref
+    ^ "\nrequest-tag=HttpGet\nrequest-signature-ref=" ^ http_signature_ref
+    ^ "\nrequest-payload-type=(Record (url String))\n\
       response-type=String\ncontinuation-id=cont\ncap-scope=Http.get\nsuspended="
     ^ String.escaped suspended ^ "\n");
   let bad_resume_mismatch_event = "p2:bad-resume-mismatch-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_mismatch_event)
     ("world=x\nkind=resume\nresume=" ^ mismatched_request_event
+   ^ "\nrequest-signature-ref=" ^ http_signature_ref
    ^ "\nresponse-type=String\nresponse=String:Ada\nresult=bad\n");
   (try
      ignore (Ledger.inspect_event ledger_root bad_resume_mismatch_event);

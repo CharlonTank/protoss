@@ -159,6 +159,40 @@ let capability_catalog =
 let capability_descriptor name =
   List.find_opt (fun d -> String.equal d.capability_name name) capability_catalog
 
+let capability_request_signature_canonical capability signature =
+  "(capability-request-signature-v1 (capability " ^ Ast.quote capability ^ ") (tag "
+  ^ Ast.quote signature.request_tag ^ ") (payload-type "
+  ^ type_to_canonical signature.request_payload_type ^ ") (response-type "
+  ^ type_to_canonical signature.response_type ^ "))"
+
+let capability_request_signature_ref capability signature =
+  hash_string (capability_request_signature_canonical capability signature)
+
+let capability_descriptor_canonical descriptor =
+  let signatures =
+    descriptor.request_signatures
+    |> List.map (capability_request_signature_canonical descriptor.capability_name)
+    |> List.sort String.compare
+  in
+  "(capability-descriptor-v1 (name " ^ Ast.quote descriptor.capability_name
+  ^ ") (requests " ^ String.concat " " signatures ^ "))"
+
+let capability_descriptor_ref descriptor =
+  hash_string (capability_descriptor_canonical descriptor)
+
+let capability_ref name =
+  capability_descriptor name |> Option.map capability_descriptor_ref
+
+let req_signature_ref req =
+  capability_request_signature_ref (req_capability req)
+    {
+      request_tag = req_tag req;
+      request_payload_type = req_payload_type req;
+      response_type = req_result_type req;
+    }
+
+let req_capability_ref req = capability_ref (req_capability req)
+
 let known_capabilities () =
   capability_catalog |> List.map (fun d -> d.capability_name) |> List.sort String.compare
 
@@ -2034,9 +2068,10 @@ let req_to_graph_json req =
     (json_field "tag" (json_string tag) :: json_field "capability" (json_string (req_capability req))
     :: fields)
 
-let capability_request_to_graph_json req =
+let capability_request_to_graph_json capability req =
   json_obj
     [
+      json_field "ref" (json_string (capability_request_signature_ref capability req));
       json_field "tag" (json_string req.request_tag);
       json_field "payloadType" (type_to_graph_json req.request_payload_type);
       json_field "responseType" (type_to_graph_json req.response_type);
@@ -2045,8 +2080,11 @@ let capability_request_to_graph_json req =
 let capability_descriptor_to_graph_json desc =
   json_obj
     [
+      json_field "ref" (json_string (capability_descriptor_ref desc));
       json_field "name" (json_string desc.capability_name);
-      json_field "requests" (json_array capability_request_to_graph_json desc.request_signatures);
+      json_field "requests"
+        (json_array (capability_request_to_graph_json desc.capability_name)
+           desc.request_signatures);
     ]
 
 let declared_capability_descriptors caps =

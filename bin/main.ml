@@ -185,6 +185,9 @@ let run_checked checked args =
       Printf.printf "Request %s\n" (Protoss.Kernel.req_to_canonical s.req);
       Printf.printf "ContinuationId %s\n" (Protoss.Runtime.continuation_id s);
       Printf.printf "CapScope %s\n" (String.concat "," s.cap_scope);
+      Printf.printf "CapabilityRef %s\n"
+        (Option.value (Protoss.Kernel.req_capability_ref s.req) ~default:"-");
+      Printf.printf "RequestSignatureRef %s\n" (Protoss.Kernel.req_signature_ref s.req);
       Printf.printf "Event %s\n" event;
       Printf.printf "NextWorldRef %s\n" next_world
   | other ->
