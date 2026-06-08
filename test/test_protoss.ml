@@ -1698,6 +1698,9 @@ let () =
     (json_string_field "packageRef" package_interface_obj);
   assert_equal "project package interface json hash" interface_hash
     (json_string_field "interfaceHash" package_interface_obj);
+  let package_interface_contract_hash = json_string_field "contractHash" package_interface_obj in
+  assert_true "project package interface json contract hash"
+    (String.length package_interface_contract_hash > 3);
   let package_interface_exports = json_array_field "exports" package_interface_obj in
   let ask_export =
     match
@@ -1731,9 +1734,26 @@ let () =
     (json_string_field "typeHash" public_box_export);
   assert_equal "project package interface json deterministic" package_interface_json
     (Workspace.package_interface_json manifest_a);
+  let package_interface_file = Filename.concat ws_a "interface.json" in
+  write_file package_interface_file package_interface_json;
+  let package_interface_check = Workspace.check_package_interface_contract manifest_a package_interface_file in
+  assert_true "project package interface check accepts saved contract"
+    (contains_substring package_interface_check "PackageInterfaceCheck OK");
+  assert_true "project package interface check prints contract hash"
+    (contains_substring package_interface_check
+       ("contract_hash=" ^ package_interface_contract_hash));
+  let bad_package_interface_file = Filename.concat ws_a "interface-bad.json" in
+  write_file bad_package_interface_file
+    (replace_once package_interface_json package_interface_contract_hash "p2:bad-contract");
+  (try
+     ignore (Workspace.check_package_interface_contract manifest_a bad_package_interface_file);
+     fail "package interface contract check should reject mismatched contract hash"
+   with Workspace.Error _ -> ());
   let package_invariants = Invariants.check_package ws_a in
   assert_equal "package invariant interface hash" interface_hash
     package_invariants.Invariants.interface_hash;
+  assert_equal "package invariant interface contract hash" package_interface_contract_hash
+    package_invariants.Invariants.interface_contract_hash;
   assert_true "package invariant counts interface exports"
     (package_invariants.Invariants.interface_exports > 0);
   assert_equal "package invariant validates all interface type hashes"
@@ -1810,6 +1830,8 @@ let () =
     consumer_package_invariants.Invariants.package_ref;
   assert_equal "package invariant imported count" "1"
     (string_of_int consumer_package_invariants.Invariants.imported_packages);
+  assert_true "package invariant imported contract hash"
+    (String.length consumer_package_invariants.Invariants.interface_contract_hash > 3);
   assert_true "package invariant imported interface exports"
     (consumer_package_invariants.Invariants.interface_exports > 0);
   assert_equal "package invariant imported type hash count"

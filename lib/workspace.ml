@@ -1239,6 +1239,58 @@ let package_json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
 
 let package_json_array f xs = "[" ^ String.concat ", " (List.map f xs) ^ "]"
 
+let package_interface_export_contract_item = function
+  | PackageDefExport
+      { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
+      lock_item "def"
+        [
+          lock_item "name" [ lock_string export_name ];
+          lock_item "type-canonical" [ lock_string export_type_canonical ];
+          lock_item "type-hash" [ export_type_hash ];
+          lock_string_list "capability-scope" export_capabilities;
+        ]
+  | PackageTypeExport { export_name; export_params; export_type_canonical; export_type_hash } ->
+      lock_item "type"
+        [
+          lock_item "name" [ lock_string export_name ];
+          lock_string_list "params" export_params;
+          lock_item "type-canonical" [ lock_string export_type_canonical ];
+          lock_item "type-hash" [ export_type_hash ];
+        ]
+
+let package_interface_import_contract_item (name, package_ref, lock_hash, interface_hash) =
+  lock_item "import"
+    [
+      lock_item "name" [ lock_string name ];
+      lock_item "package-ref" [ package_ref ];
+      lock_item "lock-hash" [ lock_hash ];
+      lock_item "interface-hash" [ interface_hash ];
+    ]
+
+let package_interface_contract_hash interface =
+  let imports =
+    interface.interface_imports
+    |> List.map package_interface_import_contract_item
+    |> List.sort String.compare
+  in
+  let exports =
+    interface.interface_exports
+    |> List.map package_interface_export_contract_item
+    |> List.sort String.compare
+  in
+  Kernel.hash_string
+    (lock_item "package-interface-contract-v1"
+       [
+         lock_item "package" [ lock_string interface.interface_package ];
+         lock_item "version" [ lock_string interface.interface_package_version ];
+         lock_item "package-ref" [ interface.interface_package_ref ];
+         lock_item "lock-hash" [ interface.interface_lock_hash ];
+         lock_item "build-id" [ interface.interface_build_id ];
+         lock_item "interface-hash" [ interface.interface_hash ];
+         lock_item "imports" imports;
+         lock_item "exports" exports;
+       ])
+
 let package_interface_export_json = function
   | PackageDefExport
       { export_name; export_type_canonical; export_type_hash; export_capabilities } ->
@@ -1288,6 +1340,8 @@ let package_interface_json manifest =
       package_json_field "lockHash" (package_json_string interface.interface_lock_hash);
       package_json_field "buildId" (package_json_string interface.interface_build_id);
       package_json_field "interfaceHash" (package_json_string interface.interface_hash);
+      package_json_field "contractHash"
+        (package_json_string (package_interface_contract_hash interface));
       package_json_field "imports"
         (package_json_array package_interface_import_json interface.interface_imports);
       package_json_field "exports"
@@ -1314,11 +1368,135 @@ let package_interface_text manifest =
        "lock_hash=" ^ interface.interface_lock_hash;
        "build_id=" ^ interface.interface_build_id;
        "interface_hash=" ^ interface.interface_hash;
+       "contract_hash=" ^ package_interface_contract_hash interface;
        "imports=" ^ string_of_int (List.length interface.interface_imports);
      ]
     @ import_lines
     @ (("exports=" ^ string_of_int (List.length exports)) :: exports))
   ^ "\n"
+
+let package_json_field_value name obj =
+  match Json.field name obj with
+  | Some value -> value
+  | None -> fail ("package interface JSON missing field: " ^ name)
+
+let package_json_string_field name obj =
+  match Json.string (package_json_field_value name obj) with
+  | Some value -> value
+  | None -> fail ("package interface JSON field must be string: " ^ name)
+
+let package_json_array_field name obj =
+  match Json.array (package_json_field_value name obj) with
+  | Some values -> values
+  | None -> fail ("package interface JSON field must be array: " ^ name)
+
+let package_json_optional_string_field name obj =
+  match Json.field name obj with
+  | None -> ""
+  | Some value -> (
+      match Json.string value with
+      | Some value -> value
+      | None -> fail ("package interface JSON field must be string: " ^ name))
+
+let package_interface_import_of_json obj =
+  ( package_json_string_field "name" obj,
+    package_json_string_field "packageRef" obj,
+    package_json_string_field "lockHash" obj,
+    package_json_string_field "interfaceHash" obj )
+
+let package_interface_export_of_json obj =
+  let kind = package_json_string_field "kind" obj in
+  let name = package_json_string_field "name" obj in
+  let type_canonical = package_json_string_field "typeCanonical" obj in
+  let type_hash = package_json_string_field "typeHash" obj in
+  if not (String.equal type_hash (Kernel.hash_string type_canonical)) then
+    fail ("package interface JSON type hash mismatch: " ^ name);
+  match kind with
+  | "def" ->
+      let capabilities =
+        package_json_array_field "capabilities" obj
+        |> List.map (function
+             | Json.String value -> value
+             | _ -> fail ("package interface JSON capabilities must be strings: " ^ name))
+      in
+      PackageDefExport
+        {
+          export_name = name;
+          export_type_canonical = type_canonical;
+          export_type_hash = type_hash;
+          export_capabilities = capabilities;
+        }
+  | "type" ->
+      let params =
+        package_json_array_field "params" obj
+        |> List.map (function
+             | Json.String value -> value
+             | _ -> fail ("package interface JSON params must be strings: " ^ name))
+      in
+      PackageTypeExport
+        {
+          export_name = name;
+          export_params = params;
+          export_type_canonical = type_canonical;
+          export_type_hash = type_hash;
+        }
+  | _ -> fail ("package interface JSON export kind unknown: " ^ kind)
+
+let package_interface_of_json path obj =
+  let expect name expected =
+    let actual = package_json_string_field name obj in
+    if not (String.equal actual expected) then
+      fail
+        ("package interface JSON " ^ name ^ " mismatch in " ^ path ^ ": expected " ^ expected
+       ^ ", got " ^ actual)
+  in
+  expect "format" "protoss-package-interface-v1";
+  expect "canonicalVersion" Kernel.canonical_version;
+  expect "canonicalGraphVersion" Kernel.canonical_graph_version;
+  expect "canonicalNodeGraphVersion" Kernel.canonical_node_graph_version;
+  expect "hashAlgorithm" Kernel.hash_algorithm;
+  expect "hashPrefix" Kernel.hash_prefix;
+  let interface =
+    {
+      interface_project = package_json_optional_string_field "project" obj;
+      interface_package = package_json_string_field "package" obj;
+      interface_package_version = package_json_string_field "packageVersion" obj;
+      interface_package_ref = package_json_string_field "packageRef" obj;
+      interface_lock_hash = package_json_string_field "lockHash" obj;
+      interface_build_id = package_json_string_field "buildId" obj;
+      interface_hash = package_json_string_field "interfaceHash" obj;
+      interface_imports =
+        package_json_array_field "imports" obj |> List.map package_interface_import_of_json;
+      interface_exports =
+        package_json_array_field "exports" obj |> List.map package_interface_export_of_json;
+    }
+  in
+  let expected_contract = package_json_string_field "contractHash" obj in
+  let actual_contract = package_interface_contract_hash interface in
+  if not (String.equal expected_contract actual_contract) then
+    fail
+      ("package interface JSON contractHash mismatch in " ^ path ^ ": expected "
+     ^ expected_contract ^ ", got " ^ actual_contract);
+  interface
+
+let parse_package_interface_json path content =
+  try package_interface_of_json path (Json.parse content)
+  with Json.Error msg -> fail ("invalid package interface JSON " ^ path ^ ": " ^ msg)
+
+let check_package_interface_contract manifest expected_path =
+  let current = read_package_interface manifest in
+  let expected = parse_package_interface_json expected_path (read_file expected_path) in
+  let current_hash = package_interface_contract_hash current in
+  let expected_hash = package_interface_contract_hash expected in
+  if not (String.equal current_hash expected_hash) then
+    fail
+      ("package interface contract mismatch: expected " ^ expected_hash ^ ", current "
+     ^ current_hash);
+  "PackageInterfaceCheck OK\npackage=" ^ current.interface_package ^ "\npackage_ref="
+  ^ current.interface_package_ref ^ "\ninterface_hash=" ^ current.interface_hash
+  ^ "\ncontract_hash=" ^ current_hash ^ "\nexports="
+  ^ string_of_int (List.length current.interface_exports) ^ "\nimports="
+  ^ string_of_int (List.length current.interface_imports) ^ "\n"
 
 let stats_to_string stats =
   "parsed=" ^ string_of_int stats.parsed ^ "\nreused=" ^ string_of_int stats.reused

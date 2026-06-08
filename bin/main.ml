@@ -12,7 +12,7 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
-     \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check|--json]\n\
+     \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check [interface.json]|--json]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json>\n\
      \       protoss patch from-diff <store-a> <store-b>\n\
@@ -371,11 +371,29 @@ let command_project_package args =
       result.Protoss.Workspace.package_ref result.package_path result.lock_hash result.build_id
       result.store
 
+let parse_project_interface_args args =
+  let rec loop json check paths = function
+    | [] -> (json, check, List.rev paths)
+    | "--json" :: rest -> loop true check paths rest
+    | "--check" :: file :: rest -> loop json (Some file) paths rest
+    | x :: _ when is_flag x -> usage ()
+    | x :: rest -> loop json check (x :: paths) rest
+  in
+  match loop false None [] args with
+  | true, Some _, _ -> usage ()
+  | json, check, [] -> (json, check, ".")
+  | json, check, [ root ] -> (json, check, root)
+  | _ -> usage ()
+
 let command_project_interface args =
-  let root = project_arg args in
+  let json, check, root = parse_project_interface_args args in
   let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
-  if has_flag "--json" args then print_string (Protoss.Workspace.package_interface_json manifest)
-  else print_string (Protoss.Workspace.package_interface_text manifest)
+  match check with
+  | Some expected ->
+      print_string (Protoss.Workspace.check_package_interface_contract manifest expected)
+  | None ->
+      if json then print_string (Protoss.Workspace.package_interface_json manifest)
+      else print_string (Protoss.Workspace.package_interface_text manifest)
 
 let command_project = function
   | "init" :: args ->

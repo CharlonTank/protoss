@@ -44,6 +44,7 @@ type package_result = {
   build_id : string;
   store : string;
   interface_hash : string;
+  interface_contract_hash : string;
   interface_exports : int;
   interface_type_hashes : int;
   imported_packages : int;
@@ -224,7 +225,9 @@ let check_package project =
   if not (String.equal "Audit OK\n" (Workspace.audit manifest)) then
     fail ("package invariant audit failed: " ^ root);
   let interface =
-    try Json.parse (Workspace.package_interface_json manifest)
+    let source = Workspace.package_interface_json manifest in
+    ignore (Workspace.parse_package_interface_json "<current package interface>" source);
+    try Json.parse source
     with Json.Error msg -> fail ("package invariant interface JSON invalid: " ^ msg)
   in
   let require_field name expected =
@@ -239,6 +242,7 @@ let check_package project =
   require_field "lockHash" package.lock_hash;
   require_field "buildId" package.build_id;
   let interface_hash = json_string_field "interfaceHash" interface in
+  let interface_contract_hash = json_string_field "contractHash" interface in
   let exports = json_array_field "exports" interface in
   let validated_type_hashes =
     exports
@@ -260,6 +264,7 @@ let check_package project =
     build_id = package.build_id;
     store = package.store;
     interface_hash;
+    interface_contract_hash;
     interface_exports = List.length exports;
     interface_type_hashes = validated_type_hashes;
     imported_packages = List.length imports;
@@ -296,7 +301,8 @@ let describe_package (result : package_result) =
   "Invariants OK\nkind=package\nproject=" ^ result.project ^ "\npackage_ref="
   ^ result.package_ref ^ "\nlock_hash=" ^ result.lock_hash ^ "\nbuild_id="
   ^ result.build_id ^ "\nstore=" ^ result.store ^ "\ninterface_hash="
-  ^ result.interface_hash ^ "\ninterface_exports="
+  ^ result.interface_hash ^ "\ninterface_contract_hash="
+  ^ result.interface_contract_hash ^ "\ninterface_exports="
   ^ string_of_int result.interface_exports ^ "\ninterface_type_hashes="
   ^ string_of_int result.interface_type_hashes ^ "\nimported_packages="
   ^ string_of_int result.imported_packages ^ "\n"
