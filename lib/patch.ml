@@ -8,6 +8,11 @@ let option_or_fail msg = function Some x -> x | None -> fail msg
 
 type op = AddDef | ReplaceDef | DeleteDef | RenameDef
 
+type embedded_sources = {
+  type_source : string option;
+  expr_source : string option;
+}
+
 type t = {
   op : op;
   name : string;
@@ -15,6 +20,7 @@ type t = {
   def : def option;
   capabilities : string list;
   dependencies : string list;
+  sources : embedded_sources;
 }
 
 type checked_change = {
@@ -49,6 +55,8 @@ let op_to_string = function
 
 let patch_context index patch =
   "patch op #" ^ string_of_int index ^ " " ^ op_to_string patch.op ^ " " ^ patch.name
+
+let no_sources = { type_source = None; expr_source = None }
 
 let partial_context index ?op ?name () =
   "patch op #" ^ string_of_int index
@@ -179,6 +187,10 @@ let rec expr_sexp_of_json = function
   | Json.Object [ ("done", e) ] -> Sexp.List [ Sexp.Atom "done"; expr_sexp_of_json e ]
   | _ -> fail "invalid structural expr JSON"
 
+let embedded_source = function
+  | Json.Object [ ("source", Json.String s) ] -> Some s
+  | _ -> None
+
 let parse_one_json ?(index = 1) obj =
   let op =
     with_context (partial_context index ()) (fun () ->
@@ -204,18 +216,33 @@ let parse_one_json ?(index = 1) obj =
   let def =
     match op with
     | AddDef | ReplaceDef ->
+        let type_json =
+          with_context (context ^ " field type") (fun () -> json_field "type" obj)
+        in
+        let expr_json =
+          with_context (context ^ " field expr") (fun () -> json_field "expr" obj)
+        in
         let typ =
           with_context (context ^ " field type") (fun () ->
-              try Parser.parse_type (type_sexp_of_json (json_field "type" obj)) with
+              try Parser.parse_type (type_sexp_of_json type_json) with
               | Parser.Error msg -> fail ("invalid patch type: " ^ msg))
         in
         let body =
           with_context (context ^ " field expr") (fun () ->
-              try Parser.parse_expr (expr_sexp_of_json (json_field "expr" obj)) with
+              try Parser.parse_expr (expr_sexp_of_json expr_json) with
               | Parser.Error msg -> fail ("invalid patch expr: " ^ msg))
         in
         Some { name; type_params = []; declared_capabilities = None; typ; body }
     | DeleteDef | RenameDef -> None
+  in
+  let sources =
+    match op with
+    | AddDef | ReplaceDef ->
+        {
+          type_source = embedded_source (json_field "type" obj);
+          expr_source = embedded_source (json_field "expr" obj);
+        }
+    | DeleteDef | RenameDef -> no_sources
   in
   let capabilities =
     with_context (context ^ " field capabilities") (fun () ->
@@ -234,7 +261,7 @@ let parse_one_json ?(index = 1) obj =
   let dependencies =
     with_context (context ^ " field deps") (fun () -> json_string_array_field "deps" obj)
   in
-  { op; name; new_name; def; capabilities; dependencies }
+  { op; name; new_name; def; capabilities; dependencies; sources }
 
 let parse_json input =
   let obj =
@@ -362,6 +389,105 @@ let merge_defs (patch : t) (defs : def list) =
 let fail_for_patch patch_path index patch msg =
   fail_in (locate patch_path (patch_context index patch)) msg
 
+let source_line_col source offset =
+  let limit = min (max 0 offset) (String.length source) in
+  let line = ref 1 and col = ref 1 in
+  for i = 0 to limit - 1 do
+    if source.[i] = '\n' then (
+      incr line;
+      col := 1)
+    else incr col
+  done;
+  (!line, !col)
+
+let find_all_substrings haystack needle =
+  let haystack_len = String.length haystack and needle_len = String.length needle in
+  if needle_len = 0 then []
+  else
+    let rec loop i acc =
+      if i + needle_len > haystack_len then List.rev acc
+      else if String.sub haystack i needle_len = needle then loop (i + 1) (i :: acc)
+      else loop (i + 1) acc
+    in
+    loop 0 []
+
+let expression_candidates msg =
+  let marker = ", expression " in
+  let marker_len = String.length marker in
+  match find_all_substrings msg marker with
+  | [] -> []
+  | offsets ->
+      offsets
+      |> List.mapi (fun index offset ->
+             let start = offset + marker_len in
+             let stop =
+               match List.nth_opt offsets (index + 1) with
+               | Some next -> next
+               | None -> String.length msg
+             in
+             String.sub msg start (stop - start) |> String.trim)
+      |> List.filter (fun s -> not (String.equal s ""))
+
+let find_substring source needle =
+  let source_len = String.length source and needle_len = String.length needle in
+  if needle_len = 0 then None
+  else
+    let rec loop i =
+      if i + needle_len > source_len then None
+      else if String.sub source i needle_len = needle then Some i
+      else loop (i + 1)
+    in
+    loop 0
+
+let source_atom_boundary source index =
+  index < 0
+  || index >= String.length source
+  ||
+  match source.[index] with
+  | ' ' | '\t' | '\r' | '\n' | '(' | ')' | ';' | '"' -> true
+  | _ -> false
+
+let is_source_atom s =
+  String.length s > 0
+  && String.for_all
+       (function ' ' | '\t' | '\r' | '\n' | '(' | ')' | ';' | '"' -> false | _ -> true)
+       s
+
+let find_expr_in_source source expr =
+  let expr = String.trim expr in
+  if String.equal expr "" then None
+  else if is_source_atom expr then
+    let len = String.length expr in
+    let rec loop from =
+      match
+        let remaining = String.length source - from in
+        if remaining <= 0 then None
+        else
+          find_substring (String.sub source from remaining) expr
+          |> Option.map (fun offset -> from + offset)
+      with
+      | None -> None
+      | Some offset ->
+          if source_atom_boundary source (offset - 1)
+             && source_atom_boundary source (offset + len)
+          then Some offset
+          else loop (offset + 1)
+    in
+    loop 0
+  else find_substring source expr
+
+let locate_embedded_expr_source patch_path index patch msg =
+  match patch.sources.expr_source with
+  | None -> None
+  | Some source ->
+      expression_candidates msg
+      |> List.find_map (find_expr_in_source source)
+      |> Option.map (fun offset ->
+             let line, col = source_line_col source offset in
+             locate patch_path
+               (patch_context index patch ^ " field expr source " ^ string_of_int line ^ ":"
+              ^ string_of_int col))
+
 let fail_kernel_with_patch_context patch_path changes msg =
   match extract_error_def_name msg with
   | Some name -> (
@@ -371,7 +497,10 @@ let fail_kernel_with_patch_context patch_path changes msg =
                String.equal change.target_name name
                || Option.value ~default:"" change.previous_name = name)
       with
-      | Some change -> fail_for_patch patch_path change.index change.patch msg
+      | Some change -> (
+          match locate_embedded_expr_source patch_path change.index change.patch msg with
+          | Some loc -> fail_in loc msg
+          | None -> fail_for_patch patch_path change.index change.patch msg)
       | None -> fail msg)
   | None -> fail msg
 

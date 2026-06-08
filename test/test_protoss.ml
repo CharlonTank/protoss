@@ -2819,6 +2819,26 @@ let () =
   assert_true "invalid patch must not modify store" (count_objects store = before);
   assert_true "invalid patch must not modify ledger" (count_files ledger = ledger_before);
 
+  let patch_bad_source =
+    patch_file "protoss-bad-source.json"
+      "{ \"op\":\"AddDef\", \"name\":\"badSource\", \"deps\":[], \"type\":\"Nat\", \
+       \"expr\":{\"source\":\"(succ true)\"} }"
+  in
+  let bad_source_before = snapshot store in
+  (try
+     ignore (Patch.apply store patch_bad_source);
+     fail "invalid patch source should be rejected"
+   with Patch.Error msg ->
+     assert_true "invalid patch source points to embedded expression"
+       (contains_substring msg
+          (patch_bad_source ^ ": patch op #1 AddDef badSource field expr source 1:7"));
+     assert_true "invalid patch source keeps kernel definition context"
+       (contains_substring msg "definition badSource"));
+  assert_true "invalid source patch must not modify store"
+    (snapshot store = bad_source_before);
+  assert_true "invalid source patch must not modify ledger"
+    (count_files ledger = ledger_before);
+
   let patch_bad_expr_shape =
     patch_file "protoss-bad-expr-shape.json"
       "{ \"op\":\"AddDef\", \"name\":\"badShape\", \"deps\":[], \"type\":\"Nat\", \
