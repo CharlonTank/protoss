@@ -597,6 +597,14 @@ type build_result = {
   store : string;
 }
 
+type package_result = {
+  package_ref : string;
+  package_path : string;
+  lock_hash : string;
+  build_id : string;
+  store : string;
+}
+
 type prepared_build = {
   units : unit_load list;
   checked : Kernel.checked;
@@ -673,6 +681,10 @@ let build ?(write = true) ?lock_hash manifest =
 
 let lock_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "lock"
 
+let package_current_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "package"
+
+let packages_dir manifest = Filename.concat (Filename.concat manifest.root ".protoss") "packages"
+
 let relative_to_root manifest path =
   let root = realpath_or manifest.root in
   let path = realpath_or path in
@@ -743,10 +755,25 @@ let write_lock manifest =
   write_file path content;
   (path, Kernel.hash_string content)
 
+let write_lock_prepared manifest prepared =
+  let path = lock_path manifest in
+  ensure_dir (Filename.dirname path);
+  let content = lock_content manifest prepared in
+  write_file path content;
+  (path, Kernel.hash_string content)
+
 let check_lock manifest =
   let path = lock_path manifest in
   if not (Sys.file_exists path) then fail ("missing lockfile: " ^ path);
   let expected = lock_content manifest (prepare_build manifest) in
+  let actual = read_file path in
+  if not (String.equal actual expected) then fail ("lockfile out of date: " ^ path);
+  Kernel.hash_string expected
+
+let check_lock_prepared manifest prepared =
+  let path = lock_path manifest in
+  if not (Sys.file_exists path) then fail ("missing lockfile: " ^ path);
+  let expected = lock_content manifest prepared in
   let actual = read_file path in
   if not (String.equal actual expected) then fail ("lockfile out of date: " ^ path);
   Kernel.hash_string expected
@@ -757,6 +784,72 @@ let build_locked ?(write = true) manifest =
 
 let check_project manifest =
   ignore (build ~write:false manifest)
+
+let package_type_item (alias : type_alias) =
+  lock_item "type"
+    [
+      lock_item "name" [ lock_string alias.type_name ];
+      lock_string_list "params" alias.type_params;
+      lock_item "hash" [ Kernel.hash_string (string_of_type_alias alias) ];
+    ]
+
+let package_def_item (d : Kernel.checked_def) =
+  lock_item "def"
+    [
+      lock_item "name" [ lock_string d.def.name ];
+      lock_item "def-id" [ d.def_id ];
+      lock_item "hash" [ Kernel.hash_string d.canonical ];
+      lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+      lock_string_list "capability-scope" d.capabilities;
+    ]
+
+let package_content manifest prepared lock_hash =
+  let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
+  String.concat "\n"
+    [
+      "(protoss-package-v1";
+      "  " ^ lock_item "package" [ lock_string manifest.name ];
+      "  " ^ lock_item "version" [ lock_string manifest.version ];
+      "  " ^ lock_item "canonical-version" [ lock_string Kernel.canonical_version ];
+      "  " ^ lock_item "canonical-graph-version" [ lock_string Kernel.canonical_graph_version ];
+      "  " ^ lock_item "canonical-node-graph-version" [ lock_string Kernel.canonical_node_graph_version ];
+      "  " ^ lock_item "lock-hash" [ lock_hash ];
+      "  " ^ lock_item "program-hash" [ prepared.build_id ];
+      "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
+      "  " ^ lock_item "program-graph-hash" [ Kernel.hash_string prepared.program_graph ];
+      "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
+      "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
+      "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_item "types" (List.map package_type_item prepared.checked.program.type_aliases);
+      "  " ^ lock_item "defs" (List.map package_def_item prepared.checked.defs);
+      "  " ^ lock_item "units" (List.map (unit_lock manifest) units);
+      ")";
+      "";
+    ]
+
+let write_package ?(locked = false) manifest =
+  let prepared = prepare_build manifest in
+  let lock_hash =
+    if locked then check_lock_prepared manifest prepared
+    else snd (write_lock_prepared manifest prepared)
+  in
+  let build_result =
+    if locked then build_locked manifest else build ~lock_hash manifest
+  in
+  let content = package_content manifest prepared lock_hash in
+  let package_ref = Kernel.hash_string content in
+  let dir = packages_dir manifest in
+  ensure_dir dir;
+  let package_path = Filename.concat dir (sanitize_id package_ref ^ ".package") in
+  write_file package_path content;
+  write_file (package_current_path manifest) (package_ref ^ "\n");
+  {
+    package_ref;
+    package_path;
+    lock_hash;
+    build_id = build_result.build_id;
+    store = build_result.store;
+  }
 
 let stats_to_string stats =
   "parsed=" ^ string_of_int stats.parsed ^ "\nreused=" ^ string_of_int stats.reused

@@ -1597,6 +1597,28 @@ let () =
   assert_equal "project lock deterministic path" lock_path lock_path_again;
   assert_equal "project lock deterministic hash" lock_hash lock_hash_again;
   assert_equal "project lock deterministic content" lock_before (Store.read_file lock_path_again);
+  let package_a = Workspace.write_package manifest_a in
+  assert_true "project package writes file" (Sys.file_exists package_a.Workspace.package_path);
+  assert_equal "project package records build" build_a.build_id package_a.build_id;
+  assert_equal "project package records lock hash" lock_hash package_a.lock_hash;
+  assert_equal "project package current pointer" package_a.package_ref
+    (String.trim (Store.read_file (Workspace.package_current_path manifest_a)));
+  let package_content = Store.read_file package_a.package_path in
+  assert_true "project package records version"
+    (contains_substring package_content "protoss-package-v1");
+  assert_true "project package records program hash"
+    (contains_substring package_content build_a.build_id);
+  assert_true "project package records lock hash in content"
+    (contains_substring package_content lock_hash);
+  assert_true "project package records recursive Json type"
+    (contains_substring package_content "(name \"Json\")");
+  let package_again = Workspace.write_package manifest_a in
+  assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
+  assert_equal "project package deterministic path" package_a.package_path package_again.package_path;
+  assert_equal "project package deterministic content" package_content
+    (Store.read_file package_again.package_path);
+  let package_locked = Workspace.write_package ~locked:true manifest_a in
+  assert_equal "project package locked ref" package_a.package_ref package_locked.package_ref;
   let dot_before_drift = snapshot (Filename.concat ws_a ".protoss") in
   let math_path = Filename.concat ws_a "src/math.protoss" in
   let math_before = Store.read_file math_path in
@@ -1604,6 +1626,10 @@ let () =
   (try
      ignore (Workspace.check_lock manifest_a);
      fail "project lock check should reject source drift"
+   with Workspace.Error _ -> ());
+  (try
+     ignore (Workspace.write_package ~locked:true manifest_a);
+     fail "locked package should reject source drift"
    with Workspace.Error _ -> ());
   (try
      ignore (Workspace.build_locked manifest_a);
