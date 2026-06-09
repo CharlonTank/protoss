@@ -943,6 +943,35 @@
 (def jsonRenderedEscaped String
   (Json.render (Json.string "Ada\n\"Lovelace\"\\lab")))
 
+(def jsonLexedObject (Result String (List JsonToken))
+  (Json.lexTokens "{\"name\":\"Ada\",\"age\":41}"))
+
+(def jsonParsedObject (Result String Json)
+  (Json.parseText "{\"name\":\"Ada\",\"age\":41}"))
+
+(def jsonParsedArray (Result String Json)
+  (Json.parseText "[true,null,3]"))
+
+(def jsonParsedNested (Result String Json)
+  (Json.parseText "{\"items\":[{\"ok\":true},null]}"))
+
+(def jsonParsedEscaped (Result String Json)
+  (Json.parseText "\"Ada\\n\\\"Lovelace\\\"\\\\lab\""))
+
+(def jsonParsedBadTrailingComma (Result String Json)
+  (Json.parseText "[1,]"))
+
+(def jsonParsedBadObjectValue (Result String Json)
+  (Json.parseText "{\"a\":}"))
+
+(def jsonParsedBadKeyword (Result String Json)
+  (Json.parseText "truth"))
+
+(def jsonParsedRenderedObject String
+  (case jsonParsedObject
+    (Err err err)
+    (Ok value (Json.render value))))
+
 (def total Nat
   (foldList bumped 0
     (lambda (x Nat)

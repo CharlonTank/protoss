@@ -1,4 +1,4 @@
-; Protoss stdlib v0.42. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.43. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -273,8 +273,40 @@
   (JNull Unit)
   (JObject (Assoc String Json))
   (JString String))
+(variant JsonToken
+  (JTLBrace Unit)
+  (JTRBrace Unit)
+  (JTLBracket Unit)
+  (JTRBracket Unit)
+  (JTColon Unit)
+  (JTComma Unit)
+  (JTNull Unit)
+  (JTBool Bool)
+  (JTNat Nat)
+  (JTString String))
+(variant JsonLexMode
+  (JsonLexDefault Unit)
+  (JsonLexString String)
+  (JsonLexEscape String)
+  (JsonLexNumber Nat)
+  (JsonLexKeyword String))
+(record JsonLexerState
+  (cursor TextCursor)
+  (mode JsonLexMode)
+  (tokens (List JsonToken))
+  (error (Maybe String)))
+(record JsonFrame
+  (kind String)
+  (items (List Json))
+  (fields (Assoc String Json))
+  (pendingKey (Maybe String))
+  (expect String))
+(record JsonParserState
+  (stack (List JsonFrame))
+  (value (Maybe Json))
+  (error (Maybe String)))
 
-(def Stdlib.version String "v0.42")
+(def Stdlib.version String "v0.43")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -437,6 +469,31 @@
 (def String.isDigit (-> String Bool)
   (lambda (ch String)
     ((((inst List.member String) String.eqString) ch) String.digitChars)))
+
+(def String.digitValue (-> String (Maybe Nat))
+  (lambda (ch String)
+    (case ((String.eqString ch) "0")
+      (true (variant Some 0))
+      (false (case ((String.eqString ch) "1")
+        (true (variant Some 1))
+        (false (case ((String.eqString ch) "2")
+          (true (variant Some 2))
+          (false (case ((String.eqString ch) "3")
+            (true (variant Some 3))
+            (false (case ((String.eqString ch) "4")
+              (true (variant Some 4))
+              (false (case ((String.eqString ch) "5")
+                (true (variant Some 5))
+                (false (case ((String.eqString ch) "6")
+                  (true (variant Some 6))
+                  (false (case ((String.eqString ch) "7")
+                    (true (variant Some 7))
+                    (false (case ((String.eqString ch) "8")
+                      (true (variant Some 8))
+                      (false (case ((String.eqString ch) "9")
+                        (true (variant Some 9))
+                        (false (variant None unit)))))))))))))))))))))
+  ))
 
 (def String.isDelimiter (-> String Bool)
   (lambda (ch String)
@@ -5163,6 +5220,541 @@
                   (false ((String.concat current) ((String.concat ",") acc)))))))))
         "}")))
   (JString value (Json.renderString value)))
+
+(def JsonLexerState.make
+  (-> TextCursor (-> JsonLexMode (-> (List JsonToken) (-> (Maybe String) JsonLexerState))))
+  (lambda (cursor TextCursor)
+    (lambda (mode JsonLexMode)
+      (lambda (tokens (List JsonToken))
+        (lambda (error (Maybe String))
+          (record (cursor cursor) (mode mode) (tokens tokens) (error error)))))))
+
+(def JsonLexerState.ok (-> TextCursor (-> JsonLexMode (-> (List JsonToken) JsonLexerState)))
+  (lambda (cursor TextCursor)
+    (lambda (mode JsonLexMode)
+      (lambda (tokens (List JsonToken))
+        ((((JsonLexerState.make cursor) mode) tokens) (variant None unit))))))
+
+(def JsonLexerState.fail (-> String (-> JsonLexerState JsonLexerState))
+  (lambda (message String)
+    (lambda (state JsonLexerState)
+      ((((JsonLexerState.make (get state cursor)) (get state mode)) (get state tokens))
+        (variant Some message)))))
+
+(def JsonLexerState.withMode (-> JsonLexMode (-> JsonLexerState JsonLexerState))
+  (lambda (mode JsonLexMode)
+    (lambda (state JsonLexerState)
+      ((((JsonLexerState.make (get state cursor)) mode) (get state tokens)) (get state error)))))
+
+(def JsonLexerState.advance (-> JsonLexerState JsonLexerState)
+  (lambda (state JsonLexerState)
+    ((((JsonLexerState.make (TextCursor.advance (get state cursor))) (get state mode))
+      (get state tokens))
+      (get state error))))
+
+(def JsonLexerState.addToken (-> JsonToken (-> JsonLexerState JsonLexerState))
+  (lambda (token JsonToken)
+    (lambda (state JsonLexerState)
+      ((((JsonLexerState.make (get state cursor)) (get state mode))
+        (Cons JsonToken token (get state tokens)))
+        (get state error)))))
+
+(def Json.syntaxChars (List String)
+  (Cons String "{"
+    (Cons String "}"
+      (Cons String "["
+        (Cons String "]"
+          (Cons String ":"
+            (Cons String "," (Nil String))))))))
+
+(def Json.isSyntaxChar (-> String Bool)
+  (lambda (ch String)
+    ((((inst List.member String) String.eqString) ch) Json.syntaxChars)))
+
+(def Json.isTokenBoundary (-> String Bool)
+  (lambda (ch String)
+    ((Bool.or (String.isWhitespace ch)) (Json.isSyntaxChar ch))))
+
+(def Json.keywordToken (-> String (Result String JsonToken))
+  (lambda (keyword String)
+    (case ((String.eqString keyword) "true")
+      (true (variant Ok (variant JTBool true)))
+      (false
+        (case ((String.eqString keyword) "false")
+          (true (variant Ok (variant JTBool false)))
+          (false
+            (case ((String.eqString keyword) "null")
+              (true (variant Ok (variant JTNull unit)))
+              (false (variant Err "invalid JSON keyword")))))))))
+
+(def JsonLexerState.addKeyword (-> String (-> JsonLexerState JsonLexerState))
+  (lambda (keyword String)
+    (lambda (state JsonLexerState)
+      (case (Json.keywordToken keyword)
+        (Err err ((JsonLexerState.fail err) state))
+        (Ok token ((JsonLexerState.addToken token) state))))))
+
+(def Json.appendDigit (-> Nat (-> String (Result String Nat)))
+  (lambda (value Nat)
+    (lambda (ch String)
+      (case (String.digitValue ch)
+        (None (variant Err "expected JSON digit"))
+        (Some digit
+          (variant Ok ((Nat.add ((Nat.mul value) 10)) digit)))))))
+
+(def Json.lexDefaultChar (-> JsonLexerState (-> String JsonLexerState))
+  (lambda (state JsonLexerState)
+    (lambda (ch String)
+      (case (String.isWhitespace ch)
+        (true state)
+        (false
+          (case ((String.eqString ch) "{")
+            (true ((JsonLexerState.addToken (variant JTLBrace unit)) state))
+            (false
+              (case ((String.eqString ch) "}")
+                (true ((JsonLexerState.addToken (variant JTRBrace unit)) state))
+                (false
+                  (case ((String.eqString ch) "[")
+                    (true ((JsonLexerState.addToken (variant JTLBracket unit)) state))
+                    (false
+                      (case ((String.eqString ch) "]")
+                        (true ((JsonLexerState.addToken (variant JTRBracket unit)) state))
+                        (false
+                          (case ((String.eqString ch) ":")
+                            (true ((JsonLexerState.addToken (variant JTColon unit)) state))
+                            (false
+                              (case ((String.eqString ch) ",")
+                                (true ((JsonLexerState.addToken (variant JTComma unit)) state))
+                                (false
+                                  (case ((String.eqString ch) "\"")
+                                    (true ((JsonLexerState.withMode (variant JsonLexString "")) state))
+                                    (false
+                                      (case (String.digitValue ch)
+                                        (Some digit
+                                          ((JsonLexerState.withMode (variant JsonLexNumber digit)) state))
+                                        (None
+                                          (case (String.isAtomChar ch)
+                                            (true
+                                              ((JsonLexerState.withMode (variant JsonLexKeyword ch)) state))
+                                            (false
+                                              ((JsonLexerState.fail "unexpected JSON character") state))))))))))))))))))))))))
+
+(def Json.lexNumberChar (-> JsonLexerState (-> Nat (-> String JsonLexerState)))
+  (lambda (state JsonLexerState)
+    (lambda (value Nat)
+      (lambda (ch String)
+        (case (String.digitValue ch)
+          (Some digit
+            (case ((Json.appendDigit value) ch)
+              (Err err ((JsonLexerState.fail err) state))
+              (Ok next ((JsonLexerState.withMode (variant JsonLexNumber next)) state))))
+          (None
+            (case (Json.isTokenBoundary ch)
+              (true
+                ((Json.lexDefaultChar
+                  ((JsonLexerState.addToken (variant JTNat value))
+                    ((JsonLexerState.withMode (variant JsonLexDefault unit)) state)))
+                  ch))
+              (false ((JsonLexerState.fail "invalid JSON number") state)))))))))
+
+(def Json.lexKeywordChar (-> JsonLexerState (-> String (-> String JsonLexerState)))
+  (lambda (state JsonLexerState)
+    (lambda (keyword String)
+      (lambda (ch String)
+        (case (Json.isTokenBoundary ch)
+          (true
+            ((Json.lexDefaultChar
+              ((JsonLexerState.addKeyword keyword)
+                ((JsonLexerState.withMode (variant JsonLexDefault unit)) state)))
+              ch))
+          (false
+            ((JsonLexerState.withMode (variant JsonLexKeyword ((String.concat keyword) ch))) state)))))))
+
+(def Json.lexStringChar (-> JsonLexerState (-> String (-> String JsonLexerState)))
+  (lambda (state JsonLexerState)
+    (lambda (text String)
+      (lambda (ch String)
+        (case ((String.eqString ch) "\"")
+          (true
+            ((JsonLexerState.addToken (variant JTString text))
+              ((JsonLexerState.withMode (variant JsonLexDefault unit)) state)))
+          (false
+            (case ((String.eqString ch) "\\")
+              (true ((JsonLexerState.withMode (variant JsonLexEscape text)) state))
+              (false
+                ((JsonLexerState.withMode (variant JsonLexString ((String.concat text) ch))) state)))))))))
+
+(def Json.lexEscapeChar (-> JsonLexerState (-> String (-> String JsonLexerState)))
+  (lambda (state JsonLexerState)
+    (lambda (text String)
+      (lambda (ch String)
+        (case ((String.eqString ch) "\"")
+          (true ((JsonLexerState.withMode (variant JsonLexString ((String.concat text) "\""))) state))
+          (false
+            (case ((String.eqString ch) "\\")
+              (true ((JsonLexerState.withMode (variant JsonLexString ((String.concat text) "\\"))) state))
+              (false
+                (case ((String.eqString ch) "n")
+                  (true ((JsonLexerState.withMode (variant JsonLexString ((String.concat text) "\n"))) state))
+                  (false
+                    (case ((String.eqString ch) "r")
+                      (true ((JsonLexerState.withMode (variant JsonLexString ((String.concat text) "\r"))) state))
+                      (false
+                        (case ((String.eqString ch) "t")
+                          (true ((JsonLexerState.withMode (variant JsonLexString ((String.concat text) "\t"))) state))
+                          (false ((JsonLexerState.fail "invalid JSON escape") state)))))))))))))))
+
+(def Json.lexStep (-> JsonLexerState (-> String JsonLexerState))
+  (lambda (state JsonLexerState)
+    (lambda (ch String)
+      (case (get state error)
+        (Some message state)
+        (None
+          (case (get state mode)
+            (JsonLexDefault (Json.lexDefaultChar state ch))
+            (JsonLexString text (((Json.lexStringChar state) text) ch))
+            (JsonLexEscape text (((Json.lexEscapeChar state) text) ch))
+            (JsonLexNumber value (((Json.lexNumberChar state) value) ch))
+            (JsonLexKeyword keyword (((Json.lexKeywordChar state) keyword) ch))))))))
+
+(def Json.lexCurrent (-> JsonLexerState JsonLexerState)
+  (lambda (state JsonLexerState)
+    (case (TextCursor.current (get state cursor))
+      (None state)
+      (Some ch (JsonLexerState.advance ((Json.lexStep state) ch))))))
+
+(def Json.lexFinalize (-> JsonLexerState (Result String (List JsonToken)))
+  (lambda (state JsonLexerState)
+    (case (get state error)
+      (Some message (variant Err message))
+      (None
+        (case (get state mode)
+          (JsonLexDefault (variant Ok ((inst List.reverse JsonToken) (get state tokens))))
+          (JsonLexNumber value
+            (variant Ok
+              ((inst List.reverse JsonToken)
+                (Cons JsonToken (variant JTNat value) (get state tokens)))))
+          (JsonLexKeyword keyword
+            (let (next JsonLexerState ((JsonLexerState.addKeyword keyword) state))
+              (case (get next error)
+                (Some err (variant Err err))
+                (None _ (variant Ok ((inst List.reverse JsonToken) (get next tokens)))))))
+          (JsonLexString text (variant Err "unterminated JSON string"))
+          (JsonLexEscape text (variant Err "unterminated JSON escape")))))))
+
+(def Json.lexTokens (-> String (Result String (List JsonToken)))
+  (lambda (source String)
+    (Json.lexFinalize
+      (foldNat (String.length source)
+        (((JsonLexerState.ok (TextCursor.start source)) (variant JsonLexDefault unit)) (Nil JsonToken))
+        (lambda (state JsonLexerState)
+          (Json.lexCurrent state))))))
+
+(def JsonFrame.array JsonFrame
+  (record
+    (kind "array")
+    (items (Nil Json))
+    (fields (inst Assoc.empty String Json))
+    (pendingKey (variant None unit))
+    (expect "array-value-or-end")))
+
+(def JsonFrame.object JsonFrame
+  (record
+    (kind "object")
+    (items (Nil Json))
+    (fields (inst Assoc.empty String Json))
+    (pendingKey (variant None unit))
+    (expect "object-key-or-end")))
+
+(def JsonFrame.withExpect (-> JsonFrame (-> String JsonFrame))
+  (lambda (frame JsonFrame)
+    (lambda (expect String)
+      (record
+        (kind (get frame kind))
+        (items (get frame items))
+        (fields (get frame fields))
+        (pendingKey (get frame pendingKey))
+        (expect expect)))))
+
+(def JsonFrame.addItem (-> JsonFrame (-> Json JsonFrame))
+  (lambda (frame JsonFrame)
+    (lambda (value Json)
+      (record
+        (kind (get frame kind))
+        (items (Cons Json value (get frame items)))
+        (fields (get frame fields))
+        (pendingKey (get frame pendingKey))
+        (expect "array-comma-or-end")))))
+
+(def JsonFrame.setKey (-> JsonFrame (-> String JsonFrame))
+  (lambda (frame JsonFrame)
+    (lambda (key String)
+      (record
+        (kind (get frame kind))
+        (items (get frame items))
+        (fields (get frame fields))
+        (pendingKey (variant Some key))
+        (expect "object-colon")))))
+
+(def JsonFrame.addField (-> JsonFrame (-> String (-> Json JsonFrame)))
+  (lambda (frame JsonFrame)
+    (lambda (key String)
+      (lambda (value Json)
+        (record
+          (kind (get frame kind))
+          (items (get frame items))
+          (fields
+            (Cons (Pair String Json)
+              (record (first key) (second value))
+              (get frame fields)))
+          (pendingKey (variant None unit))
+          (expect "object-comma-or-end"))))))
+
+(def JsonParserState.make
+  (-> (List JsonFrame) (-> (Maybe Json) (-> (Maybe String) JsonParserState)))
+  (lambda (stack (List JsonFrame))
+    (lambda (value (Maybe Json))
+      (lambda (error (Maybe String))
+        (record (stack stack) (value value) (error error))))))
+
+(def JsonParserState.initial JsonParserState
+  (((JsonParserState.make (Nil JsonFrame)) (variant None unit)) (variant None unit)))
+
+(def JsonParserState.fail (-> String (-> JsonParserState JsonParserState))
+  (lambda (message String)
+    (lambda (state JsonParserState)
+      (((JsonParserState.make (get state stack)) (get state value)) (variant Some message)))))
+
+(def JsonParserState.withStack (-> (List JsonFrame) (-> JsonParserState JsonParserState))
+  (lambda (stack (List JsonFrame))
+    (lambda (state JsonParserState)
+      (((JsonParserState.make stack) (get state value)) (get state error)))))
+
+(def JsonParserState.setTopValue (-> Json (-> JsonParserState JsonParserState))
+  (lambda (value Json)
+    (lambda (state JsonParserState)
+      (((JsonParserState.make (Nil JsonFrame)) (variant Some value)) (get state error)))))
+
+(def JsonParserState.canStartValue (-> JsonParserState Bool)
+  (lambda (state JsonParserState)
+    (caseList (get state stack)
+      (Nil
+        (case (get state value)
+          (None _ true)
+          (Some value false)))
+      (Cons frame rest
+        (case ((String.eqString (get frame kind)) "array")
+          (true
+            ((Bool.or ((String.eqString (get frame expect)) "array-value-or-end"))
+              ((String.eqString (get frame expect)) "array-value")))
+          (false
+            (case ((String.eqString (get frame kind)) "object")
+              (true ((String.eqString (get frame expect)) "object-value"))
+              (false false))))))))
+
+(def JsonParserState.pushFrame (-> JsonFrame (-> JsonParserState JsonParserState))
+  (lambda (frame JsonFrame)
+    (lambda (state JsonParserState)
+      (case (JsonParserState.canStartValue state)
+        (true
+          (((JsonParserState.make (Cons JsonFrame frame (get state stack)))
+            (get state value))
+            (get state error)))
+        (false ((JsonParserState.fail "unexpected JSON value") state))))))
+
+(def JsonParserState.emitValue (-> Json (-> JsonParserState JsonParserState))
+  (lambda (value Json)
+    (lambda (state JsonParserState)
+      (case (get state error)
+        (Some message state)
+        (None
+          (caseList (get state stack)
+            (Nil
+              (case (get state value)
+                (None _ ((JsonParserState.setTopValue value) state))
+                (Some old ((JsonParserState.fail "trailing JSON value") state))))
+            (Cons frame rest
+              (case ((String.eqString (get frame kind)) "array")
+                (true
+                  (case
+                    ((Bool.or ((String.eqString (get frame expect)) "array-value-or-end"))
+                      ((String.eqString (get frame expect)) "array-value"))
+                    (true
+                      (((JsonParserState.make
+                        (Cons JsonFrame ((JsonFrame.addItem frame) value) rest))
+                        (get state value))
+                        (get state error)))
+                    (false ((JsonParserState.fail "unexpected JSON value") state))))
+                (false
+                  (case ((String.eqString (get frame kind)) "object")
+                    (true
+                      (case ((String.eqString (get frame expect)) "object-value")
+                        (true
+                          (case (get frame pendingKey)
+                            (None _ ((JsonParserState.fail "missing JSON object key") state))
+                            (Some key
+                              (((JsonParserState.make
+                                (Cons JsonFrame (((JsonFrame.addField frame) key) value) rest))
+                                (get state value))
+                                (get state error)))))
+                        (false ((JsonParserState.fail "unexpected JSON value") state))))
+                    (false ((JsonParserState.fail "invalid JSON parser frame") state))))))))))))
+
+(def JsonParserState.emitString (-> String (-> JsonParserState JsonParserState))
+  (lambda (text String)
+    (lambda (state JsonParserState)
+      (case (get state error)
+        (Some message state)
+        (None
+          (caseList (get state stack)
+            (Nil ((JsonParserState.emitValue (Json.string text)) state))
+            (Cons frame rest
+              (case
+                ((Bool.and ((String.eqString (get frame kind)) "object"))
+                  ((Bool.or ((String.eqString (get frame expect)) "object-key-or-end"))
+                    ((String.eqString (get frame expect)) "object-key")))
+                (true
+                  (((JsonParserState.make
+                    (Cons JsonFrame ((JsonFrame.setKey frame) text) rest))
+                    (get state value))
+                    (get state error)))
+                (false ((JsonParserState.emitValue (Json.string text)) state))))))))))
+
+(def JsonParserState.closeArray (-> JsonParserState JsonParserState)
+  (lambda (state JsonParserState)
+    (case (get state error)
+      (Some message state)
+      (None
+        (caseList (get state stack)
+          (Nil ((JsonParserState.fail "unexpected ]") state))
+          (Cons frame rest
+            (case ((String.eqString (get frame kind)) "array")
+              (false ((JsonParserState.fail "unexpected ]") state))
+              (true
+                (case ((String.eqString (get frame expect)) "array-value")
+                  (true ((JsonParserState.fail "expected JSON value") state))
+                  (false
+                    ((JsonParserState.emitValue
+                      (Json.array ((inst List.reverse Json) (get frame items))))
+                      (((JsonParserState.make rest) (get state value)) (get state error)))))))))))))
+
+(def JsonParserState.closeObject (-> JsonParserState JsonParserState)
+  (lambda (state JsonParserState)
+    (case (get state error)
+      (Some message state)
+      (None
+        (caseList (get state stack)
+          (Nil ((JsonParserState.fail "unexpected }") state))
+          (Cons frame rest
+            (case ((String.eqString (get frame kind)) "object")
+              (false ((JsonParserState.fail "unexpected }") state))
+              (true
+                (case ((String.eqString (get frame expect)) "object-key")
+                  (true ((JsonParserState.fail "expected JSON object key") state))
+                  (false
+                    (case ((String.eqString (get frame expect)) "object-colon")
+                      (true ((JsonParserState.fail "expected JSON object colon") state))
+                      (false
+                        (case ((String.eqString (get frame expect)) "object-value")
+                          (true ((JsonParserState.fail "expected JSON value") state))
+                          (false
+                            ((JsonParserState.emitValue
+                              (Json.object
+                                ((inst List.reverse (Pair String Json)) (get frame fields))))
+                              (((JsonParserState.make rest) (get state value))
+                                (get state error)))))))))))))))))
+
+(def JsonParserState.comma (-> JsonParserState JsonParserState)
+  (lambda (state JsonParserState)
+    (case (get state error)
+      (Some message state)
+      (None
+        (caseList (get state stack)
+          (Nil ((JsonParserState.fail "unexpected ,") state))
+          (Cons frame rest
+            (case ((String.eqString (get frame kind)) "array")
+              (true
+                (case ((String.eqString (get frame expect)) "array-comma-or-end")
+                  (true
+                    (((JsonParserState.make
+                      (Cons JsonFrame ((JsonFrame.withExpect frame) "array-value") rest))
+                      (get state value))
+                      (get state error)))
+                  (false ((JsonParserState.fail "unexpected ,") state))))
+              (false
+                (case ((String.eqString (get frame kind)) "object")
+                  (true
+                    (case ((String.eqString (get frame expect)) "object-comma-or-end")
+                      (true
+                        (((JsonParserState.make
+                          (Cons JsonFrame ((JsonFrame.withExpect frame) "object-key") rest))
+                          (get state value))
+                          (get state error)))
+                      (false ((JsonParserState.fail "unexpected ,") state))))
+                  (false ((JsonParserState.fail "unexpected ,") state)))))))))))
+
+(def JsonParserState.colon (-> JsonParserState JsonParserState)
+  (lambda (state JsonParserState)
+    (case (get state error)
+      (Some message state)
+      (None
+        (caseList (get state stack)
+          (Nil ((JsonParserState.fail "unexpected :") state))
+          (Cons frame rest
+            (case
+              ((Bool.and ((String.eqString (get frame kind)) "object"))
+                ((String.eqString (get frame expect)) "object-colon"))
+              (true
+                (((JsonParserState.make
+                  (Cons JsonFrame ((JsonFrame.withExpect frame) "object-value") rest))
+                  (get state value))
+                  (get state error)))
+              (false ((JsonParserState.fail "unexpected :") state)))))))))
+
+(def Json.parseToken (-> JsonParserState (-> JsonToken JsonParserState))
+  (lambda (state JsonParserState)
+    (lambda (token JsonToken)
+      (case (get state error)
+        (Some message state)
+        (None
+          (case token
+            (JTLBrace ((JsonParserState.pushFrame JsonFrame.object) state))
+            (JTRBrace (JsonParserState.closeObject state))
+            (JTLBracket ((JsonParserState.pushFrame JsonFrame.array) state))
+            (JTRBracket (JsonParserState.closeArray state))
+            (JTColon (JsonParserState.colon state))
+            (JTComma (JsonParserState.comma state))
+            (JTNull ((JsonParserState.emitValue Json.null) state))
+            (JTBool value ((JsonParserState.emitValue (Json.bool value)) state))
+            (JTNat value ((JsonParserState.emitValue (Json.nat value)) state))
+            (JTString value ((JsonParserState.emitString value) state))))))))
+
+(def Json.parseFinalize (-> JsonParserState (Result String Json))
+  (lambda (state JsonParserState)
+    (case (get state error)
+      (Some message (variant Err message))
+      (None
+        (caseList (get state stack)
+          (Cons frame rest (variant Err "unterminated JSON container"))
+          (Nil
+            (case (get state value)
+              (None _ (variant Err "expected JSON value"))
+              (Some value (variant Ok value)))))))))
+
+(def Json.parseTokens (-> (List JsonToken) (Result String Json))
+  (lambda (tokens (List JsonToken))
+    (Json.parseFinalize
+      (foldList ((inst List.reverse JsonToken) tokens)
+        JsonParserState.initial
+        (lambda (token JsonToken)
+          (lambda (state JsonParserState)
+            ((Json.parseToken state) token)))))))
+
+(def Json.parseText (-> String (Result String Json))
+  (lambda (source String)
+    (case (Json.lexTokens source)
+      (Err err (variant Err err))
+      (Ok tokens (Json.parseTokens tokens)))))
 
 (def Json.isNull (-> Json Bool)
   (lambda (json Json)

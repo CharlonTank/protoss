@@ -2702,6 +2702,46 @@ let () =
   assert_equal "stdlib Json.render escaped string"
     "\"\\\"Ada\\\\n\\\\\\\"Lovelace\\\\\\\"\\\\\\\\lab\\\"\""
     (Runtime.value_to_string json_rendered_escaped);
+  let json_lexed_object, _ = Runtime.normalize_def stdlib_generics "jsonLexedObject" in
+  assert_equal "stdlib Json.lexTokens object"
+    "Ok [JTLBrace unit, JTString \"name\", JTColon unit, JTString \"Ada\", JTComma unit, JTString \"age\", JTColon unit, JTNat 41, JTRBrace unit]"
+    (Runtime.value_to_string json_lexed_object);
+  let json_parsed_object, _ = Runtime.normalize_def stdlib_generics "jsonParsedObject" in
+  assert_equal "stdlib Json.parseText object"
+    "Ok JObject [{first = \"name\", second = JString \"Ada\"}, {first = \"age\", second = JNat 41}]"
+    (Runtime.value_to_string json_parsed_object);
+  let json_parsed_array, _ = Runtime.normalize_def stdlib_generics "jsonParsedArray" in
+  assert_equal "stdlib Json.parseText array" "Ok JArray [JBool true, JNull unit, JNat 3]"
+    (Runtime.value_to_string json_parsed_array);
+  let json_parsed_nested, _ = Runtime.normalize_def stdlib_generics "jsonParsedNested" in
+  assert_equal "stdlib Json.parseText nested"
+    "Ok JObject [{first = \"items\", second = JArray [JObject [{first = \"ok\", second = JBool true}], JNull unit]}]"
+    (Runtime.value_to_string json_parsed_nested);
+  let json_parsed_escaped, _ = Runtime.normalize_def stdlib_generics "jsonParsedEscaped" in
+  assert_equal "stdlib Json.parseText escaped string"
+    "Ok JString \"Ada\\n\\\"Lovelace\\\"\\\\lab\""
+    (Runtime.value_to_string json_parsed_escaped);
+  let json_parsed_bad_trailing_comma, _ =
+    Runtime.normalize_def stdlib_generics "jsonParsedBadTrailingComma"
+  in
+  assert_equal "stdlib Json.parseText trailing comma" "Err \"expected JSON value\""
+    (Runtime.value_to_string json_parsed_bad_trailing_comma);
+  let json_parsed_bad_object_value, _ =
+    Runtime.normalize_def stdlib_generics "jsonParsedBadObjectValue"
+  in
+  assert_equal "stdlib Json.parseText missing object value" "Err \"expected JSON value\""
+    (Runtime.value_to_string json_parsed_bad_object_value);
+  let json_parsed_bad_keyword, _ =
+    Runtime.normalize_def stdlib_generics "jsonParsedBadKeyword"
+  in
+  assert_equal "stdlib Json.parseText bad keyword" "Err \"invalid JSON keyword\""
+    (Runtime.value_to_string json_parsed_bad_keyword);
+  let json_parsed_rendered_object, _ =
+    Runtime.normalize_def stdlib_generics "jsonParsedRenderedObject"
+  in
+  assert_equal "stdlib Json.parseText render round-trip"
+    "\"{\\\"name\\\":\\\"Ada\\\",\\\"age\\\":41}\""
+    (Runtime.value_to_string json_parsed_rendered_object);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in
