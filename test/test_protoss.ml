@@ -217,6 +217,22 @@ let () =
   let elm_like_equiv = Loader.check_file elm_like_equiv_path in
   assert_equal "Elm-like surface hashes as S-expression surface"
     (Kernel.hash_program elm_like_equiv) (Kernel.hash_program elm_like);
+  let inferred_add_surface = check "add a b =\n  a + b\n" in
+  assert_equal "Elm-like signature-free Nat add type" "(-> Nat (-> Nat Nat))"
+    (Ast.string_of_typ (checked_def inferred_add_surface "add").Kernel.def.typ);
+  let inferred_add_equiv =
+    check
+      "(def add (-> Nat (-> Nat Nat)) \
+       (lambda a (lambda b (foldNat a b (lambda acc (succ acc))))))"
+  in
+  assert_equal "Elm-like signature-free Nat add hash"
+    (Kernel.hash_program inferred_add_equiv)
+    (Kernel.hash_program inferred_add_surface);
+  let inferred_literal_surface = check "total =\n  2 + 5\n" in
+  let inferred_literal_value, _ = Runtime.normalize_def inferred_literal_surface "total" in
+  assert_equal "Elm-like signature-free Nat literal add normalizes" "7"
+    (Runtime.value_to_string inferred_literal_value);
+  expect_parse_error_contains "id x =\n  x\n" "missing type signature for id";
   let elm_like_main, _ = Runtime.normalize_def elm_like "main" in
   assert_equal "Elm-like pipeline normalizes" "5"
     (Runtime.value_to_string elm_like_main);
@@ -244,6 +260,12 @@ let () =
   let elm_like_number_count, _ = Runtime.normalize_def elm_like "numberCount" in
   assert_equal "Elm-like list literal type inference normalizes" "3"
     (Runtime.value_to_string elm_like_number_count);
+  let elm_like_inferred_literal, _ = Runtime.normalize_def elm_like "inferredLiteral" in
+  assert_equal "Elm-like inferred literal add normalizes" "7"
+    (Runtime.value_to_string elm_like_inferred_literal);
+  let elm_like_inferred_total, _ = Runtime.normalize_def elm_like "inferredTotal" in
+  assert_equal "Elm-like inferred add call normalizes" "7"
+    (Runtime.value_to_string elm_like_inferred_total);
 
   let alpha_a = check "(def main (-> Nat Nat) (lambda (x Nat) (succ x)))" in
   let alpha_b = check "(def main (-> Nat Nat) (lambda (y Nat) (succ y)))" in

@@ -56,3 +56,14 @@
 
 (def numberCount Nat
   (List.length numbers))
+
+(def inferredAdd (-> Nat (-> Nat Nat))
+  (lambda a
+    (lambda b
+      (foldNat a b (lambda __infix_add_acc (succ __infix_add_acc))))))
+
+(def inferredLiteral Nat
+  (foldNat 2 5 (lambda __infix_add_acc (succ __infix_add_acc))))
+
+(def inferredTotal Nat
+  ((inferredAdd 2) 5))

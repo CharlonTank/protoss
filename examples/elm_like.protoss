@@ -67,3 +67,13 @@ numbers =
 numberCount : Nat
 numberCount =
     List.length numbers
+
+inferredAdd a b =
+    a + b
+
+inferredLiteral =
+    2 + 5
+
+inferredTotal : Nat
+inferredTotal =
+    inferredAdd 2 5

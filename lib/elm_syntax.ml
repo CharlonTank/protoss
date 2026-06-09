@@ -76,6 +76,16 @@ let value_separator line =
       | name :: params when is_name name && List.for_all is_name params -> Some (name, params, rhs)
       | _ -> None)
 
+let nat_type = Sexp.Atom "Nat"
+
+let fun_type args result =
+  List.fold_right
+    (fun arg acc -> Sexp.List [ Sexp.Atom "->"; arg; acc ])
+    args result
+
+let nat_fun_type arity =
+  fun_type (List.init arity (fun _ -> nat_type)) nat_type
+
 type token =
   | Ident of string
   | Str of string
@@ -140,7 +150,7 @@ let tokenize input =
       && (not (is_space input.[!j]))
       &&
       match input.[!j] with
-      | '(' | ')' | '{' | '}' | '[' | ']' | ':' | '=' | ',' | '|' | '\\' -> false
+      | '(' | ')' | '{' | '}' | '[' | ']' | ':' | '=' | ',' | '|' | '+' | '\\' -> false
       | '-' when !j + 1 < len && input.[!j + 1] = '>' -> false
       | _ -> true
     do
@@ -163,6 +173,7 @@ let tokenize input =
       | ':' -> loop (Colon :: acc) (i + 1)
       | '=' -> loop (Equals :: acc) (i + 1)
       | ',' -> loop (Comma :: acc) (i + 1)
+      | '+' -> loop (Ident "+" :: acc) (i + 1)
       | '\\' -> loop (Backslash :: acc) (i + 1)
       | '|' when i + 1 < len && input.[i + 1] = '>' -> loop (PipeGt :: acc) (i + 2)
       | '|' -> loop (Pipe :: acc) (i + 1)
@@ -289,6 +300,15 @@ let list_literal elems =
     (fun elem acc -> Sexp.List [ Sexp.Atom "Cons"; elem; acc ])
     elems (Sexp.Atom "Nil")
 
+let nat_add_expr left right =
+  Sexp.List
+    [
+      Sexp.Atom "foldNat";
+      left;
+      right;
+      Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom "__infix_add_acc"; Sexp.List [ Sexp.Atom "succ"; Sexp.Atom "__infix_add_acc" ] ];
+    ]
+
 let wrap_lambdas params body =
   let rec ensure_unique_params seen = function
     | [] -> ()
@@ -313,6 +333,17 @@ let field_access_expr name =
            (fun acc field -> Sexp.List [ Sexp.Atom "get"; acc; Sexp.Atom field ])
            (Sexp.Atom base) (field :: rest))
   | _ -> None
+
+let has_plus_operator text =
+  tokenize text |> List.exists (function Ident "+" -> true | _ -> false)
+
+let infer_missing_value_type name params body =
+  if has_plus_operator body then nat_fun_type (List.length params)
+  else fail ("missing type signature for " ^ name)
+
+let infer_missing_let_type name params body =
+  if has_plus_operator body then nat_fun_type (List.length params)
+  else fail ("let function binding requires a type signature: " ^ name)
 
 let parse_variant_case tokens =
   match tokens with
@@ -365,13 +396,15 @@ and parse_let_expr text =
         | lines -> parse_expr_text (String.concat "\n" lines)
       in
       List.fold_right
-        (fun (name, params, expr) acc ->
-          let expr = parse_expr_text expr |> wrap_lambdas params in
+        (fun (name, params, source) acc ->
+          let expr = parse_expr_text source |> wrap_lambdas params in
           match Hashtbl.find_opt signatures name with
           | Some ty -> Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; ty; expr ]; acc ]
           | None ->
-              if params <> [] then fail ("let function binding requires a type signature: " ^ name);
-              Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; expr ]; acc ])
+              if params = [] then Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; expr ]; acc ]
+              else
+                let ty = infer_missing_let_type name params source in
+                Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; ty; expr ]; acc ])
         bindings body
   | _ -> fail "let syntax is: let ... in ..."
 
@@ -454,11 +487,22 @@ and parse_pipeline st =
         loop (append_pipeline_arg (parse_app st) acc)
     | _ -> acc
   in
+  loop (parse_sum st)
+
+and parse_sum st =
+  let rec loop acc =
+    match peek st with
+    | Some (Ident "+") ->
+        ignore (take st);
+        loop (nat_add_expr acc (parse_app st))
+    | _ -> acc
+  in
   loop (parse_app st)
 
 and parse_app st =
   let rec collect acc =
     match peek st with
+    | Some (Ident "+") -> List.rev acc
     | Some (Ident _ | Str _ | LParen | LBrace | LBracket | Backslash) ->
         collect (parse_atom_expr st :: acc)
     | _ -> List.rev acc
@@ -471,6 +515,7 @@ and parse_app st =
 and parse_atom_expr st =
   match take st with
   | Some (Ident "if") -> parse_if_expr st
+  | Some (Ident "+") -> fail "+ is an infix operator"
   | Some (Ident name) -> (
       match field_access_expr name with Some expr -> expr | None -> Sexp.Atom name)
   | Some (Str value) -> Sexp.Str value
@@ -712,12 +757,12 @@ let to_sexp_source input =
         | None -> (
             match value_separator line with
             | Some (name, params, first_body) ->
+                let body, next = collect_block lines (i + 1) first_body in
                 let typ =
                   match Hashtbl.find_opt signatures name with
                   | Some typ -> typ
-                  | None -> fail ("missing type signature for " ^ name)
+                  | None -> infer_missing_value_type name params body
                 in
-                let body, next = collect_block lines (i + 1) first_body in
                 let expr = parse_expr_text body |> wrap_lambdas params in
                 forms := Sexp.List [ Sexp.Atom "def"; Sexp.Atom name; typ; expr ] :: !forms;
                 loop next
