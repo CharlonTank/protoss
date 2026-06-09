@@ -1,152 +1,157 @@
-(type Model (Record (lead String) (status String)))
-(type Msg (Variant (Contact Unit) (Portfolio Unit)))
-(type MsgView (View Msg))
-(type MsgViews (List MsgView))
+type alias Model =
+    { lead : String
+    , status : String
+    }
 
-(def init
-  (Process Model)
-  (done (record
-    (lead "bonjour@studioclair.fr")
-    (status "Audit express disponible cette semaine"))))
+type Msg
+    = Contact
+    | Portfolio
 
-(def update
-  (-> Msg
-      (-> Model
-          (Process Model)))
-  (lambda (msg Msg)
-    (lambda (model Model)
-      (case msg
-        (Contact _
-          (done (record
-            (lead (get model lead))
-            (status "Contact: bonjour@studioclair.fr"))))
-        (Portfolio _
-          (done (record
-            (lead (get model lead))
-            (status "References disponibles sur demande"))))))))
+type alias MsgView =
+    View Msg
 
-(def emptyViews
-  MsgViews
-  (Nil MsgView))
+type alias MsgViews =
+    List MsgView
 
-(def contactMsg
-  Msg
-  (variant Msg Contact unit))
+init : Process Model
+init =
+    done
+        { lead = "bonjour@studioclair.fr"
+        , status = "Audit express disponible cette semaine"
+        }
 
-(def portfolioMsg
-  Msg
-  (variant Msg Portfolio unit))
+update : Msg -> Model -> Process Model
+update msg model =
+    case msg of
+        Contact ->
+            done
+                { lead = model.lead
+                , status = "Contact: bonjour@studioclair.fr"
+                }
 
-(def actionRow
-  MsgView
-  (row
-    (Cons MsgView
-      (button "Demander un audit" contactMsg)
-      (Cons MsgView
-        (button "Voir les offres" portfolioMsg)
-        emptyViews))))
+        Portfolio ->
+            done
+                { lead = model.lead
+                , status = "References disponibles sur demande"
+                }
 
-(def offerStrategy
-  MsgView
-  (column
-    (Cons MsgView
-      (text "Positionnement net")
-      (Cons MsgView
-        (text "Une promesse lisible, des preuves visibles et un parcours sans friction.")
-        emptyViews))))
+contactMsg : Msg
+contactMsg =
+    variant Contact unit
 
-(def offerBuild
-  MsgView
-  (column
-    (Cons MsgView
-      (text "Page rapide")
-      (Cons MsgView
-        (text "Structure courte, responsive, contenu priorise et rendu deterministe.")
-        emptyViews))))
+portfolioMsg : Msg
+portfolioMsg =
+    variant Portfolio unit
 
-(def offerLaunch
-  MsgView
-  (column
-    (Cons MsgView
-      (text "Lancement propre")
-      (Cons MsgView
-        (text "Livraison testee, source versionnee et base prete pour evoluer.")
-        emptyViews))))
+actionItems : MsgViews
+actionItems =
+    [ button "Demander un audit" contactMsg
+    , button "Voir les offres" portfolioMsg
+    ]
 
-(def offersRow
-  MsgView
-  (row
-    (Cons MsgView
-      offerStrategy
-      (Cons MsgView
-        offerBuild
-        (Cons MsgView
-          offerLaunch
-          emptyViews)))))
+actionRow : MsgView
+actionRow =
+    row actionItems
 
-(def metricOne
-  MsgView
-  (column
-    (Cons MsgView
-      (text "72h")
-      (Cons MsgView
-        (text "pour cadrer le message et sortir une premiere version.")
-        emptyViews))))
+offerStrategyItems : MsgViews
+offerStrategyItems =
+    [ text "Positionnement net"
+    , text "Une promesse lisible, des preuves visibles et un parcours sans friction."
+    ]
 
-(def metricTwo
-  MsgView
-  (column
-    (Cons MsgView
-      (text "1 page")
-      (Cons MsgView
-        (text "concue pour expliquer, rassurer et declencher le contact.")
-        emptyViews))))
+offerStrategy : MsgView
+offerStrategy =
+    column offerStrategyItems
 
-(def metricThree
-  MsgView
-  (column
-    (Cons MsgView
-      (text "0 opacite")
-      (Cons MsgView
-        (text "le contenu, le graphe et le bundle restent inspectables.")
-        emptyViews))))
+offerBuildItems : MsgViews
+offerBuildItems =
+    [ text "Page rapide"
+    , text "Structure courte, responsive, contenu priorise et rendu deterministe."
+    ]
 
-(def metricsRow
-  MsgView
-  (row
-    (Cons MsgView
-      metricOne
-      (Cons MsgView
-        metricTwo
-        (Cons MsgView
-          metricThree
-          emptyViews)))))
+offerBuild : MsgView
+offerBuild =
+    column offerBuildItems
 
-(def page
-  MsgView
-  (column
-    (Cons MsgView
-      (text "STUDIO CLAIR")
-      (Cons MsgView
-        (text "Sites vitrines rapides et sobres pour equipes qui vendent du service.")
-        (Cons MsgView
-          (text "On transforme une offre complexe en page claire: message, preuves, appel a l'action et base technique inspectable.")
-          (Cons MsgView
-            actionRow
-            (Cons MsgView
-              (image "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1600&q=80" "Equipe travaillant dans un studio lumineux")
-              (Cons MsgView
-                offersRow
-                (Cons MsgView
-                  (text "Offre MVP: cadrage, redaction, design responsive et livraison web en une semaine.")
-                  (Cons MsgView
-                    metricsRow
-                    (Cons MsgView
-                      (text "Contact: bonjour@studioclair.fr")
-                      emptyViews)))))))))))
+offerLaunchItems : MsgViews
+offerLaunchItems =
+    [ text "Lancement propre"
+    , text "Livraison testee, source versionnee et base prete pour evoluer."
+    ]
 
-(def view
-  (-> Model
-      MsgView)
-  (lambda (model Model)
-    page))
+offerLaunch : MsgView
+offerLaunch =
+    column offerLaunchItems
+
+offerItems : MsgViews
+offerItems =
+    [ offerStrategy
+    , offerBuild
+    , offerLaunch
+    ]
+
+offersRow : MsgView
+offersRow =
+    row offerItems
+
+metricOneItems : MsgViews
+metricOneItems =
+    [ text "72h"
+    , text "pour cadrer le message et sortir une premiere version."
+    ]
+
+metricOne : MsgView
+metricOne =
+    column metricOneItems
+
+metricTwoItems : MsgViews
+metricTwoItems =
+    [ text "1 page"
+    , text "concue pour expliquer, rassurer et declencher le contact."
+    ]
+
+metricTwo : MsgView
+metricTwo =
+    column metricTwoItems
+
+metricThreeItems : MsgViews
+metricThreeItems =
+    [ text "0 opacite"
+    , text "le contenu, le graphe et le bundle restent inspectables."
+    ]
+
+metricThree : MsgView
+metricThree =
+    column metricThreeItems
+
+metricItems : MsgViews
+metricItems =
+    [ metricOne
+    , metricTwo
+    , metricThree
+    ]
+
+metricsRow : MsgView
+metricsRow =
+    row metricItems
+
+pageItems : MsgViews
+pageItems =
+    [ text "STUDIO CLAIR"
+    , text "Sites vitrines rapides et sobres pour equipes qui vendent du service."
+    , text "On transforme une offre complexe en page claire: message, preuves, appel a l'action et base technique inspectable."
+    , actionRow
+    , image "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1600&q=80" "Equipe travaillant dans un studio lumineux"
+    , offersRow
+    , text "Offre MVP: cadrage, redaction, design responsive et livraison web en une semaine."
+    , metricsRow
+    , text "Contact: bonjour@studioclair.fr"
+    ]
+
+page : MsgView
+page =
+    column pageItems
+
+view : Model -> MsgView
+view model =
+    page

@@ -10,8 +10,8 @@ type Status
     | Closed
 
 double : Nat -> Nat
-double =
-    \x -> x |> Nat.add x
+double x =
+    x |> Nat.add x
 
 main : Nat
 main =
@@ -29,13 +29,15 @@ withLet : Nat
 withLet =
     let
         base = 2
-        bumped = base |> double
+        bump : Nat -> Nat
+        bump value = value |> double
+        bumped = base |> bump
     in
         bumped |> succ
 
 pick : Bool -> Nat -> Nat -> Nat
-pick =
-    \flag yes no -> if flag then yes else no
+pick flag yes no =
+    if flag then yes else no
 
 picked : Nat
 picked =
@@ -50,3 +52,18 @@ user =
     { name = "Ada"
     , active = true
     }
+
+userName : String
+userName =
+    user.name
+
+numbers : List Nat
+numbers =
+    [ 1
+    , 2
+    , 3
+    ]
+
+numberCount : Nat
+numberCount =
+    List.length numbers

@@ -20,8 +20,9 @@
 
 (def withLet Nat
   (let (base 2)
-    (let (bumped (double base))
-      (succ bumped))))
+    (let (bump (-> Nat Nat) (lambda value (double value)))
+    (let (bumped (bump base))
+      (succ bumped)))))
 
 (def pick (-> Bool (-> Nat (-> Nat Nat)))
   (lambda flag
@@ -46,3 +47,12 @@
   (record
     (active true)
     (name "Ada")))
+
+(def userName String
+  (get user name))
+
+(def numbers (List Nat)
+  (Cons 1 (Cons 2 (Cons 3 Nil))))
+
+(def numberCount Nat
+  (List.length numbers))

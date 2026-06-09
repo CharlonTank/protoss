@@ -1,4 +1,4 @@
-; Protoss stdlib v0.43. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.44. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -266,6 +266,11 @@
   (missingDeclarations (List String))
   (duplicateDeclarations (List String))
   (duplicateScopes (List String)))
+(record ProtossStaticReport
+  (resolve ProtossResolveReport)
+  (termOrder ProtossDepOrder)
+  (typeEnv ProtossTypeEnvReport)
+  (capabilities ProtossCapabilityReport))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -306,7 +311,7 @@
   (value (Maybe Json))
   (error (Maybe String)))
 
-(def Stdlib.version String "v0.43")
+(def Stdlib.version String "v0.44")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -5114,6 +5119,109 @@
     (case (Protoss.parseText source)
       (Err err (variant Err err))
       (Ok decls (Protoss.checkCapabilityDecls decls)))))
+
+(def Protoss.resolveFirstError (-> ProtossResolveReport (Maybe String))
+  (lambda (report ProtossResolveReport)
+    (caseList (get report duplicateTerms)
+      (Nil
+        (caseList (get report duplicateTypes)
+          (Nil
+            (caseList (get report missingTerms)
+              (Nil
+                (caseList (get report missingTypes)
+                  (Nil
+                    (caseList (get report missingExports)
+                      (Nil (variant None unit))
+                      (Cons first rest
+                        (variant Some ((String.concat "missing export: ") first)))))
+                  (Cons first rest
+                    (variant Some ((String.concat "missing type: ") first)))))
+              (Cons first rest
+                (variant Some ((String.concat "missing term: ") first)))))
+          (Cons first rest
+            (variant Some ((String.concat "duplicate type: ") first)))))
+      (Cons first rest
+        (variant Some ((String.concat "duplicate term: ") first))))))
+
+(def Protoss.depOrderFirstError (-> String (-> ProtossDepOrder (Maybe String)))
+  (lambda (kind String)
+    (lambda (order ProtossDepOrder)
+      (case order
+        (PDepOrderOk names (variant None unit))
+        (PDepOrderCycle names
+          (variant Some
+            ((String.concat "cyclic ")
+              ((String.concat kind)
+                ((String.concat " dependency: ") ((String.join ",") names))))))))))
+
+(def Protoss.staticReportDeclsWith
+  (-> (List String) (-> (List String) (-> (List ProtossDecl) ProtossStaticReport)))
+  (lambda (externalTerms (List String))
+    (lambda (externalTypes (List String))
+      (lambda (decls (List ProtossDecl))
+        (record
+          (resolve (((Protoss.resolveDeclsWith externalTerms) externalTypes) decls))
+          (termOrder (Protoss.termDependencyOrderDecls decls))
+          (typeEnv ((Protoss.typeEnvReportDeclsWith externalTypes) decls))
+          (capabilities (Protoss.capabilityReportDecls decls)))))))
+
+(def Protoss.staticReportDecls (-> (List ProtossDecl) ProtossStaticReport)
+  (lambda (decls (List ProtossDecl))
+    (((Protoss.staticReportDeclsWith (Nil String)) (Nil String)) decls)))
+
+(def Protoss.staticReportTextWith
+  (-> (List String) (-> (List String) (-> String (Result String ProtossStaticReport))))
+  (lambda (externalTerms (List String))
+    (lambda (externalTypes (List String))
+      (lambda (source String)
+        (case (Protoss.parseText source)
+          (Err err (variant Err err))
+          (Ok decls
+            (variant Ok (((Protoss.staticReportDeclsWith externalTerms) externalTypes) decls))))))))
+
+(def Protoss.staticReportText (-> String (Result String ProtossStaticReport))
+  (lambda (source String)
+    (((Protoss.staticReportTextWith (Nil String)) (Nil String)) source)))
+
+(def Protoss.staticFirstError (-> ProtossStaticReport (Maybe String))
+  (lambda (report ProtossStaticReport)
+    (case (Protoss.resolveFirstError (get report resolve))
+      (Some err (variant Some err))
+      (None _
+        (case ((Protoss.depOrderFirstError "term") (get report termOrder))
+          (Some err (variant Some err))
+          (None _
+            (case (Protoss.typeEnvFirstError (get report typeEnv))
+              (Some err (variant Some err))
+              (None _
+                (Protoss.capabilityFirstError (get report capabilities))))))))))
+
+(def Protoss.checkStaticDeclsWith
+  (-> (List String) (-> (List String) (-> (List ProtossDecl) (Result String ProtossStaticReport))))
+  (lambda (externalTerms (List String))
+    (lambda (externalTypes (List String))
+      (lambda (decls (List ProtossDecl))
+        (let (report ProtossStaticReport (((Protoss.staticReportDeclsWith externalTerms) externalTypes) decls))
+          (case (Protoss.staticFirstError report)
+            (None _ (variant Ok report))
+            (Some err (variant Err err))))))))
+
+(def Protoss.checkStaticDecls (-> (List ProtossDecl) (Result String ProtossStaticReport))
+  (lambda (decls (List ProtossDecl))
+    (((Protoss.checkStaticDeclsWith (Nil String)) (Nil String)) decls)))
+
+(def Protoss.checkStaticTextWith
+  (-> (List String) (-> (List String) (-> String (Result String ProtossStaticReport))))
+  (lambda (externalTerms (List String))
+    (lambda (externalTypes (List String))
+      (lambda (source String)
+        (case (Protoss.parseText source)
+          (Err err (variant Err err))
+          (Ok decls (((Protoss.checkStaticDeclsWith externalTerms) externalTypes) decls)))))))
+
+(def Protoss.checkStaticText (-> String (Result String ProtossStaticReport))
+  (lambda (source String)
+    (((Protoss.checkStaticTextWith (Nil String)) (Nil String)) source)))
 
 (def Json.null Json
   (variant JNull unit))

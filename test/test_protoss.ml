@@ -235,6 +235,15 @@ let () =
   let elm_like_user, _ = Runtime.normalize_def elm_like "user" in
   assert_equal "Elm-like record literal normalizes" "{active = true, name = \"Ada\"}"
     (Runtime.value_to_string elm_like_user);
+  let elm_like_user_name, _ = Runtime.normalize_def elm_like "userName" in
+  assert_equal "Elm-like field access normalizes" "\"Ada\""
+    (Runtime.value_to_string elm_like_user_name);
+  let elm_like_numbers, _ = Runtime.normalize_def elm_like "numbers" in
+  assert_equal "Elm-like list literal normalizes" "[1, 2, 3]"
+    (Runtime.value_to_string elm_like_numbers);
+  let elm_like_number_count, _ = Runtime.normalize_def elm_like "numberCount" in
+  assert_equal "Elm-like list literal type inference normalizes" "3"
+    (Runtime.value_to_string elm_like_number_count);
 
   let alpha_a = check "(def main (-> Nat Nat) (lambda (x Nat) (succ x)))" in
   let alpha_b = check "(def main (-> Nat Nat) (lambda (y Nat) (succ y)))" in
@@ -2662,6 +2671,51 @@ let () =
   assert_equal "stdlib Protoss.checkCapabilityText duplicate scope"
     "Err \"duplicate scoped capability: ask.Human.ask\""
     (Runtime.value_to_string protoss_capability_duplicate_scope);
+  let protoss_static_valid_missing_terms, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticValidMissingTerms"
+  in
+  assert_equal "stdlib Protoss.checkStaticText valid terms" "[]"
+    (Runtime.value_to_string protoss_static_valid_missing_terms);
+  let protoss_static_valid_term_order, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticValidTermOrder"
+  in
+  assert_equal "stdlib Protoss.checkStaticText term order"
+    "PDepOrderOk [\"base\", \"ask\", \"askAgain\"]"
+    (Runtime.value_to_string protoss_static_valid_term_order);
+  let protoss_static_valid_type_order, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticValidTypeOrder"
+  in
+  assert_equal "stdlib Protoss.checkStaticText type order" "PDepOrderOk [\"Box\"]"
+    (Runtime.value_to_string protoss_static_valid_type_order);
+  let protoss_static_valid_capabilities, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticValidCapabilities"
+  in
+  assert_equal "stdlib Protoss.checkStaticText capabilities" "[\"Human.ask\"]"
+    (Runtime.value_to_string protoss_static_valid_capabilities);
+  let protoss_static_missing_term, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticMissingTerm"
+  in
+  assert_equal "stdlib Protoss.checkStaticText missing term"
+    "Err \"missing term: unknown\""
+    (Runtime.value_to_string protoss_static_missing_term);
+  let protoss_static_term_cycle, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticTermCycle"
+  in
+  assert_equal "stdlib Protoss.checkStaticText term cycle"
+    "Err \"cyclic term dependency: a,b\""
+    (Runtime.value_to_string protoss_static_term_cycle);
+  let protoss_static_type_arity, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticTypeArity"
+  in
+  assert_equal "stdlib Protoss.checkStaticText type arity"
+    "Err \"wrong type arity: Box expected 1 got 2\""
+    (Runtime.value_to_string protoss_static_type_arity);
+  let protoss_static_missing_capability, _ =
+    Runtime.normalize_def stdlib_generics "protossStaticMissingCapability"
+  in
+  assert_equal "stdlib Protoss.checkStaticText missing capability"
+    "Err \"missing capability declaration: Human.ask\""
+    (Runtime.value_to_string protoss_static_missing_capability);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

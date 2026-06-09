@@ -892,6 +892,42 @@
 (def protossCapabilityDuplicateScope (Result String ProtossCapabilityReport)
   (Protoss.checkCapabilityText "(capabilities Human.ask)\n(defcap ask (capabilities Human.ask Human.ask) (Process String) (Human.ask \"Name?\"))"))
 
+(def protossStaticParsedValid (Result String ProtossStaticReport)
+  (Protoss.checkStaticText
+    "(capabilities Human.ask)\n(record Box (value Nat))\n(def base Nat 1)\n(def ask (Process String) (Human.ask \"Name?\"))\n(defcap askAgain (capabilities Human.ask) (Process String) ask)\n(export Box base ask askAgain)"))
+
+(def protossStaticValidMissingTerms (List String)
+  (case protossStaticParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get (get report resolve) missingTerms))))
+
+(def protossStaticValidTermOrder (ProtossDepOrder)
+  (case protossStaticParsedValid
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok report (get report termOrder))))
+
+(def protossStaticValidTypeOrder (ProtossDepOrder)
+  (case protossStaticParsedValid
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok report (get (get report typeEnv) order))))
+
+(def protossStaticValidCapabilities (List String)
+  (case protossStaticParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get (get report capabilities) used))))
+
+(def protossStaticMissingTerm (Result String ProtossStaticReport)
+  (Protoss.checkStaticText "(def bad Nat unknown)"))
+
+(def protossStaticTermCycle (Result String ProtossStaticReport)
+  (Protoss.checkStaticText "(def a Nat b)\n(def b Nat a)"))
+
+(def protossStaticTypeArity (Result String ProtossStaticReport)
+  (Protoss.checkStaticText "(record Box (params A) (value A))\n(record Use (value (Box Nat String)))"))
+
+(def protossStaticMissingCapability (Result String ProtossStaticReport)
+  (Protoss.checkStaticText "(def ask (Process String) (Human.ask \"Name?\"))"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

@@ -37,7 +37,18 @@ let indentation line =
   loop 0
 
 let strip_line_comment line =
-  if starts_with (trim line) "--" then "" else line
+  let len = String.length line in
+  let rec loop in_string escaped i =
+    if i >= len then line
+    else
+      match line.[i] with
+      | '-' when (not in_string) && i + 1 < len && line.[i + 1] = '-' ->
+          String.sub line 0 i
+      | '"' when not escaped -> loop (not in_string) false (i + 1)
+      | '\\' when in_string && not escaped -> loop in_string true (i + 1)
+      | _ -> loop in_string false (i + 1)
+  in
+  loop false false 0
 
 let split_words s =
   s |> String.split_on_char ' ' |> List.map trim |> List.filter (( <> ) "")
@@ -55,13 +66,15 @@ let find_sub s needle =
   in
   loop 0
 
-let binding_separator line =
+let value_separator line =
   match String.index_opt line '=' with
   | None -> None
   | Some i ->
-      let name = trim (String.sub line 0 i) in
-      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
-      else None
+      let lhs = trim (String.sub line 0 i) in
+      let rhs = trim (String.sub line (i + 1) (String.length line - i - 1)) in
+      (match split_words lhs with
+      | name :: params when is_name name && List.for_all is_name params -> Some (name, params, rhs)
+      | _ -> None)
 
 type token =
   | Ident of string
@@ -70,6 +83,8 @@ type token =
   | RParen
   | LBrace
   | RBrace
+  | LBracket
+  | RBracket
   | Colon
   | Equals
   | Comma
@@ -85,6 +100,8 @@ let token_name = function
   | RParen -> ")"
   | LBrace -> "{"
   | RBrace -> "}"
+  | LBracket -> "["
+  | RBracket -> "]"
   | Colon -> ":"
   | Equals -> "="
   | Comma -> ","
@@ -123,7 +140,7 @@ let tokenize input =
       && (not (is_space input.[!j]))
       &&
       match input.[!j] with
-      | '(' | ')' | '{' | '}' | ':' | '=' | ',' | '|' | '\\' -> false
+      | '(' | ')' | '{' | '}' | '[' | ']' | ':' | '=' | ',' | '|' | '\\' -> false
       | '-' when !j + 1 < len && input.[!j + 1] = '>' -> false
       | _ -> true
     do
@@ -141,6 +158,8 @@ let tokenize input =
       | ')' -> loop (RParen :: acc) (i + 1)
       | '{' -> loop (LBrace :: acc) (i + 1)
       | '}' -> loop (RBrace :: acc) (i + 1)
+      | '[' -> loop (LBracket :: acc) (i + 1)
+      | ']' -> loop (RBracket :: acc) (i + 1)
       | ':' -> loop (Colon :: acc) (i + 1)
       | '=' -> loop (Equals :: acc) (i + 1)
       | ',' -> loop (Comma :: acc) (i + 1)
@@ -244,8 +263,10 @@ let split_variant_cases tokens =
     | Pipe :: rest when depth = 0 -> loop depth [] (List.rev current :: acc) rest
     | LParen :: rest -> loop (depth + 1) (LParen :: current) acc rest
     | LBrace :: rest -> loop (depth + 1) (LBrace :: current) acc rest
+    | LBracket :: rest -> loop (depth + 1) (LBracket :: current) acc rest
     | RParen :: rest -> loop (max 0 (depth - 1)) (RParen :: current) acc rest
     | RBrace :: rest -> loop (max 0 (depth - 1)) (RBrace :: current) acc rest
+    | RBracket :: rest -> loop (max 0 (depth - 1)) (RBracket :: current) acc rest
     | tok :: rest -> loop depth (tok :: current) acc rest
   in
   loop 0 [] [] tokens
@@ -263,6 +284,36 @@ let tuple_payload = function
              (fun i ty -> Sexp.List [ Sexp.Atom ("_" ^ string_of_int (i + 1)); ty ])
              payloads)
 
+let list_literal elems =
+  List.fold_right
+    (fun elem acc -> Sexp.List [ Sexp.Atom "Cons"; elem; acc ])
+    elems (Sexp.Atom "Nil")
+
+let wrap_lambdas params body =
+  let rec ensure_unique_params seen = function
+    | [] -> ()
+    | name :: rest ->
+        if List.exists (String.equal name) seen then fail ("duplicate parameter: " ^ name);
+        ensure_unique_params (name :: seen) rest
+  in
+  ensure_unique_params [] params;
+  List.fold_right
+    (fun name acc -> Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom name; acc ])
+    params body
+
+let field_access_expr name =
+  match String.split_on_char '.' name with
+  | base :: field :: rest
+    when base <> ""
+         &&
+         (match base.[0] with 'a' .. 'z' | '_' -> true | _ -> false)
+         && is_name base && List.for_all is_name (field :: rest) ->
+      Some
+        (List.fold_left
+           (fun acc field -> Sexp.List [ Sexp.Atom "get"; acc; Sexp.Atom field ])
+           (Sexp.Atom base) (field :: rest))
+  | _ -> None
+
 let parse_variant_case tokens =
   match tokens with
   | Ident name :: rest ->
@@ -270,6 +321,14 @@ let parse_variant_case tokens =
       Sexp.List [ Sexp.Atom name; tuple_payload payloads ]
   | [] -> fail "empty variant constructor"
   | tok :: _ -> fail ("expected variant constructor, got " ^ token_name tok)
+
+let signature_separator line =
+  match String.index_opt line ':' with
+  | None -> None
+  | Some i ->
+      let name = trim (String.sub line 0 i) in
+      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
+      else None
 
 let rec parse_expr_text text =
   let text = trim text in
@@ -285,13 +344,19 @@ and parse_let_expr text =
   let lines = nonempty_lines text in
   match lines with
   | "let" :: rest ->
+      let signatures = Hashtbl.create 8 in
       let rec split_bindings acc = function
         | [] -> fail "let block missing in"
         | "in" :: body -> (List.rev acc, body)
         | line :: rest -> (
-            match binding_separator line with
-            | Some (name, expr) -> split_bindings ((name, expr) :: acc) rest
-            | None -> fail ("invalid let binding: " ^ line))
+            match signature_separator line with
+            | Some (name, ty) ->
+                Hashtbl.replace signatures name (parse_type_text ty);
+                split_bindings acc rest
+            | None -> (
+                match value_separator line with
+                | Some (name, params, expr) -> split_bindings ((name, params, expr) :: acc) rest
+                | None -> fail ("invalid let binding: " ^ line)))
       in
       let bindings, body = split_bindings [] rest in
       let body =
@@ -300,8 +365,13 @@ and parse_let_expr text =
         | lines -> parse_expr_text (String.concat "\n" lines)
       in
       List.fold_right
-        (fun (name, expr) acc ->
-          Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; parse_expr_text expr ]; acc ])
+        (fun (name, params, expr) acc ->
+          let expr = parse_expr_text expr |> wrap_lambdas params in
+          match Hashtbl.find_opt signatures name with
+          | Some ty -> Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; ty; expr ]; acc ]
+          | None ->
+              if params <> [] then fail ("let function binding requires a type signature: " ^ name);
+              Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; expr ]; acc ])
         bindings body
   | _ -> fail "let syntax is: let ... in ..."
 
@@ -373,9 +443,7 @@ and parse_expr st =
       in
       let params = params [] in
       let body = parse_expr st in
-      List.fold_right
-        (fun name acc -> Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom name; acc ])
-        params body
+      wrap_lambdas params body
   | _ -> parse_pipeline st
 
 and parse_pipeline st =
@@ -391,7 +459,8 @@ and parse_pipeline st =
 and parse_app st =
   let rec collect acc =
     match peek st with
-    | Some (Ident _ | Str _ | LParen | LBrace | Backslash) -> collect (parse_atom_expr st :: acc)
+    | Some (Ident _ | Str _ | LParen | LBrace | LBracket | Backslash) ->
+        collect (parse_atom_expr st :: acc)
     | _ -> List.rev acc
   in
   match collect [] with
@@ -402,13 +471,15 @@ and parse_app st =
 and parse_atom_expr st =
   match take st with
   | Some (Ident "if") -> parse_if_expr st
-  | Some (Ident name) -> Sexp.Atom name
+  | Some (Ident name) -> (
+      match field_access_expr name with Some expr -> expr | None -> Sexp.Atom name)
   | Some (Str value) -> Sexp.Str value
   | Some LParen ->
       let expr = parse_expr st in
       expect st RParen;
       expr
   | Some LBrace -> parse_record_expr st
+  | Some LBracket -> parse_list_expr st
   | Some Backslash ->
       st.pos <- st.pos - 1;
       parse_expr st
@@ -434,6 +505,28 @@ and parse_record_expr st =
     | None -> fail "unterminated record expression"
   in
   fields []
+
+and parse_list_expr st =
+  let rec elems acc =
+    match peek st with
+    | Some RBracket ->
+        ignore (take st);
+        list_literal (List.rev acc)
+    | Some Comma ->
+        ignore (take st);
+        elems acc
+    | Some _ ->
+        let expr = parse_expr st in
+        (match peek st with
+        | Some Comma ->
+            ignore (take st);
+            elems (expr :: acc)
+        | Some RBracket -> elems (expr :: acc)
+        | Some tok -> fail ("expected , or ], got " ^ token_name tok)
+        | None -> fail "unterminated list expression")
+    | None -> fail "unterminated list expression"
+  in
+  elems []
 
 and parse_if_expr st =
   let then_index = find_if_then st.pos st in
@@ -469,8 +562,8 @@ and find_if_then start st =
       | Ident "then" when paren_depth = 0 && if_depth = 0 -> i
       | Ident "else" when paren_depth = 0 && if_depth > 0 ->
           loop paren_depth (if_depth - 1) (i + 1)
-      | LParen | LBrace -> loop (paren_depth + 1) if_depth (i + 1)
-      | RParen | RBrace -> loop (max 0 (paren_depth - 1)) if_depth (i + 1)
+      | LParen | LBrace | LBracket -> loop (paren_depth + 1) if_depth (i + 1)
+      | RParen | RBrace | RBracket -> loop (max 0 (paren_depth - 1)) if_depth (i + 1)
       | _ -> loop paren_depth if_depth (i + 1)
   in
   loop 0 0 start
@@ -484,8 +577,8 @@ and find_if_else start st =
       | Ident "else" when paren_depth = 0 && if_depth = 0 -> i
       | Ident "else" when paren_depth = 0 && if_depth > 0 ->
           loop paren_depth (if_depth - 1) (i + 1)
-      | LParen | LBrace -> loop (paren_depth + 1) if_depth (i + 1)
-      | RParen | RBrace -> loop (max 0 (paren_depth - 1)) if_depth (i + 1)
+      | LParen | LBrace | LBracket -> loop (paren_depth + 1) if_depth (i + 1)
+      | RParen | RBrace | RBracket -> loop (max 0 (paren_depth - 1)) if_depth (i + 1)
       | _ -> loop paren_depth if_depth (i + 1)
   in
   loop 0 0 start
@@ -495,9 +588,9 @@ and find_expr_boundary start st =
     if i >= Array.length st.tokens then i
     else
       match st.tokens.(i) with
-      | RParen | RBrace | Comma when depth = 0 -> i
-      | LParen | LBrace -> loop (depth + 1) (i + 1)
-      | RParen | RBrace -> loop (max 0 (depth - 1)) (i + 1)
+      | RParen | RBrace | RBracket | Comma when depth = 0 -> i
+      | LParen | LBrace | LBracket -> loop (depth + 1) (i + 1)
+      | RParen | RBrace | RBracket -> loop (max 0 (depth - 1)) (i + 1)
       | _ -> loop depth (i + 1)
   in
   loop 0 start
@@ -508,22 +601,6 @@ and append_pipeline_arg stage arg =
   | f -> Sexp.List [ f; arg ]
 
 let sexp text = Sexp.to_string text
-
-let signature_separator line =
-  match String.index_opt line ':' with
-  | None -> None
-  | Some i ->
-      let name = trim (String.sub line 0 i) in
-      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
-      else None
-
-let assignment_separator line =
-  match String.index_opt line '=' with
-  | None -> None
-  | Some i ->
-      let name = trim (String.sub line 0 i) in
-      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
-      else None
 
 let collect_block lines start first =
   let len = Array.length lines in
@@ -582,7 +659,7 @@ let looks_like input =
          &&
          (starts_with line "type " || starts_with line "module " || starts_with line "export "
         || starts_with line "import " || starts_with line "capabilities "
-        || Option.is_some (signature_separator line) || Option.is_some (assignment_separator line)))
+        || Option.is_some (signature_separator line) || Option.is_some (value_separator line)))
 
 let to_sexp_source input =
   let lines = input |> String.split_on_char '\n' |> Array.of_list in
@@ -633,15 +710,16 @@ let to_sexp_source input =
             Hashtbl.replace signatures name (parse_type_text ty);
             loop (i + 1)
         | None -> (
-            match assignment_separator line with
-            | Some (name, first_body) ->
+            match value_separator line with
+            | Some (name, params, first_body) ->
                 let typ =
                   match Hashtbl.find_opt signatures name with
                   | Some typ -> typ
                   | None -> fail ("missing type signature for " ^ name)
                 in
                 let body, next = collect_block lines (i + 1) first_body in
-                forms := Sexp.List [ Sexp.Atom "def"; Sexp.Atom name; typ; parse_expr_text body ] :: !forms;
+                let expr = parse_expr_text body |> wrap_lambdas params in
+                forms := Sexp.List [ Sexp.Atom "def"; Sexp.Atom name; typ; expr ] :: !forms;
                 loop next
             | None -> fail ("invalid Elm-like top-level line: " ^ line))
   in
