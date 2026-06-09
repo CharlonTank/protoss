@@ -36,6 +36,11 @@ and continuation =
   | KDone
   | KBind of continuation * Kernel.cterm * value list * string list
 
+type recur_frame = {
+  recur_key : string;
+  recur_apply : value -> value;
+}
+
 type eval_state = {
   checked : Kernel.checked;
   def_cache : (string, value) Hashtbl.t;
@@ -44,7 +49,7 @@ type eval_state = {
   cache_scope : string;
   mutable trace : string list;
   trace_cache : bool;
-  mutable recur_stack : (value -> value) list;
+  mutable recur_stack : recur_frame list;
   mutable cap_scope : string list;
 }
 
@@ -129,6 +134,14 @@ and suspended_to_cache_key suspended =
   ^ String.concat " " (List.sort_uniq String.compare suspended.cap_scope) ^ ")"
 
 let trace st line = if st.trace_cache then st.trace <- line :: st.trace
+
+let recur_stack_to_cache_key frames =
+  match frames with
+  | [] -> "recur:none"
+  | _ ->
+      "recur:"
+      ^ String.concat ">"
+          (List.map (fun frame -> Kernel.hash_string frame.recur_key) frames)
 
 let has_prefix prefix s =
   let lp = String.length prefix in
@@ -349,7 +362,12 @@ let rec eval_cterm st env = function
           in
           loop count (eval_cterm st env zero)
       | v -> fail ("foldNat on non-Nat runtime value: " ^ value_to_string v))
-  | Kernel.CFoldVariant (_, _, scrut, branches) ->
+  | Kernel.CFoldVariant (target, result, scrut, branches) ->
+      let recur_key =
+        "foldVariant:" ^ Kernel.cterm_to_string (Kernel.CFoldVariant (target, result, scrut, branches))
+        ^ " (env " ^ String.concat " " (List.map value_to_cache_key env)
+        ^ ") (cap-scope " ^ String.concat " " (List.sort_uniq String.compare st.cap_scope) ^ ")"
+      in
       let rec fold value =
         match value with
         | VVariant (_, con, payload) ->
@@ -361,7 +379,7 @@ let rec eval_cterm st env = function
             in
             let body = Kernel.option_or_fail ("missing foldVariant branch at runtime: " ^ con) body in
             let previous = st.recur_stack in
-            st.recur_stack <- fold :: previous;
+            st.recur_stack <- { recur_key; recur_apply = fold } :: previous;
             Fun.protect
               ~finally:(fun () -> st.recur_stack <- previous)
               (fun () -> eval_cterm st (payload :: env) body)
@@ -370,7 +388,7 @@ let rec eval_cterm st env = function
       fold (eval_cterm st env scrut)
   | Kernel.CRecur e -> (
       match st.recur_stack with
-      | fold :: _ -> fold (eval_cterm st env e)
+      | frame :: _ -> frame.recur_apply (eval_cterm st env e)
       | [] -> fail "recur outside foldVariant at runtime")
   | Kernel.CNil t -> VList (t, [])
   | Kernel.CCons (t, head, tail) -> (
@@ -443,7 +461,8 @@ and expect_view = function
 and eval_app st fv av =
   let key =
     Kernel.hash_string
-      ("app-v2:" ^ st.cache_scope ^ ":" ^ value_to_cache_key fv ^ ":" ^ value_to_cache_key av)
+      ("app-v3:" ^ st.cache_scope ^ ":" ^ recur_stack_to_cache_key st.recur_stack ^ ":"
+     ^ value_to_cache_key fv ^ ":" ^ value_to_cache_key av)
   in
   match Hashtbl.find_opt st.app_cache key with
   | Some v ->

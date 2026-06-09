@@ -2417,6 +2417,56 @@ let () =
   in
   assert_equal "stdlib Protoss.declTypeNames variant" "[\"Tree\"]"
     (Runtime.value_to_string protoss_type_names_variant_decl);
+  let protoss_resolve_valid_missing_terms, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveValidMissingTerms"
+  in
+  assert_equal "stdlib Protoss.resolveText valid terms" "[]"
+    (Runtime.value_to_string protoss_resolve_valid_missing_terms);
+  let protoss_resolve_valid_missing_types, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveValidMissingTypes"
+  in
+  assert_equal "stdlib Protoss.resolveText valid types" "[]"
+    (Runtime.value_to_string protoss_resolve_valid_missing_types);
+  let protoss_resolve_valid_missing_exports, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveValidMissingExports"
+  in
+  assert_equal "stdlib Protoss.resolveText valid exports" "[]"
+    (Runtime.value_to_string protoss_resolve_valid_missing_exports);
+  let protoss_resolve_missing_terms, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveMissingTerms"
+  in
+  assert_equal "stdlib Protoss.resolveText missing terms" "[\"unknown\"]"
+    (Runtime.value_to_string protoss_resolve_missing_terms);
+  let protoss_resolve_missing_types, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveMissingTypes"
+  in
+  assert_equal "stdlib Protoss.resolveText missing types" "[\"MissingType\"]"
+    (Runtime.value_to_string protoss_resolve_missing_types);
+  let protoss_resolve_missing_exports, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveMissingExports"
+  in
+  assert_equal "stdlib Protoss.resolveText missing exports" "[\"nope\"]"
+    (Runtime.value_to_string protoss_resolve_missing_exports);
+  let protoss_resolve_duplicate_terms, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveDuplicateTerms"
+  in
+  assert_equal "stdlib Protoss.resolveText duplicate terms" "[\"a\"]"
+    (Runtime.value_to_string protoss_resolve_duplicate_terms);
+  let protoss_resolve_duplicate_types, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveDuplicateTypes"
+  in
+  assert_equal "stdlib Protoss.resolveText duplicate types" "[\"Box\"]"
+    (Runtime.value_to_string protoss_resolve_duplicate_types);
+  let protoss_resolve_external_missing_terms, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveExternalMissingTerms"
+  in
+  assert_equal "stdlib Protoss.resolveTextWith external terms" "[]"
+    (Runtime.value_to_string protoss_resolve_external_missing_terms);
+  let protoss_resolve_external_missing_types, _ =
+    Runtime.normalize_def stdlib_generics "protossResolveExternalMissingTypes"
+  in
+  assert_equal "stdlib Protoss.resolveTextWith external types" "[]"
+    (Runtime.value_to_string protoss_resolve_external_missing_types);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

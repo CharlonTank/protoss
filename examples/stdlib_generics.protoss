@@ -674,6 +674,71 @@
         (Nil (Nil String))
         (Cons decl rest (Protoss.declTypeNames decl))))))
 
+(def protossResolveParsedValid (Result String ProtossResolveReport)
+  (Protoss.resolveText "(type Count Nat)\n(def base Count 1)\n(def total Count (succ base))\n(export total Count)"))
+
+(def protossResolveValidMissingTerms (List String)
+  (case protossResolveParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingTerms))))
+
+(def protossResolveValidMissingTypes (List String)
+  (case protossResolveParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingTypes))))
+
+(def protossResolveValidMissingExports (List String)
+  (case protossResolveParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingExports))))
+
+(def protossResolveParsedMissing (Result String ProtossResolveReport)
+  (Protoss.resolveText "(def bad MissingType unknown)\n(export bad nope)"))
+
+(def protossResolveMissingTerms (List String)
+  (case protossResolveParsedMissing
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingTerms))))
+
+(def protossResolveMissingTypes (List String)
+  (case protossResolveParsedMissing
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingTypes))))
+
+(def protossResolveMissingExports (List String)
+  (case protossResolveParsedMissing
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingExports))))
+
+(def protossResolveParsedDuplicates (Result String ProtossResolveReport)
+  (Protoss.resolveText "(def a Nat 1)\n(def a Nat 2)\n(type Box Nat)\n(type Box String)"))
+
+(def protossResolveDuplicateTerms (List String)
+  (case protossResolveParsedDuplicates
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report duplicateTerms))))
+
+(def protossResolveDuplicateTypes (List String)
+  (case protossResolveParsedDuplicates
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report duplicateTypes))))
+
+(def protossResolveParsedExternal (Result String ProtossResolveReport)
+  (((Protoss.resolveTextWith
+    (Cons String "externalValue" (Nil String)))
+    (Cons String "ExternalType" (Nil String)))
+    "(def local ExternalType externalValue)"))
+
+(def protossResolveExternalMissingTerms (List String)
+  (case protossResolveParsedExternal
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingTerms))))
+
+(def protossResolveExternalMissingTypes (List String)
+  (case protossResolveParsedExternal
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingTypes))))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

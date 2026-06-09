@@ -1,4 +1,4 @@
-; Protoss stdlib v0.35. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.36. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -217,6 +217,17 @@
   (PDRecord ProtossRecordDecl)
   (PDType ProtossTypeAlias)
   (PDVariant ProtossVariantDecl))
+(record ProtossResolveReport
+  (definedTerms (List String))
+  (definedTypes (List String))
+  (termRefs (List String))
+  (typeRefs (List String))
+  (exports (List String))
+  (missingTerms (List String))
+  (missingTypes (List String))
+  (missingExports (List String))
+  (duplicateTerms (List String))
+  (duplicateTypes (List String)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -225,7 +236,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.35")
+(def Stdlib.version String "v0.36")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -3609,6 +3620,40 @@
           (lambda (acc (List String))
             ((Protoss.nameSetRemove name) acc)))))))
 
+(def Protoss.nameSetUnique (-> (List String) (List String))
+  (lambda (names (List String))
+    (foldList names (Nil String)
+      (lambda (name String)
+        (lambda (acc (List String))
+          ((Protoss.nameSetInsertRaw name) acc))))))
+
+(def Protoss.nameSetDuplicates (-> (List String) (List String))
+  (lambda (names (List String))
+    (get
+      (foldList names
+        (record
+          (first (Nil String))
+          (second (Nil String)))
+        (lambda (name String)
+          (lambda (state (Pair (List String) (List String)))
+            (case ((Protoss.nameSetContains name) (get state first))
+              (true
+                (record
+                  (first (get state first))
+                  (second ((Protoss.nameSetInsertRaw name) (get state second)))))
+              (false
+                (record
+                  (first ((Protoss.nameSetInsertRaw name) (get state first)))
+                  (second (get state second))))))))
+      second)))
+
+(def Protoss.nameSetMissingFrom (-> (List String) (-> (List String) (List String)))
+  (lambda (refs (List String))
+    (lambda (available (List String))
+      (((inst List.filter String) refs)
+        (lambda (name String)
+          (Bool.not ((Protoss.nameSetContains name) available)))))))
+
 (def Protoss.isBuiltinValueName (-> String Bool)
   (lambda (name String)
     ((Protoss.nameSetContains name) Protoss.builtinValueNames)))
@@ -3961,6 +4006,122 @@
               (lambda (acc (List String))
                 ((Protoss.nameSetUnion (Protoss.typeNames (get caseDecl payload))) acc))))))
       (_ (Nil String)))))
+
+(def Protoss.declDefinedTermNames (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def (Cons String (get def name) (Nil String)))
+      (PDDefCap def (Cons String (get def name) (Nil String)))
+      (PDDefPoly def (Cons String (get def name) (Nil String)))
+      (PDDefPolyCap def (Cons String (get def name) (Nil String)))
+      (PDDefRec def (Cons String (get def name) (Nil String)))
+      (_ (Nil String)))))
+
+(def Protoss.declDefinedTypeNames (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDRecord recordDecl (Cons String (get recordDecl name) (Nil String)))
+      (PDType typeDecl (Cons String (get typeDecl name) (Nil String)))
+      (PDVariant variantDecl (Cons String (get variantDecl name) (Nil String)))
+      (_ (Nil String)))))
+
+(def Protoss.declExportNames (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDExport names names)
+      (_ (Nil String)))))
+
+(def Protoss.declsRawDefinedTermNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          (((inst List.append String) (Protoss.declDefinedTermNames decl)) acc))))))
+
+(def Protoss.declsRawDefinedTypeNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          (((inst List.append String) (Protoss.declDefinedTypeNames decl)) acc))))))
+
+(def Protoss.declsDefinedTermNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (Protoss.nameSetUnique (Protoss.declsRawDefinedTermNames decls))))
+
+(def Protoss.declsDefinedTypeNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (Protoss.nameSetUnique (Protoss.declsRawDefinedTypeNames decls))))
+
+(def Protoss.declsTermNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (Protoss.declTermNames decl)) acc))))))
+
+(def Protoss.declsTypeNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (Protoss.declTypeNames decl)) acc))))))
+
+(def Protoss.declsRawExportNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          (((inst List.append String) (Protoss.declExportNames decl)) acc))))))
+
+(def Protoss.declsExportNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (Protoss.nameSetUnique (Protoss.declsRawExportNames decls))))
+
+(def Protoss.resolveDeclsWith
+  (-> (List String) (-> (List String) (-> (List ProtossDecl) ProtossResolveReport)))
+  (lambda (externalTerms (List String))
+    (lambda (externalTypes (List String))
+      (lambda (decls (List ProtossDecl))
+        (let (rawDefinedTerms (List String) (Protoss.declsRawDefinedTermNames decls))
+          (let (rawDefinedTypes (List String) (Protoss.declsRawDefinedTypeNames decls))
+            (let (definedTerms (List String) (Protoss.nameSetUnique rawDefinedTerms))
+              (let (definedTypes (List String) (Protoss.nameSetUnique rawDefinedTypes))
+                (let (termRefs (List String) (Protoss.declsTermNames decls))
+                  (let (typeRefs (List String) (Protoss.declsTypeNames decls))
+                    (let (exports (List String) (Protoss.declsExportNames decls))
+                      (let (availableTerms (List String) ((Protoss.nameSetUnion definedTerms) externalTerms))
+                        (let (availableTypes (List String) ((Protoss.nameSetUnion definedTypes) externalTypes))
+                          (let (exportableNames (List String) ((Protoss.nameSetUnion definedTerms) definedTypes))
+                            (record
+                              (definedTerms definedTerms)
+                              (definedTypes definedTypes)
+                              (termRefs termRefs)
+                              (typeRefs typeRefs)
+                              (exports exports)
+                              (missingTerms ((Protoss.nameSetMissingFrom termRefs) availableTerms))
+                              (missingTypes ((Protoss.nameSetMissingFrom typeRefs) availableTypes))
+                              (missingExports ((Protoss.nameSetMissingFrom exports) exportableNames))
+                              (duplicateTerms (Protoss.nameSetDuplicates rawDefinedTerms))
+                              (duplicateTypes (Protoss.nameSetDuplicates rawDefinedTypes)))))))))))))))))
+
+(def Protoss.resolveDecls (-> (List ProtossDecl) ProtossResolveReport)
+  (lambda (decls (List ProtossDecl))
+    (((Protoss.resolveDeclsWith (Nil String)) (Nil String)) decls)))
+
+(def Protoss.resolveTextWith
+  (-> (List String) (-> (List String) (-> String (Result String ProtossResolveReport))))
+  (lambda (externalTerms (List String))
+    (lambda (externalTypes (List String))
+      (lambda (source String)
+        (case (Protoss.parseText source)
+          (Err err (variant Err err))
+          (Ok decls
+            (variant Ok (((Protoss.resolveDeclsWith externalTerms) externalTypes) decls))))))))
+
+(def Protoss.resolveText (-> String (Result String ProtossResolveReport))
+  (lambda (source String)
+    (((Protoss.resolveTextWith (Nil String)) (Nil String)) source)))
 
 (def Json.null Json
   (variant JNull unit))
