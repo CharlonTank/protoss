@@ -2467,6 +2467,28 @@ let () =
   in
   assert_equal "stdlib Protoss.resolveTextWith external types" "[]"
     (Runtime.value_to_string protoss_resolve_external_missing_types);
+  let protoss_dep_order_valid, _ =
+    Runtime.normalize_def stdlib_generics "protossDepOrderValid"
+  in
+  assert_equal "stdlib Protoss.termDependencyOrderText valid"
+    "PDepOrderOk [\"a\", \"b\", \"c\"]"
+    (Runtime.value_to_string protoss_dep_order_valid);
+  let protoss_dep_order_cycle, _ =
+    Runtime.normalize_def stdlib_generics "protossDepOrderCycle"
+  in
+  assert_equal "stdlib Protoss.termDependencyOrderText cycle"
+    "PDepOrderCycle [\"a\", \"b\"]"
+    (Runtime.value_to_string protoss_dep_order_cycle);
+  let protoss_dep_order_external, _ =
+    Runtime.normalize_def stdlib_generics "protossDepOrderExternal"
+  in
+  assert_equal "stdlib Protoss.termDependencyOrderText external"
+    "PDepOrderOk [\"local\"]"
+    (Runtime.value_to_string protoss_dep_order_external);
+  let protoss_dep_nodes, _ = Runtime.normalize_def stdlib_generics "protossDepNodes" in
+  assert_equal "stdlib Protoss.declsTermDepNodes"
+    "[{deps = [\"b\"], name = \"c\"}, {deps = [\"a\"], name = \"b\"}, {deps = [], name = \"a\"}]"
+    (Runtime.value_to_string protoss_dep_nodes);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

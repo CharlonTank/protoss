@@ -1,4 +1,4 @@
-; Protoss stdlib v0.36. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.37. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -228,6 +228,15 @@
   (missingExports (List String))
   (duplicateTerms (List String))
   (duplicateTypes (List String)))
+(record ProtossDepNode
+  (name String)
+  (deps (List String)))
+(record ProtossDepSortState
+  (remaining (List ProtossDepNode))
+  (ordered (List String)))
+(variant ProtossDepOrder
+  (PDepOrderOk (List String))
+  (PDepOrderCycle (List String)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -236,7 +245,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.36")
+(def Stdlib.version String "v0.37")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -3654,6 +3663,11 @@
         (lambda (name String)
           (Bool.not ((Protoss.nameSetContains name) available)))))))
 
+(def Protoss.nameSetIntersect (-> (List String) (-> (List String) (List String)))
+  (lambda (left (List String))
+    (lambda (right (List String))
+      (((inst Set.intersect String) String.eqString) left right))))
+
 (def Protoss.isBuiltinValueName (-> String Bool)
   (lambda (name String)
     ((Protoss.nameSetContains name) Protoss.builtinValueNames)))
@@ -4122,6 +4136,114 @@
 (def Protoss.resolveText (-> String (Result String ProtossResolveReport))
   (lambda (source String)
     (((Protoss.resolveTextWith (Nil String)) (Nil String)) source)))
+
+(def Protoss.declTermDepNode (-> (List String) (-> ProtossDecl (Maybe ProtossDepNode)))
+  (lambda (definedTerms (List String))
+    (lambda (decl ProtossDecl)
+      (case decl
+        (PDDef def
+          (variant Some
+            (record
+              (name (get def name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTermNames decl)) definedTerms)))))
+        (PDDefCap def
+          (variant Some
+            (record
+              (name (get def name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTermNames decl)) definedTerms)))))
+        (PDDefPoly def
+          (variant Some
+            (record
+              (name (get def name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTermNames decl)) definedTerms)))))
+        (PDDefPolyCap def
+          (variant Some
+            (record
+              (name (get def name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTermNames decl)) definedTerms)))))
+        (PDDefRec def
+          (variant Some
+            (record
+              (name (get def name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTermNames decl)) definedTerms)))))
+        (_ (variant None unit))))))
+
+(def Protoss.declsTermDepNodes (-> (List ProtossDecl) (List ProtossDepNode))
+  (lambda (decls (List ProtossDecl))
+    (let (definedTerms (List String) (Protoss.declsDefinedTermNames decls))
+      (foldList decls (Nil ProtossDepNode)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List ProtossDepNode))
+            (case ((Protoss.declTermDepNode definedTerms) decl)
+              (None _ acc)
+              (Some node (Cons ProtossDepNode node acc)))))))))
+
+(def Protoss.depNodeNames (-> (List ProtossDepNode) (List String))
+  (lambda (nodes (List ProtossDepNode))
+    (((inst List.map ProtossDepNode String) nodes)
+      (lambda (node ProtossDepNode)
+        (get node name)))))
+
+(def Protoss.depNodeReady (-> (List String) (-> ProtossDepNode Bool))
+  (lambda (ordered (List String))
+    (lambda (node ProtossDepNode)
+      (((inst List.all String) (get node deps))
+        (lambda (dep String)
+          ((Protoss.nameSetContains dep) ordered))))))
+
+(def Protoss.depPartitionReady
+  (-> (List String) (-> (List ProtossDepNode) (Pair (List String) (List ProtossDepNode))))
+  (lambda (ordered (List String))
+    (lambda (nodes (List ProtossDepNode))
+      (foldList nodes
+        (record
+          (first (Nil String))
+          (second (Nil ProtossDepNode)))
+        (lambda (node ProtossDepNode)
+          (lambda (acc (Pair (List String) (List ProtossDepNode)))
+            (case ((Protoss.depNodeReady ordered) node)
+              (true
+                (record
+                  (first (Cons String (get node name) (get acc first)))
+                  (second (get acc second))))
+              (false
+                (record
+                  (first (get acc first))
+                  (second (Cons ProtossDepNode node (get acc second))))))))))))
+
+(def Protoss.depSortStep (-> ProtossDepSortState ProtossDepSortState)
+  (lambda (state ProtossDepSortState)
+    (caseList (get state remaining)
+      (Nil state)
+      (Cons first rest
+        (let (partition (Pair (List String) (List ProtossDepNode))
+          ((Protoss.depPartitionReady (get state ordered)) (get state remaining)))
+          (caseList (get partition first)
+            (Nil state)
+            (Cons ready restReady
+              (record
+                (remaining (get partition second))
+                (ordered (((inst List.append String) (get state ordered)) (get partition first)))))))))))
+
+(def Protoss.termDependencyOrderDecls (-> (List ProtossDecl) ProtossDepOrder)
+  (lambda (decls (List ProtossDecl))
+    (let (nodes (List ProtossDepNode) (Protoss.declsTermDepNodes decls))
+      (let (state ProtossDepSortState
+        (foldNat ((inst List.length ProtossDepNode) nodes)
+          (record
+            (remaining nodes)
+            (ordered (Nil String)))
+          (lambda (acc ProtossDepSortState)
+            (Protoss.depSortStep acc))))
+        (caseList (get state remaining)
+          (Nil (variant PDepOrderOk (get state ordered)))
+          (Cons first rest (variant PDepOrderCycle (Protoss.depNodeNames (get state remaining)))))))))
+
+(def Protoss.termDependencyOrderText (-> String (Result String ProtossDepOrder))
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (variant Err err))
+      (Ok decls (variant Ok (Protoss.termDependencyOrderDecls decls))))))
 
 (def Json.null Json
   (variant JNull unit))

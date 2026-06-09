@@ -739,6 +739,38 @@
     (Err err (Cons String err (Nil String)))
     (Ok report (get report missingTypes))))
 
+(def protossDepOrderParsedValid (Result String ProtossDepOrder)
+  (Protoss.termDependencyOrderText "(def c Nat b)\n(def b Nat a)\n(def a Nat 1)"))
+
+(def protossDepOrderValid (ProtossDepOrder)
+  (case protossDepOrderParsedValid
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok order order)))
+
+(def protossDepOrderParsedCycle (Result String ProtossDepOrder)
+  (Protoss.termDependencyOrderText "(def a Nat b)\n(def b Nat a)"))
+
+(def protossDepOrderCycle (ProtossDepOrder)
+  (case protossDepOrderParsedCycle
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok order order)))
+
+(def protossDepOrderParsedExternal (Result String ProtossDepOrder)
+  (Protoss.termDependencyOrderText "(def local Nat externalValue)"))
+
+(def protossDepOrderExternal (ProtossDepOrder)
+  (case protossDepOrderParsedExternal
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok order order)))
+
+(def protossDepNodesParsed (Result String (List ProtossDecl))
+  (Protoss.parseText "(def c Nat b)\n(def b Nat a)\n(def a Nat 1)"))
+
+(def protossDepNodes (List ProtossDepNode)
+  (case protossDepNodesParsed
+    (Err err (Nil ProtossDepNode))
+    (Ok decls (Protoss.declsTermDepNodes decls))))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
