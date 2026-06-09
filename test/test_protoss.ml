@@ -2690,6 +2690,18 @@ let () =
   let json_missing_field, _ = Runtime.normalize_def stdlib_generics "jsonMissingField" in
   assert_equal "stdlib Json.expectField missing" "Err \"missing field\""
     (Runtime.value_to_string json_missing_field);
+  let json_rendered_profile, _ = Runtime.normalize_def stdlib_generics "jsonRenderedProfile" in
+  assert_equal "stdlib Json.render object" "\"{\\\"name\\\":\\\"Ada\\\",\\\"age\\\":41}\""
+    (Runtime.value_to_string json_rendered_profile);
+  let json_rendered_array, _ = Runtime.normalize_def stdlib_generics "jsonRenderedArray" in
+  assert_equal "stdlib Json.render array" "\"[true,null,3]\""
+    (Runtime.value_to_string json_rendered_array);
+  let json_rendered_escaped, _ =
+    Runtime.normalize_def stdlib_generics "jsonRenderedEscaped"
+  in
+  assert_equal "stdlib Json.render escaped string"
+    "\"\\\"Ada\\\\n\\\\\\\"Lovelace\\\\\\\"\\\\\\\\lab\\\"\""
+    (Runtime.value_to_string json_rendered_escaped);
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in

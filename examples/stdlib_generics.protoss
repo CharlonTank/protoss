@@ -929,6 +929,20 @@
 (def jsonMissingField (Result String Json)
   ((Json.expectField "missing") jsonProfile))
 
+(def jsonRenderedProfile String
+  (Json.render jsonProfile))
+
+(def jsonRenderedArray String
+  (Json.render
+    (Json.array
+      (Cons Json (Json.bool true)
+        (Cons Json Json.null
+          (Cons Json (Json.nat 3)
+            (Nil Json)))))))
+
+(def jsonRenderedEscaped String
+  (Json.render (Json.string "Ada\n\"Lovelace\"\\lab")))
+
 (def total Nat
   (foldList bumped 0
     (lambda (x Nat)

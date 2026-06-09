@@ -1,4 +1,4 @@
-; Protoss stdlib v0.41. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.42. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -274,7 +274,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.41")
+(def Stdlib.version String "v0.42")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -5087,6 +5087,82 @@
       (Json.object
         ((((inst Assoc.insert String Json) key) value)
           (inst Assoc.empty String Json))))))
+
+(def Json.escapeChar (-> String String)
+  (lambda (ch String)
+    (case ((String.eqString ch) "\"")
+      (true "\\\"")
+      (false
+        (case ((String.eqString ch) "\\")
+          (true "\\\\")
+          (false
+            (case ((String.eqString ch) "\n")
+              (true "\\n")
+              (false
+                (case ((String.eqString ch) "\r")
+                  (true "\\r")
+                  (false
+                    (case ((String.eqString ch) "\t")
+                      (true "\\t")
+                      (false ch))))))))))))
+
+(def Json.escapeString (-> String String)
+  (lambda (value String)
+    (get
+      (foldNat (String.length value)
+        (record
+          (first (TextCursor.start value))
+          (second String.empty))
+        (lambda (state (Pair TextCursor String))
+          (case (TextCursor.current (get state first))
+            (None state)
+            (Some ch
+              (record
+                (first (TextCursor.advance (get state first)))
+                (second
+                  ((String.concat (get state second)) (Json.escapeChar ch))))))))
+      second)))
+
+(def Json.renderString (-> String String)
+  (lambda (value String)
+    ((String.concat "\"") ((String.concat (Json.escapeString value)) "\""))))
+
+(def Json.renderBool (-> Bool String)
+  (lambda (value Bool)
+    (case value
+      (true "true")
+      (false "false"))))
+
+(defrec Json.render (-> Json String)
+  (variant json)
+  (JArray items
+    ((String.concat "[")
+      ((String.concat
+        (foldList items String.empty
+          (lambda (item Json)
+            (lambda (acc String)
+              (let (current String (recur item))
+                (case (String.isEmpty acc)
+                  (true current)
+                  (false ((String.concat current) ((String.concat ",") acc)))))))))
+        "]")))
+  (JBool value (Json.renderBool value))
+  (JNat value (Nat.toString value))
+  (JNull "null")
+  (JObject fields
+    ((String.concat "{")
+      ((String.concat
+        (foldList fields String.empty
+          (lambda (field (Pair String Json))
+            (lambda (acc String)
+              (let (current String
+                ((String.concat (Json.renderString (get field first)))
+                  ((String.concat ":") (recur (get field second)))))
+                (case (String.isEmpty acc)
+                  (true current)
+                  (false ((String.concat current) ((String.concat ",") acc)))))))))
+        "}")))
+  (JString value (Json.renderString value)))
 
 (def Json.isNull (-> Json Bool)
   (lambda (json Json)
