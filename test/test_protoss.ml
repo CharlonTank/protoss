@@ -211,6 +211,19 @@ let () =
   ignore (check valid);
   expect_check_error "(def bad Nat true)";
 
+  let elm_like_path = find_up (Sys.getcwd ()) "examples/elm_like.protoss" in
+  let elm_like_equiv_path = find_up (Sys.getcwd ()) "examples/elm_like_equiv.protoss" in
+  let elm_like = Loader.check_file elm_like_path in
+  let elm_like_equiv = Loader.check_file elm_like_equiv_path in
+  assert_equal "Elm-like surface hashes as S-expression surface"
+    (Kernel.hash_program elm_like_equiv) (Kernel.hash_program elm_like);
+  let elm_like_main, _ = Runtime.normalize_def elm_like "main" in
+  assert_equal "Elm-like pipeline normalizes" "5"
+    (Runtime.value_to_string elm_like_main);
+  let elm_like_user, _ = Runtime.normalize_def elm_like "user" in
+  assert_equal "Elm-like record literal normalizes" "{active = true, name = \"Ada\"}"
+    (Runtime.value_to_string elm_like_user);
+
   let alpha_a = check "(def main (-> Nat Nat) (lambda (x Nat) (succ x)))" in
   let alpha_b = check "(def main (-> Nat Nat) (lambda (y Nat) (succ y)))" in
   assert_equal "alpha hash" (Kernel.hash_program alpha_a) (Kernel.hash_program alpha_b);

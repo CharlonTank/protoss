@@ -1,0 +1,26 @@
+import "../stdlib/prelude.protoss"
+
+type alias User =
+    { name : String
+    , active : Bool
+    }
+
+type Status
+    = Open
+    | Closed
+
+double : Nat -> Nat
+double =
+    \x -> x |> Nat.add x
+
+main : Nat
+main =
+    2
+        |> double
+        |> succ
+
+user : User
+user =
+    { name = "Ada"
+    , active = true
+    }

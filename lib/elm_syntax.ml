@@ -1,0 +1,473 @@
+exception Error of string
+
+let fail msg = raise (Error msg)
+
+let trim = String.trim
+
+let starts_with s prefix =
+  let n = String.length prefix in
+  String.length s >= n && String.sub s 0 n = prefix
+
+let is_space = function ' ' | '\t' | '\r' | '\n' -> true | _ -> false
+
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let is_ident_start = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+  | _ -> false
+
+let is_ident_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '.' -> true
+  | _ -> false
+
+let is_name s =
+  let len = String.length s in
+  len > 0 && is_ident_start s.[0]
+  &&
+  let rec loop i =
+    i >= len || (is_ident_char s.[i] && loop (i + 1))
+  in
+  loop 1
+
+let indentation line =
+  let rec loop i =
+    if i < String.length line && (line.[i] = ' ' || line.[i] = '\t') then loop (i + 1)
+    else i
+  in
+  loop 0
+
+let strip_line_comment line =
+  if starts_with (trim line) "--" then "" else line
+
+let split_words s =
+  s |> String.split_on_char ' ' |> List.map trim |> List.filter (( <> ) "")
+
+type token =
+  | Ident of string
+  | Str of string
+  | LParen
+  | RParen
+  | LBrace
+  | RBrace
+  | Colon
+  | Equals
+  | Comma
+  | Pipe
+  | PipeGt
+  | Arrow
+  | Backslash
+
+let token_name = function
+  | Ident s -> s
+  | Str _ -> "string"
+  | LParen -> "("
+  | RParen -> ")"
+  | LBrace -> "{"
+  | RBrace -> "}"
+  | Colon -> ":"
+  | Equals -> "="
+  | Comma -> ","
+  | Pipe -> "|"
+  | PipeGt -> "|>"
+  | Arrow -> "->"
+  | Backslash -> "\\"
+
+let tokenize input =
+  let len = String.length input in
+  let rec string start buf i =
+    if i >= len then fail "unterminated string"
+    else
+      match input.[i] with
+      | '"' -> (Str (Buffer.contents buf), i + 1)
+      | '\\' when i + 1 < len ->
+          let c =
+            match input.[i + 1] with
+            | 'n' -> '\n'
+            | 'r' -> '\r'
+            | 't' -> '\t'
+            | '"' -> '"'
+            | '\\' -> '\\'
+            | c -> c
+          in
+          Buffer.add_char buf c;
+          string start buf (i + 2)
+      | c ->
+          Buffer.add_char buf c;
+          string start buf (i + 1)
+  in
+  let ident_token i =
+    let j = ref i in
+    while
+      !j < len
+      && (not (is_space input.[!j]))
+      &&
+      match input.[!j] with
+      | '(' | ')' | '{' | '}' | ':' | '=' | ',' | '|' | '\\' -> false
+      | '-' when !j + 1 < len && input.[!j + 1] = '>' -> false
+      | _ -> true
+    do
+      incr j
+    done;
+    if !j = i then fail ("unexpected character: " ^ String.make 1 input.[i]);
+    (Ident (String.sub input i (!j - i)), !j)
+  in
+  let rec loop acc i =
+    if i >= len then List.rev acc
+    else if is_space input.[i] then loop acc (i + 1)
+    else
+      match input.[i] with
+      | '(' -> loop (LParen :: acc) (i + 1)
+      | ')' -> loop (RParen :: acc) (i + 1)
+      | '{' -> loop (LBrace :: acc) (i + 1)
+      | '}' -> loop (RBrace :: acc) (i + 1)
+      | ':' -> loop (Colon :: acc) (i + 1)
+      | '=' -> loop (Equals :: acc) (i + 1)
+      | ',' -> loop (Comma :: acc) (i + 1)
+      | '\\' -> loop (Backslash :: acc) (i + 1)
+      | '|' when i + 1 < len && input.[i + 1] = '>' -> loop (PipeGt :: acc) (i + 2)
+      | '|' -> loop (Pipe :: acc) (i + 1)
+      | '-' when i + 1 < len && input.[i + 1] = '>' -> loop (Arrow :: acc) (i + 2)
+      | '"' ->
+          let tok, j = string i (Buffer.create 16) (i + 1) in
+          loop (tok :: acc) j
+      | _ ->
+          let tok, j = ident_token i in
+          loop (tok :: acc) j
+  in
+  loop [] 0
+
+type stream = { tokens : token array; mutable pos : int }
+
+let stream tokens = { tokens = Array.of_list tokens; pos = 0 }
+
+let peek st =
+  if st.pos >= Array.length st.tokens then None else Some st.tokens.(st.pos)
+
+let take st =
+  match peek st with
+  | None -> None
+  | Some tok ->
+      st.pos <- st.pos + 1;
+      Some tok
+
+let expect st wanted =
+  match take st with
+  | Some tok when tok = wanted -> ()
+  | Some tok -> fail ("expected " ^ token_name wanted ^ ", got " ^ token_name tok)
+  | None -> fail ("expected " ^ token_name wanted)
+
+let at_end st = st.pos >= Array.length st.tokens
+
+let rec parse_type tokens =
+  let st = stream tokens in
+  let ty = parse_fun_type st in
+  if not (at_end st) then fail ("unexpected type token: " ^ token_name st.tokens.(st.pos));
+  ty
+
+and parse_fun_type st =
+  let left = parse_app_type st in
+  match peek st with
+  | Some Arrow ->
+      ignore (take st);
+      Sexp.List [ Sexp.Atom "->"; left; parse_fun_type st ]
+  | _ -> left
+
+and parse_app_type st =
+  let rec collect acc =
+    match peek st with
+    | Some (Ident _ | LParen | LBrace) -> collect (parse_type_atom st :: acc)
+    | _ -> List.rev acc
+  in
+  match collect [] with
+  | [] -> fail "expected type"
+  | [ one ] -> one
+  | Sexp.Atom name :: args -> Sexp.List (Sexp.Atom name :: args)
+  | head :: _ -> fail ("invalid type application head: " ^ Sexp.to_string head)
+
+and parse_type_atom st =
+  match take st with
+  | Some (Ident name) -> Sexp.Atom name
+  | Some LParen ->
+      let ty = parse_fun_type st in
+      expect st RParen;
+      ty
+  | Some LBrace -> parse_record_type st
+  | Some tok -> fail ("expected type atom, got " ^ token_name tok)
+  | None -> fail "expected type atom"
+
+and parse_record_type st =
+  let rec fields acc =
+    match peek st with
+    | Some RBrace ->
+        ignore (take st);
+        Sexp.List (Sexp.Atom "Record" :: List.rev acc)
+    | Some Comma ->
+        ignore (take st);
+        fields acc
+    | Some (Ident name) ->
+        ignore (take st);
+        expect st Colon;
+        let ty = parse_fun_type st in
+        (match peek st with Some Comma -> ignore (take st) | _ -> ());
+        fields (Sexp.List [ Sexp.Atom name; ty ] :: acc)
+    | Some tok -> fail ("invalid record type field: " ^ token_name tok)
+    | None -> fail "unterminated record type"
+  in
+  fields []
+
+let parse_type_text text = parse_type (tokenize text)
+
+let split_variant_cases tokens =
+  let rec loop depth current acc = function
+    | [] -> List.rev (List.rev current :: acc)
+    | Pipe :: rest when depth = 0 -> loop depth [] (List.rev current :: acc) rest
+    | LParen :: rest -> loop (depth + 1) (LParen :: current) acc rest
+    | LBrace :: rest -> loop (depth + 1) (LBrace :: current) acc rest
+    | RParen :: rest -> loop (max 0 (depth - 1)) (RParen :: current) acc rest
+    | RBrace :: rest -> loop (max 0 (depth - 1)) (RBrace :: current) acc rest
+    | tok :: rest -> loop depth (tok :: current) acc rest
+  in
+  loop 0 [] [] tokens
+
+let rec parse_payload_atoms acc st =
+  if at_end st then List.rev acc else parse_payload_atoms (parse_type_atom st :: acc) st
+
+let tuple_payload = function
+  | [] -> Sexp.Atom "Unit"
+  | [ one ] -> one
+  | payloads ->
+      Sexp.List
+        (Sexp.Atom "Record"
+        :: List.mapi
+             (fun i ty -> Sexp.List [ Sexp.Atom ("_" ^ string_of_int (i + 1)); ty ])
+             payloads)
+
+let parse_variant_case tokens =
+  match tokens with
+  | Ident name :: rest ->
+      let payloads = parse_payload_atoms [] (stream rest) in
+      Sexp.List [ Sexp.Atom name; tuple_payload payloads ]
+  | [] -> fail "empty variant constructor"
+  | tok :: _ -> fail ("expected variant constructor, got " ^ token_name tok)
+
+let rec parse_expr_text text =
+  let st = stream (tokenize text) in
+  let expr = parse_expr st in
+  if not (at_end st) then fail ("unexpected expression token: " ^ token_name st.tokens.(st.pos));
+  expr
+
+and parse_expr st =
+  match peek st with
+  | Some Backslash ->
+      ignore (take st);
+      let name =
+        match take st with
+        | Some (Ident name) -> name
+        | Some tok -> fail ("expected lambda parameter, got " ^ token_name tok)
+        | None -> fail "expected lambda parameter"
+      in
+      expect st Arrow;
+      Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom name; parse_expr st ]
+  | _ -> parse_pipeline st
+
+and parse_pipeline st =
+  let rec loop acc =
+    match peek st with
+    | Some PipeGt ->
+        ignore (take st);
+        loop (append_pipeline_arg (parse_app st) acc)
+    | _ -> acc
+  in
+  loop (parse_app st)
+
+and parse_app st =
+  let rec collect acc =
+    match peek st with
+    | Some (Ident _ | Str _ | LParen | LBrace | Backslash) -> collect (parse_atom_expr st :: acc)
+    | _ -> List.rev acc
+  in
+  match collect [] with
+  | [] -> fail "expected expression"
+  | [ one ] -> one
+  | f :: args -> Sexp.List (f :: args)
+
+and parse_atom_expr st =
+  match take st with
+  | Some (Ident name) -> Sexp.Atom name
+  | Some (Str value) -> Sexp.Str value
+  | Some LParen ->
+      let expr = parse_expr st in
+      expect st RParen;
+      expr
+  | Some LBrace -> parse_record_expr st
+  | Some Backslash ->
+      st.pos <- st.pos - 1;
+      parse_expr st
+  | Some tok -> fail ("expected expression atom, got " ^ token_name tok)
+  | None -> fail "expected expression atom"
+
+and parse_record_expr st =
+  let rec fields acc =
+    match peek st with
+    | Some RBrace ->
+        ignore (take st);
+        Sexp.List (Sexp.Atom "record" :: List.rev acc)
+    | Some Comma ->
+        ignore (take st);
+        fields acc
+    | Some (Ident name) ->
+        ignore (take st);
+        expect st Equals;
+        let expr = parse_expr st in
+        (match peek st with Some Comma -> ignore (take st) | _ -> ());
+        fields (Sexp.List [ Sexp.Atom name; expr ] :: acc)
+    | Some tok -> fail ("invalid record field: " ^ token_name tok)
+    | None -> fail "unterminated record expression"
+  in
+  fields []
+
+and append_pipeline_arg stage arg =
+  match stage with
+  | Sexp.List (f :: args) -> Sexp.List (f :: args @ [ arg ])
+  | f -> Sexp.List [ f; arg ]
+
+let sexp text = Sexp.to_string text
+
+let signature_separator line =
+  match String.index_opt line ':' with
+  | None -> None
+  | Some i ->
+      let name = trim (String.sub line 0 i) in
+      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
+      else None
+
+let assignment_separator line =
+  match String.index_opt line '=' with
+  | None -> None
+  | Some i ->
+      let name = trim (String.sub line 0 i) in
+      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
+      else None
+
+let collect_block lines start first =
+  let len = Array.length lines in
+  let rec loop i acc =
+    if i >= len then (String.concat " " (List.rev acc), i)
+    else
+      let raw = lines.(i) |> strip_line_comment in
+      let trimmed = trim raw in
+      if trimmed = "" then loop (i + 1) acc
+      else if indentation raw > 0 || starts_with trimmed "|" || starts_with trimmed "," then
+        loop (i + 1) (trimmed :: acc)
+      else (String.concat " " (List.rev acc), i)
+  in
+  let acc = if trim first = "" then [] else [ trim first ] in
+  loop start acc
+
+let parse_type_decl text =
+  let tokens = tokenize text in
+  match tokens with
+  | Ident "type" :: Ident "alias" :: Ident name :: rest ->
+      let params, rhs =
+        let rec split acc = function
+          | Equals :: rhs -> (List.rev acc, rhs)
+          | Ident p :: rest -> split (p :: acc) rest
+          | tok :: _ -> fail ("invalid type alias header: " ^ token_name tok)
+          | [] -> fail "type alias missing ="
+        in
+        split [] rest
+      in
+      Sexp.List
+        (Sexp.Atom "type" :: Sexp.Atom name
+        :: (if params = [] then [] else [ Sexp.List (List.map (fun p -> Sexp.Atom p) params) ])
+        @ [ parse_type rhs ])
+  | Ident "type" :: Ident name :: rest ->
+      let params, rhs =
+        let rec split acc = function
+          | Equals :: rhs -> (List.rev acc, rhs)
+          | Ident p :: rest -> split (p :: acc) rest
+          | tok :: _ -> fail ("invalid type header: " ^ token_name tok)
+          | [] -> fail "type declaration missing ="
+        in
+        split [] rest
+      in
+      let cases = split_variant_cases rhs |> List.map parse_variant_case in
+      Sexp.List
+        (Sexp.Atom "variant" :: Sexp.Atom name
+        :: (if params = [] then [] else [ Sexp.List (Sexp.Atom "params" :: List.map (fun p -> Sexp.Atom p) params) ])
+        @ cases)
+  | _ -> fail "invalid type declaration"
+
+let looks_like input =
+  input |> String.split_on_char '\n'
+  |> List.exists (fun raw ->
+         let line = trim (strip_line_comment raw) in
+         line <> "" && not (starts_with line "(")
+         &&
+         (starts_with line "type " || starts_with line "module " || starts_with line "export "
+        || starts_with line "import " || starts_with line "capabilities "
+        || Option.is_some (signature_separator line) || Option.is_some (assignment_separator line)))
+
+let to_sexp_source input =
+  let lines = input |> String.split_on_char '\n' |> Array.of_list in
+  let signatures = Hashtbl.create 16 in
+  let forms = ref [] in
+  let rec loop i =
+    if i >= Array.length lines then ()
+    else
+      let raw = strip_line_comment lines.(i) in
+      let line = trim raw in
+      if line = "" then loop (i + 1)
+      else if indentation raw > 0 then fail ("unexpected indented top-level line: " ^ line)
+      else if starts_with line "module " then (
+        let parts = split_words line in
+        match parts with
+        | [ "module"; name ] ->
+            forms := Sexp.List [ Sexp.Atom "module"; Sexp.Atom name ] :: !forms;
+            loop (i + 1)
+        | _ -> fail "module syntax is: module Name")
+      else if starts_with line "export " then (
+        match split_words line with
+        | "export" :: names ->
+            forms := Sexp.List (Sexp.Atom "export" :: List.map (fun n -> Sexp.Atom n) names) :: !forms;
+            loop (i + 1)
+        | _ -> fail "export syntax is: export name ...")
+      else if starts_with line "import " then (
+        let path = trim (String.sub line 7 (String.length line - 7)) in
+        let path =
+          if String.length path >= 2 && path.[0] = '"' && path.[String.length path - 1] = '"'
+          then String.sub path 1 (String.length path - 2)
+          else path
+        in
+        forms := Sexp.List [ Sexp.Atom "import"; Sexp.Str path ] :: !forms;
+        loop (i + 1))
+      else if starts_with line "capabilities " then (
+        let caps =
+          match split_words line with "capabilities" :: caps -> caps | _ -> []
+        in
+        forms := Sexp.List (Sexp.Atom "capabilities" :: List.map (fun c -> Sexp.Atom c) caps) :: !forms;
+        loop (i + 1))
+      else if starts_with line "type " then
+        let block, next = collect_block lines (i + 1) line in
+        forms := parse_type_decl block :: !forms;
+        loop next
+      else
+        match signature_separator line with
+        | Some (name, ty) ->
+            Hashtbl.replace signatures name (parse_type_text ty);
+            loop (i + 1)
+        | None -> (
+            match assignment_separator line with
+            | Some (name, first_body) ->
+                let typ =
+                  match Hashtbl.find_opt signatures name with
+                  | Some typ -> typ
+                  | None -> fail ("missing type signature for " ^ name)
+                in
+                let body, next = collect_block lines (i + 1) first_body in
+                forms := Sexp.List [ Sexp.Atom "def"; Sexp.Atom name; typ; parse_expr_text body ] :: !forms;
+                loop next
+            | None -> fail ("invalid Elm-like top-level line: " ^ line))
+  in
+  loop 0;
+  !forms |> List.rev |> List.map Sexp.to_string |> String.concat "\n"

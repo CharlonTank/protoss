@@ -741,7 +741,7 @@ let parse_toplevel = function
   | Sexp.List (Sexp.Atom "defrecpoly" :: _) -> fail "invalid defrecpoly form"
   | x -> fail ("invalid top-level form: " ^ Sexp.to_string x)
 
-let parse_string input =
+let parse_sexp_string input =
   let forms =
     try Sexp.parse input with Sexp.Error msg -> fail msg
   in
@@ -774,6 +774,14 @@ let parse_string input =
     type_aliases;
     defs;
   }
+
+let parse_string input =
+  if Elm_syntax.looks_like input then
+    let converted =
+      try Elm_syntax.to_sexp_source input with Elm_syntax.Error msg -> fail msg
+    in
+    parse_sexp_string converted
+  else parse_sexp_string input
 
 let parse_file path =
   let ic = open_in path in

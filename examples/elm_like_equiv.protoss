@@ -1,0 +1,19 @@
+(import "../stdlib/prelude.protoss")
+
+(type User (Record (active Bool) (name String)))
+
+(variant Status
+  (Closed Unit)
+  (Open Unit))
+
+(def double (-> Nat Nat)
+  (lambda x
+    ((Nat.add x) x)))
+
+(def main Nat
+  (succ (double 2)))
+
+(def user User
+  (record
+    (active true)
+    (name "Ada")))
