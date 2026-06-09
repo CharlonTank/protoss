@@ -6,7 +6,14 @@ Install from this repository:
 
 ```sh
 mkdir -p ~/.cursor/extensions
-cp -R editors/cursor/protoss-syntax ~/.cursor/extensions/protoss.protoss-syntax-0.2.0
+cp -R editors/cursor/protoss-syntax ~/.cursor/extensions/protoss.protoss-syntax-0.2.1
+```
+
+For Cursor Remote/WSL, also install it in the remote extension host:
+
+```sh
+mkdir -p ~/.cursor-server/extensions
+cp -R editors/cursor/protoss-syntax ~/.cursor-server/extensions/protoss.protoss-syntax-0.2.1
 ```
 
 Restart Cursor and open any `.protoss` file. Cursor should select the `Protoss` language automatically.
