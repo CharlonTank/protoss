@@ -42,6 +42,27 @@ let strip_line_comment line =
 let split_words s =
   s |> String.split_on_char ' ' |> List.map trim |> List.filter (( <> ) "")
 
+let nonempty_lines text =
+  text |> String.split_on_char '\n' |> List.map strip_line_comment |> List.map trim
+  |> List.filter (( <> ) "")
+
+let find_sub s needle =
+  let n = String.length needle in
+  let rec loop i =
+    if i + n > String.length s then None
+    else if String.sub s i n = needle then Some i
+    else loop (i + 1)
+  in
+  loop 0
+
+let binding_separator line =
+  match String.index_opt line '=' with
+  | None -> None
+  | Some i ->
+      let name = trim (String.sub line 0 i) in
+      if is_name name then Some (name, trim (String.sub line (i + 1) (String.length line - i - 1)))
+      else None
+
 type token =
   | Ident of string
   | Str of string
@@ -251,10 +272,91 @@ let parse_variant_case tokens =
   | tok :: _ -> fail ("expected variant constructor, got " ^ token_name tok)
 
 let rec parse_expr_text text =
-  let st = stream (tokenize text) in
-  let expr = parse_expr st in
-  if not (at_end st) then fail ("unexpected expression token: " ^ token_name st.tokens.(st.pos));
-  expr
+  let text = trim text in
+  if text = "let" || starts_with text "let\n" then parse_let_expr text
+  else if starts_with text "case " then parse_case_expr text
+  else
+    let st = stream (tokenize text) in
+    let expr = parse_expr st in
+    if not (at_end st) then fail ("unexpected expression token: " ^ token_name st.tokens.(st.pos));
+    expr
+
+and parse_let_expr text =
+  let lines = nonempty_lines text in
+  match lines with
+  | "let" :: rest ->
+      let rec split_bindings acc = function
+        | [] -> fail "let block missing in"
+        | "in" :: body -> (List.rev acc, body)
+        | line :: rest -> (
+            match binding_separator line with
+            | Some (name, expr) -> split_bindings ((name, expr) :: acc) rest
+            | None -> fail ("invalid let binding: " ^ line))
+      in
+      let bindings, body = split_bindings [] rest in
+      let body =
+        match body with
+        | [] -> fail "let block missing body"
+        | lines -> parse_expr_text (String.concat "\n" lines)
+      in
+      List.fold_right
+        (fun (name, expr) acc ->
+          Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom name; parse_expr_text expr ]; acc ])
+        bindings body
+  | _ -> fail "let syntax is: let ... in ..."
+
+and parse_case_expr text =
+  let lines = nonempty_lines text in
+  match lines with
+  | header :: branch_lines when starts_with header "case " && String.length header >= 8 ->
+      let scrutinee =
+        match find_sub header " of" with
+        | Some i -> trim (String.sub header 5 (i - 5))
+        | None -> fail "case syntax is: case expr of"
+      in
+      if branch_lines = [] then fail "case expression requires branches";
+      let branches = parse_case_branches branch_lines in
+      Sexp.List (Sexp.Atom "match" :: parse_expr_text scrutinee :: branches)
+  | _ -> fail "case syntax is: case expr of"
+
+and parse_case_branches lines =
+  let finish acc = function
+    | None -> List.rev acc
+    | Some (pattern, body_lines) ->
+        let body = String.concat "\n" (List.rev body_lines) in
+        parse_case_branch pattern body :: acc |> List.rev
+  in
+  let rec loop acc current = function
+    | [] -> finish acc current
+    | line :: rest -> (
+        match find_sub line "->" with
+        | Some i ->
+            let pattern = trim (String.sub line 0 i) in
+            let body = trim (String.sub line (i + 2) (String.length line - i - 2)) in
+            let acc =
+              match current with
+              | None -> acc
+              | Some (old_pattern, old_body) ->
+                  parse_case_branch old_pattern (String.concat "\n" (List.rev old_body)) :: acc
+            in
+            loop acc (Some (pattern, [ body ])) rest
+        | None -> (
+            match current with
+            | None -> fail ("case branch missing ->: " ^ line)
+            | Some (pattern, body) -> loop acc (Some (pattern, line :: body)) rest))
+  in
+  loop [] None lines
+
+and parse_case_branch pattern body =
+  match split_words pattern with
+  | [] -> fail "empty case branch pattern"
+  | [ "_" ] -> Sexp.List [ Sexp.Atom "_"; parse_expr_text body ]
+  | [ "true" ] -> Sexp.List [ Sexp.Atom "true"; parse_expr_text body ]
+  | [ "false" ] -> Sexp.List [ Sexp.Atom "false"; parse_expr_text body ]
+  | [ con ] -> Sexp.List [ Sexp.Atom con; parse_expr_text body ]
+  | [ con; binder ] -> Sexp.List [ Sexp.Atom con; Sexp.Atom binder; parse_expr_text body ]
+  | [ "Cons"; head; tail ] -> Sexp.List [ Sexp.Atom "Cons"; Sexp.Atom head; Sexp.Atom tail; parse_expr_text body ]
+  | _ -> fail ("unsupported case branch pattern: " ^ pattern)
 
 and parse_expr st =
   match peek st with
@@ -352,14 +454,14 @@ let assignment_separator line =
 let collect_block lines start first =
   let len = Array.length lines in
   let rec loop i acc =
-    if i >= len then (String.concat " " (List.rev acc), i)
+    if i >= len then (String.concat "\n" (List.rev acc), i)
     else
       let raw = lines.(i) |> strip_line_comment in
       let trimmed = trim raw in
       if trimmed = "" then loop (i + 1) acc
       else if indentation raw > 0 || starts_with trimmed "|" || starts_with trimmed "," then
         loop (i + 1) (trimmed :: acc)
-      else (String.concat " " (List.rev acc), i)
+      else (String.concat "\n" (List.rev acc), i)
   in
   let acc = if trim first = "" then [] else [ trim first ] in
   loop start acc

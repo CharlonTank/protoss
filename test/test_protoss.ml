@@ -220,6 +220,12 @@ let () =
   let elm_like_main, _ = Runtime.normalize_def elm_like "main" in
   assert_equal "Elm-like pipeline normalizes" "5"
     (Runtime.value_to_string elm_like_main);
+  let elm_like_selected, _ = Runtime.normalize_def elm_like "selected" in
+  assert_equal "Elm-like case normalizes" "1"
+    (Runtime.value_to_string elm_like_selected);
+  let elm_like_with_let, _ = Runtime.normalize_def elm_like "withLet" in
+  assert_equal "Elm-like let normalizes" "5"
+    (Runtime.value_to_string elm_like_with_let);
   let elm_like_user, _ = Runtime.normalize_def elm_like "user" in
   assert_equal "Elm-like record literal normalizes" "{active = true, name = \"Ada\"}"
     (Runtime.value_to_string elm_like_user);

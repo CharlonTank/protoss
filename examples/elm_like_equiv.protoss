@@ -13,6 +13,16 @@
 (def main Nat
   (succ (double 2)))
 
+(def selected Nat
+  (match true
+    (true 1)
+    (false 0)))
+
+(def withLet Nat
+  (let (base 2)
+    (let (bumped (double base))
+      (succ bumped))))
+
 (def user User
   (record
     (active true)

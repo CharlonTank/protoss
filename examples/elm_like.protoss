@@ -19,6 +19,20 @@ main =
         |> double
         |> succ
 
+selected : Nat
+selected =
+    case true of
+        true -> 1
+        false -> 0
+
+withLet : Nat
+withLet =
+    let
+        base = 2
+        bumped = base |> double
+    in
+        bumped |> succ
+
 user : User
 user =
     { name = "Ada"
