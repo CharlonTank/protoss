@@ -1,4 +1,4 @@
-; Protoss stdlib v0.34. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.35. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -225,7 +225,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.34")
+(def Stdlib.version String "v0.35")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -3561,6 +3561,406 @@
     (case (Protoss.parseText source)
       (Err err (variant Err err))
       (Ok decls (variant Ok (Protoss.renderDecls decls))))))
+
+(def Protoss.builtinValueNames (List String)
+  (Cons String "succ"
+    (Cons String "prim.Nat.eq"
+      (Cons String "prim.Nat.toString"
+        (Cons String "prim.String.concat"
+          (Cons String "prim.String.eq"
+            (Cons String "prim.String.length"
+              (Cons String "prim.String.slice"
+                (Nil String)))))))))
+
+(def Protoss.builtinTypeNames (List String)
+  (Cons String "Unit"
+    (Cons String "Bool"
+      (Cons String "Nat"
+        (Cons String "String"
+          (Cons String "Process"
+            (Cons String "List"
+              (Nil String))))))))
+
+(def Protoss.nameSetContains (-> String (-> (List String) Bool))
+  (lambda (name String)
+    (lambda (names (List String))
+      ((((inst Set.contains String) String.eqString) name) names))))
+
+(def Protoss.nameSetInsertRaw (-> String (-> (List String) (List String)))
+  (lambda (name String)
+    (lambda (names (List String))
+      ((((inst Set.insert String) String.eqString) name) names))))
+
+(def Protoss.nameSetUnion (-> (List String) (-> (List String) (List String)))
+  (lambda (left (List String))
+    (lambda (right (List String))
+      ((((inst Set.union String) String.eqString) left) right))))
+
+(def Protoss.nameSetRemove (-> String (-> (List String) (List String)))
+  (lambda (name String)
+    (lambda (names (List String))
+      ((((inst Set.remove String) String.eqString) name) names))))
+
+(def Protoss.nameSetRemoveMany (-> (List String) (-> (List String) (List String)))
+  (lambda (removed (List String))
+    (lambda (names (List String))
+      (foldList removed names
+        (lambda (name String)
+          (lambda (acc (List String))
+            ((Protoss.nameSetRemove name) acc)))))))
+
+(def Protoss.isBuiltinValueName (-> String Bool)
+  (lambda (name String)
+    ((Protoss.nameSetContains name) Protoss.builtinValueNames)))
+
+(def Protoss.isBuiltinTypeName (-> String Bool)
+  (lambda (name String)
+    ((Protoss.nameSetContains name) Protoss.builtinTypeNames)))
+
+(def Protoss.isNatLiteralName (-> String Bool)
+  (lambda (name String)
+    (case ((Nat.eqNat (String.length name)) 0)
+      (true false)
+      (false
+        (let (scan (Pair Nat Bool)
+          (foldNat (String.length name)
+            (record (first 0) (second true))
+            (lambda (state (Pair Nat Bool))
+              (record
+                (first (succ (get state first)))
+                (second
+                  (case (get state second)
+                    (true
+                      (case ((String.charAt name) (get state first))
+                        (None _ false)
+                        (Some ch (String.isDigit ch))))
+                    (false false)))))))
+          (get scan second))))))
+
+(def Protoss.isValueReferenceName (-> String Bool)
+  (lambda (name String)
+    (case (String.isEmpty name)
+      (true false)
+      (false
+        (case (Protoss.isBuiltinValueName name)
+          (true false)
+          (false (Bool.not (Protoss.isNatLiteralName name))))))))
+
+(def Protoss.valueRefName (-> String (-> (List String) (List String)))
+  (lambda (name String)
+    (lambda (bound (List String))
+      (case ((Protoss.nameSetContains name) bound)
+        (true (Nil String))
+        (false
+          (case (Protoss.isValueReferenceName name)
+            (true ((Protoss.nameSetInsertRaw name) (Nil String)))
+            (false (Nil String))))))))
+
+(def Protoss.typeRefName (-> String (-> (List String) (List String)))
+  (lambda (name String)
+    (lambda (bound (List String))
+      (case ((Protoss.nameSetContains name) bound)
+        (true (Nil String))
+        (false
+          (case (Protoss.isBuiltinTypeName name)
+            (true (Nil String))
+            (false ((Protoss.nameSetInsertRaw name) (Nil String)))))))))
+
+(defrec Protoss.typeNames (-> ProtossType (List String))
+  (variant typ)
+  (PTName name
+    ((Protoss.typeRefName name) (Nil String)))
+  (PTFun pair
+    ((Protoss.nameSetUnion (recur (get pair first)))
+      (recur (get pair second))))
+  (PTApply app
+    ((Protoss.nameSetUnion ((Protoss.typeRefName (get app name)) (Nil String)))
+      (foldList (get app args) (Nil String)
+        (lambda (arg ProtossType)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion (recur arg)) acc)))))))
+
+(def Protoss.typeNamesExcept (-> (List String) (-> ProtossType (List String)))
+  (lambda (bound (List String))
+    (lambda (typ ProtossType)
+      ((Protoss.nameSetRemoveMany bound) (Protoss.typeNames typ)))))
+
+(defrec Protoss.exprTermNames (-> ProtossExpr (List String))
+  (variant expr)
+  (PEApply call
+    ((Protoss.nameSetUnion (recur (get call fn)))
+      (foldList (get call args) (Nil String)
+        (lambda (arg ProtossExpr)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion (recur arg)) acc))))))
+  (PEBind bindExpr
+    ((Protoss.nameSetUnion (recur (get bindExpr process)))
+      ((Protoss.nameSetRemove (get bindExpr param)) (recur (get bindExpr body)))))
+  (PEBool value
+    (Nil String))
+  (PECase caseExpr
+    ((Protoss.nameSetUnion (recur (get caseExpr scrutinee)))
+      (foldList (get caseExpr branches) (Nil String)
+        (lambda (branch ProtossCaseBranch)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion
+              (case (get branch binder)
+                (None _ (recur (get branch body)))
+                (Some name ((Protoss.nameSetRemove name) (recur (get branch body))))))
+              acc))))))
+  (PECaseList caseListExpr
+    ((Protoss.nameSetUnion (recur (get caseListExpr target)))
+      ((Protoss.nameSetUnion (recur (get caseListExpr nilBody)))
+        ((Protoss.nameSetRemoveMany
+          (Cons String (get caseListExpr head)
+            (Cons String (get caseListExpr tail)
+              (Nil String))))
+          (recur (get caseListExpr consBody))))))
+  (PEDone value
+    (recur value))
+  (PEField fieldExpr
+    (recur (get fieldExpr target)))
+  (PEFoldNat foldNatExpr
+    ((Protoss.nameSetUnion (recur (get foldNatExpr target)))
+      ((Protoss.nameSetUnion (recur (get foldNatExpr zero)))
+        (recur (get foldNatExpr step)))))
+  (PEFoldVariant foldVariantExpr
+    ((Protoss.nameSetUnion (recur (get foldVariantExpr scrutinee)))
+      (foldList (get foldVariantExpr branches) (Nil String)
+        (lambda (branch ProtossCaseBranch)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion
+              (case (get branch binder)
+                (None _ (recur (get branch body)))
+                (Some name ((Protoss.nameSetRemove name) (recur (get branch body))))))
+              acc))))))
+  (PEFoldList foldListExpr
+    ((Protoss.nameSetUnion (recur (get foldListExpr target)))
+      ((Protoss.nameSetUnion (recur (get foldListExpr zero)))
+        (recur (get foldListExpr step)))))
+  (PEInst instExpr
+    ((Protoss.valueRefName (get instExpr name)) (Nil String)))
+  (PELambda lam
+    ((Protoss.nameSetRemove (get (get lam param) name))
+      (recur (get lam body))))
+  (PELet letExpr
+    ((Protoss.nameSetUnion (recur (get letExpr value)))
+      ((Protoss.nameSetRemove (get letExpr name))
+        (recur (get letExpr body)))))
+  (PECons consExpr
+    ((Protoss.nameSetUnion (recur (get consExpr head)))
+      (recur (get consExpr tail))))
+  (PENil nilExpr
+    (Nil String))
+  (PERecord fields
+    (foldList fields (Nil String)
+      (lambda (field ProtossRecordFieldExpr)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (recur (get field expr))) acc)))))
+  (PERecur value
+    (recur value))
+  (PERequest request
+    (Nil String))
+  (PEString value
+    (Nil String))
+  (PEUnit
+    (Nil String))
+  (PEVariant variantExpr
+    (recur (get variantExpr payload)))
+  (PEVar name
+    ((Protoss.valueRefName name) (Nil String))))
+
+(defrec Protoss.exprTypeNames (-> ProtossExpr (List String))
+  (variant expr)
+  (PEApply call
+    ((Protoss.nameSetUnion (recur (get call fn)))
+      (foldList (get call args) (Nil String)
+        (lambda (arg ProtossExpr)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion (recur arg)) acc))))))
+  (PEBind bindExpr
+    ((Protoss.nameSetUnion (Protoss.typeNames (get bindExpr typ)))
+      ((Protoss.nameSetUnion (recur (get bindExpr process)))
+        (recur (get bindExpr body)))))
+  (PEBool value
+    (Nil String))
+  (PECase caseExpr
+    ((Protoss.nameSetUnion (recur (get caseExpr scrutinee)))
+      (foldList (get caseExpr branches) (Nil String)
+        (lambda (branch ProtossCaseBranch)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion (recur (get branch body))) acc))))))
+  (PECaseList caseListExpr
+    ((Protoss.nameSetUnion (recur (get caseListExpr target)))
+      ((Protoss.nameSetUnion (recur (get caseListExpr nilBody)))
+        (recur (get caseListExpr consBody)))))
+  (PEDone value
+    (recur value))
+  (PEField fieldExpr
+    (recur (get fieldExpr target)))
+  (PEFoldNat foldNatExpr
+    ((Protoss.nameSetUnion (recur (get foldNatExpr target)))
+      ((Protoss.nameSetUnion (recur (get foldNatExpr zero)))
+        (recur (get foldNatExpr step)))))
+  (PEFoldVariant foldVariantExpr
+    ((Protoss.nameSetUnion (Protoss.typeNames (get foldVariantExpr target)))
+      ((Protoss.nameSetUnion (Protoss.typeNames (get foldVariantExpr result)))
+        ((Protoss.nameSetUnion (recur (get foldVariantExpr scrutinee)))
+          (foldList (get foldVariantExpr branches) (Nil String)
+            (lambda (branch ProtossCaseBranch)
+              (lambda (acc (List String))
+                ((Protoss.nameSetUnion (recur (get branch body))) acc))))))))
+  (PEFoldList foldListExpr
+    ((Protoss.nameSetUnion (recur (get foldListExpr target)))
+      ((Protoss.nameSetUnion (recur (get foldListExpr zero)))
+        (recur (get foldListExpr step)))))
+  (PEInst instExpr
+    (foldList (get instExpr typeArgs) (Nil String)
+      (lambda (typ ProtossType)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (Protoss.typeNames typ)) acc)))))
+  (PELambda lam
+    ((Protoss.nameSetUnion (Protoss.typeNames (get (get lam param) typ)))
+      (recur (get lam body))))
+  (PELet letExpr
+    ((Protoss.nameSetUnion
+      (case (get letExpr typ)
+        (None _ (Nil String))
+        (Some typ (Protoss.typeNames typ))))
+      ((Protoss.nameSetUnion (recur (get letExpr value)))
+        (recur (get letExpr body)))))
+  (PECons consExpr
+    ((Protoss.nameSetUnion
+      (case (get consExpr typ)
+        (None _ (Nil String))
+        (Some typ (Protoss.typeNames typ))))
+      ((Protoss.nameSetUnion (recur (get consExpr head)))
+        (recur (get consExpr tail)))))
+  (PENil nilExpr
+    (case (get nilExpr typ)
+      (None _ (Nil String))
+      (Some typ (Protoss.typeNames typ))))
+  (PERecord fields
+    (foldList fields (Nil String)
+      (lambda (field ProtossRecordFieldExpr)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (recur (get field expr))) acc)))))
+  (PERecur value
+    (recur value))
+  (PERequest request
+    (Nil String))
+  (PEString value
+    (Nil String))
+  (PEUnit
+    (Nil String))
+  (PEVariant variantExpr
+    ((Protoss.nameSetUnion
+      (case (get variantExpr typeHint)
+        (None _ (Nil String))
+        (Some typ (Protoss.typeNames typ))))
+      (recur (get variantExpr payload))))
+  (PEVar name
+    (Nil String)))
+
+(def Protoss.defRecBodyTermNames (-> ProtossDefRecBody (List String))
+  (lambda (body ProtossDefRecBody)
+    (case body
+      (PDRNat nat
+        ((Protoss.nameSetUnion
+          ((Protoss.nameSetRemove (get nat param)) (Protoss.exprTermNames (get nat zero))))
+          ((Protoss.nameSetRemoveMany
+            (Cons String (get nat acc)
+              (Cons String (get nat param)
+                (Nil String))))
+            (Protoss.exprTermNames (get nat step)))))
+      (PDRList listRec
+        ((Protoss.nameSetUnion
+          ((Protoss.nameSetRemove (get listRec param)) (Protoss.exprTermNames (get listRec nil))))
+          ((Protoss.nameSetRemoveMany
+            (Cons String (get listRec item)
+              (Cons String (get listRec acc)
+                (Cons String (get listRec param)
+                  (Nil String)))))
+            (Protoss.exprTermNames (get listRec step)))))
+      (PDRVariant variantRec
+        (foldList (get variantRec branches) (Nil String)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List String))
+              ((Protoss.nameSetUnion
+                (case (get branch binder)
+                  (None _
+                    ((Protoss.nameSetRemove (get variantRec param))
+                      (Protoss.exprTermNames (get branch body))))
+                  (Some name
+                    ((Protoss.nameSetRemoveMany
+                      (Cons String name
+                        (Cons String (get variantRec param)
+                          (Nil String))))
+                      (Protoss.exprTermNames (get branch body))))))
+                acc))))))))
+
+(def Protoss.defRecBodyTypeNames (-> ProtossDefRecBody (List String))
+  (lambda (body ProtossDefRecBody)
+    (case body
+      (PDRNat nat
+        ((Protoss.nameSetUnion (Protoss.exprTypeNames (get nat zero)))
+          (Protoss.exprTypeNames (get nat step))))
+      (PDRList listRec
+        ((Protoss.nameSetUnion (Protoss.exprTypeNames (get listRec nil)))
+          (Protoss.exprTypeNames (get listRec step))))
+      (PDRVariant variantRec
+        (foldList (get variantRec branches) (Nil String)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List String))
+              ((Protoss.nameSetUnion (Protoss.exprTypeNames (get branch body))) acc))))))))
+
+(def Protoss.declTermNames (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def (Protoss.exprTermNames (get def expr)))
+      (PDDefCap def (Protoss.exprTermNames (get def expr)))
+      (PDDefPoly def (Protoss.exprTermNames (get def expr)))
+      (PDDefPolyCap def (Protoss.exprTermNames (get def expr)))
+      (PDDefRec def (Protoss.defRecBodyTermNames (get def body)))
+      (_ (Nil String)))))
+
+(def Protoss.declTypeNames (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def
+        ((Protoss.nameSetUnion (Protoss.typeNames (get def typ)))
+          (Protoss.exprTypeNames (get def expr))))
+      (PDDefCap def
+        ((Protoss.nameSetUnion (Protoss.typeNames (get def typ)))
+          (Protoss.exprTypeNames (get def expr))))
+      (PDDefPoly def
+        ((Protoss.nameSetRemoveMany (get def typeParams))
+          ((Protoss.nameSetUnion (Protoss.typeNames (get def typ)))
+            (Protoss.exprTypeNames (get def expr)))))
+      (PDDefPolyCap def
+        ((Protoss.nameSetRemoveMany (get def typeParams))
+          ((Protoss.nameSetUnion (Protoss.typeNames (get def typ)))
+            (Protoss.exprTypeNames (get def expr)))))
+      (PDDefRec def
+        ((Protoss.nameSetRemoveMany (get def typeParams))
+          ((Protoss.nameSetUnion (Protoss.typeNames (get def typ)))
+            (Protoss.defRecBodyTypeNames (get def body)))))
+      (PDRecord recordDecl
+        ((Protoss.nameSetRemoveMany (get recordDecl typeParams))
+          (foldList (get recordDecl fields) (Nil String)
+            (lambda (field ProtossField)
+              (lambda (acc (List String))
+                ((Protoss.nameSetUnion (Protoss.typeNames (get field typ))) acc))))))
+      (PDType typeDecl
+        ((Protoss.nameSetRemoveMany (get typeDecl typeParams))
+          (Protoss.typeNames (get typeDecl body))))
+      (PDVariant variantDecl
+        ((Protoss.nameSetRemoveMany (get variantDecl typeParams))
+          (foldList (get variantDecl cases) (Nil String)
+            (lambda (caseDecl ProtossVariantCase)
+              (lambda (acc (List String))
+                ((Protoss.nameSetUnion (Protoss.typeNames (get caseDecl payload))) acc))))))
+      (_ (Nil String)))))
 
 (def Json.null Json
   (variant JNull unit))

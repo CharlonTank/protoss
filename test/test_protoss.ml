@@ -2386,6 +2386,37 @@ let () =
   assert_equal "stdlib Protoss.formatText defrec"
     "Ok \"(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))\\n(defrecpoly copy (params A) (-> (List A) (List A)) (list xs) (nil Nil) (cons item acc (Cons item acc)))\""
     (Runtime.value_to_string protoss_formatted_defrec);
+  let protoss_term_names_def, _ =
+    Runtime.normalize_def stdlib_generics "protossTermNamesDef"
+  in
+  assert_equal "stdlib Protoss.declTermNames def" "[\"Nat.add\", \"base\"]"
+    (Runtime.value_to_string protoss_term_names_def);
+  let protoss_type_names_def, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeNamesDef"
+  in
+  assert_equal "stdlib Protoss.declTypeNames def" "[\"Pair\"]"
+    (Runtime.value_to_string protoss_type_names_def);
+  let protoss_term_names_poly, _ =
+    Runtime.normalize_def stdlib_generics "protossTermNamesPoly"
+  in
+  assert_equal "stdlib Protoss.declTermNames defpoly" "[]"
+    (Runtime.value_to_string protoss_term_names_poly);
+  let protoss_type_names_poly, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeNamesPoly"
+  in
+  assert_equal "stdlib Protoss.declTypeNames defpoly" "[\"Maybe\"]"
+    (Runtime.value_to_string protoss_type_names_poly);
+  let protoss_term_names_defrec, _ =
+    Runtime.normalize_def stdlib_generics "protossTermNamesDefRec"
+  in
+  assert_equal "stdlib Protoss.declTermNames defrec"
+    "[\"base\", \"Nat.add\", \"stepBase\"]"
+    (Runtime.value_to_string protoss_term_names_defrec);
+  let protoss_type_names_variant_decl, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeNamesVariantDecl"
+  in
+  assert_equal "stdlib Protoss.declTypeNames variant" "[\"Tree\"]"
+    (Runtime.value_to_string protoss_type_names_variant_decl);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

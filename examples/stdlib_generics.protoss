@@ -614,6 +614,66 @@
 (def protossFormattedDefRec (Result String String)
   (Protoss.formatText "(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))\n(defrecpoly copy (params A) (-> (List A) (List A)) (list xs) (nil Nil) (cons item acc (Cons item acc)))"))
 
+(def protossDepsParsedDef (Result String (List ProtossDecl))
+  (Protoss.parseText "(def total (Pair Nat String) ((Nat.add base) (let (x Nat 1) (succ x))))"))
+
+(def protossTermNamesDef (List String)
+  (case protossDepsParsedDef
+    (Err err (Nil String))
+    (Ok decls
+      (caseList decls
+        (Nil (Nil String))
+        (Cons decl rest (Protoss.declTermNames decl))))))
+
+(def protossTypeNamesDef (List String)
+  (case protossDepsParsedDef
+    (Err err (Nil String))
+    (Ok decls
+      (caseList decls
+        (Nil (Nil String))
+        (Cons decl rest (Protoss.declTypeNames decl))))))
+
+(def protossDepsParsedPoly (Result String (List ProtossDecl))
+  (Protoss.parseText "(defpoly wrap (params A) (-> A (Maybe A)) (lambda (x A) (variant Some x)))"))
+
+(def protossTermNamesPoly (List String)
+  (case protossDepsParsedPoly
+    (Err err (Nil String))
+    (Ok decls
+      (caseList decls
+        (Nil (Nil String))
+        (Cons decl rest (Protoss.declTermNames decl))))))
+
+(def protossTypeNamesPoly (List String)
+  (case protossDepsParsedPoly
+    (Err err (Nil String))
+    (Ok decls
+      (caseList decls
+        (Nil (Nil String))
+        (Cons decl rest (Protoss.declTypeNames decl))))))
+
+(def protossDepsParsedDefRec (Result String (List ProtossDecl))
+  (Protoss.parseText "(defrec count (-> Nat Nat) (nat n) (zero base) (step acc ((Nat.add acc) stepBase)))"))
+
+(def protossTermNamesDefRec (List String)
+  (case protossDepsParsedDefRec
+    (Err err (Nil String))
+    (Ok decls
+      (caseList decls
+        (Nil (Nil String))
+        (Cons decl rest (Protoss.declTermNames decl))))))
+
+(def protossDepsParsedVariantType (Result String (List ProtossDecl))
+  (Protoss.parseText "(variant Tree (params A) (Leaf A) (Node (Tree A)))"))
+
+(def protossTypeNamesVariantDecl (List String)
+  (case protossDepsParsedVariantType
+    (Err err (Nil String))
+    (Ok decls
+      (caseList decls
+        (Nil (Nil String))
+        (Cons decl rest (Protoss.declTypeNames decl))))))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
