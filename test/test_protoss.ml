@@ -2513,6 +2513,54 @@ let () =
   assert_equal "stdlib Protoss.declsTypeDepNodes"
     "[{deps = [\"Box\"], name = \"UseBox\"}, {deps = [\"Id\"], name = \"Box\"}, {deps = [], name = \"Id\"}]"
     (Runtime.value_to_string protoss_type_dep_nodes);
+  let protoss_type_env_entries, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvValidEntries"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText entries"
+    "[{arity = 0, deps = [\"Box\"], kind = \"variant\", name = \"UseBox\"}, {arity = 1, deps = [], kind = \"record\", name = \"Box\"}, {arity = 0, deps = [], kind = \"alias\", name = \"Id\"}]"
+    (Runtime.value_to_string protoss_type_env_entries);
+  let protoss_type_env_order, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvValidOrder"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText order"
+    "PDepOrderOk [\"Box\", \"Id\", \"UseBox\"]"
+    (Runtime.value_to_string protoss_type_env_order);
+  let protoss_type_env_duplicate_type, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvDuplicateType"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText duplicate type"
+    "Err \"duplicate type: Box\""
+    (Runtime.value_to_string protoss_type_env_duplicate_type);
+  let protoss_type_env_missing_type, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvMissingType"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText missing type"
+    "Err \"missing type: Missing\""
+    (Runtime.value_to_string protoss_type_env_missing_type);
+  let protoss_type_env_duplicate_param, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvDuplicateParam"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText duplicate param"
+    "Err \"duplicate type parameter: Box.A\""
+    (Runtime.value_to_string protoss_type_env_duplicate_param);
+  let protoss_type_env_duplicate_record_field, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvDuplicateRecordField"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText duplicate record field"
+    "Err \"duplicate record field: Box.value\""
+    (Runtime.value_to_string protoss_type_env_duplicate_record_field);
+  let protoss_type_env_duplicate_variant_case, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvDuplicateVariantCase"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText duplicate variant case"
+    "Err \"duplicate variant case: Maybe.Some\""
+    (Runtime.value_to_string protoss_type_env_duplicate_variant_case);
+  let protoss_type_env_cycle, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvCycle"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText cycle"
+    "Err \"cyclic type dependency: A,B\""
+    (Runtime.value_to_string protoss_type_env_cycle);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

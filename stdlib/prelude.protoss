@@ -1,4 +1,4 @@
-; Protoss stdlib v0.38. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.39. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -237,6 +237,19 @@
 (variant ProtossDepOrder
   (PDepOrderOk (List String))
   (PDepOrderCycle (List String)))
+(record ProtossTypeEnvEntry
+  (name String)
+  (kind String)
+  (arity Nat)
+  (deps (List String)))
+(record ProtossTypeEnvReport
+  (entries (List ProtossTypeEnvEntry))
+  (order ProtossDepOrder)
+  (missingTypes (List String))
+  (duplicateTypes (List String))
+  (duplicateTypeParams (List String))
+  (duplicateRecordFields (List String))
+  (duplicateVariantCases (List String)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -245,7 +258,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.38")
+(def Stdlib.version String "v0.39")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -4297,6 +4310,204 @@
     (case (Protoss.parseText source)
       (Err err (variant Err err))
       (Ok decls (variant Ok (Protoss.typeDependencyOrderDecls decls))))))
+
+(def Protoss.qualifyName (-> String (-> String String))
+  (lambda (owner String)
+    (lambda (name String)
+      ((String.concat ((String.concat owner) ".")) name))))
+
+(def Protoss.qualifyNames (-> String (-> (List String) (List String)))
+  (lambda (owner String)
+    (lambda (names (List String))
+      (((inst List.map String String) names)
+        (lambda (name String)
+          ((Protoss.qualifyName owner) name))))))
+
+(def Protoss.recordFieldNames (-> ProtossRecordDecl (List String))
+  (lambda (recordDecl ProtossRecordDecl)
+    (((inst List.map ProtossField String) (get recordDecl fields))
+      (lambda (field ProtossField)
+        (get field name)))))
+
+(def Protoss.variantCaseNames (-> ProtossVariantDecl (List String))
+  (lambda (variantDecl ProtossVariantDecl)
+    (((inst List.map ProtossVariantCase String) (get variantDecl cases))
+      (lambda (caseDecl ProtossVariantCase)
+        (get caseDecl name)))))
+
+(def Protoss.declDuplicateTypeParams (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDefPoly def
+        (Protoss.nameSetDuplicates (get def typeParams)))
+      (PDDefPolyCap def
+        (Protoss.nameSetDuplicates (get def typeParams)))
+      (PDDefRec def
+        (Protoss.nameSetDuplicates (get def typeParams)))
+      (PDRecord recordDecl
+        ((Protoss.qualifyNames (get recordDecl name))
+          (Protoss.nameSetDuplicates (get recordDecl typeParams))))
+      (PDType typeDecl
+        ((Protoss.qualifyNames (get typeDecl name))
+          (Protoss.nameSetDuplicates (get typeDecl typeParams))))
+      (PDVariant variantDecl
+        ((Protoss.qualifyNames (get variantDecl name))
+          (Protoss.nameSetDuplicates (get variantDecl typeParams))))
+      (_ (Nil String)))))
+
+(def Protoss.declsDuplicateTypeParams (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (Protoss.declDuplicateTypeParams decl)) acc))))))
+
+(def Protoss.declDuplicateRecordFields (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDRecord recordDecl
+        ((Protoss.qualifyNames (get recordDecl name))
+          (Protoss.nameSetDuplicates (Protoss.recordFieldNames recordDecl))))
+      (_ (Nil String)))))
+
+(def Protoss.declsDuplicateRecordFields (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (Protoss.declDuplicateRecordFields decl)) acc))))))
+
+(def Protoss.declDuplicateVariantCases (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDVariant variantDecl
+        ((Protoss.qualifyNames (get variantDecl name))
+          (Protoss.nameSetDuplicates (Protoss.variantCaseNames variantDecl))))
+      (_ (Nil String)))))
+
+(def Protoss.declsDuplicateVariantCases (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          ((Protoss.nameSetUnion (Protoss.declDuplicateVariantCases decl)) acc))))))
+
+(def Protoss.typeEnvEntry (-> (List String) (-> ProtossDecl (Maybe ProtossTypeEnvEntry)))
+  (lambda (definedTypes (List String))
+    (lambda (decl ProtossDecl)
+      (case decl
+        (PDRecord recordDecl
+          (variant Some
+            (record
+              (name (get recordDecl name))
+              (kind "record")
+              (arity ((inst List.length String) (get recordDecl typeParams)))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTypeNames decl)) definedTypes)))))
+        (PDType typeDecl
+          (variant Some
+            (record
+              (name (get typeDecl name))
+              (kind "alias")
+              (arity ((inst List.length String) (get typeDecl typeParams)))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTypeNames decl)) definedTypes)))))
+        (PDVariant variantDecl
+          (variant Some
+            (record
+              (name (get variantDecl name))
+              (kind "variant")
+              (arity ((inst List.length String) (get variantDecl typeParams)))
+              (deps
+                ((Protoss.nameSetRemove (get variantDecl name))
+                  ((Protoss.nameSetIntersect (Protoss.declTypeNames decl)) definedTypes))))))
+        (_ (variant None unit))))))
+
+(def Protoss.declsTypeEnvEntries (-> (List ProtossDecl) (List ProtossTypeEnvEntry))
+  (lambda (decls (List ProtossDecl))
+    (let (definedTypes (List String) (Protoss.declsDefinedTypeNames decls))
+      (foldList decls (Nil ProtossTypeEnvEntry)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List ProtossTypeEnvEntry))
+            (case ((Protoss.typeEnvEntry definedTypes) decl)
+              (None _ acc)
+              (Some entry (Cons ProtossTypeEnvEntry entry acc)))))))))
+
+(def Protoss.typeEnvReportDeclsWith
+  (-> (List String) (-> (List ProtossDecl) ProtossTypeEnvReport))
+  (lambda (externalTypes (List String))
+    (lambda (decls (List ProtossDecl))
+      (let (resolve ProtossResolveReport (((Protoss.resolveDeclsWith (Nil String)) externalTypes) decls))
+        (record
+          (entries (Protoss.declsTypeEnvEntries decls))
+          (order (Protoss.typeDependencyOrderDecls decls))
+          (missingTypes (get resolve missingTypes))
+          (duplicateTypes (get resolve duplicateTypes))
+          (duplicateTypeParams (Protoss.declsDuplicateTypeParams decls))
+          (duplicateRecordFields (Protoss.declsDuplicateRecordFields decls))
+          (duplicateVariantCases (Protoss.declsDuplicateVariantCases decls)))))))
+
+(def Protoss.typeEnvReportDecls (-> (List ProtossDecl) ProtossTypeEnvReport)
+  (lambda (decls (List ProtossDecl))
+    ((Protoss.typeEnvReportDeclsWith (Nil String)) decls)))
+
+(def Protoss.typeEnvReportTextWith
+  (-> (List String) (-> String (Result String ProtossTypeEnvReport)))
+  (lambda (externalTypes (List String))
+    (lambda (source String)
+      (case (Protoss.parseText source)
+        (Err err (variant Err err))
+        (Ok decls (variant Ok ((Protoss.typeEnvReportDeclsWith externalTypes) decls)))))))
+
+(def Protoss.typeEnvReportText (-> String (Result String ProtossTypeEnvReport))
+  (lambda (source String)
+    ((Protoss.typeEnvReportTextWith (Nil String)) source)))
+
+(def Protoss.typeEnvFirstError (-> ProtossTypeEnvReport (Maybe String))
+  (lambda (report ProtossTypeEnvReport)
+    (caseList (get report duplicateTypes)
+      (Nil
+        (caseList (get report duplicateTypeParams)
+          (Nil
+            (caseList (get report duplicateRecordFields)
+              (Nil
+                (caseList (get report duplicateVariantCases)
+                  (Nil
+                    (caseList (get report missingTypes)
+                      (Nil
+                        (case (get report order)
+                          (PDepOrderOk ordered (variant None unit))
+                          (PDepOrderCycle names
+                            (variant Some
+                              ((String.concat "cyclic type dependency: ") ((String.join ",") names))))))
+                      (Cons first rest (variant Some ((String.concat "missing type: ") first)))))
+                  (Cons first rest (variant Some ((String.concat "duplicate variant case: ") first)))))
+              (Cons first rest (variant Some ((String.concat "duplicate record field: ") first)))))
+          (Cons first rest (variant Some ((String.concat "duplicate type parameter: ") first)))))
+      (Cons first rest (variant Some ((String.concat "duplicate type: ") first))))))
+
+(def Protoss.checkTypeEnvDeclsWith
+  (-> (List String) (-> (List ProtossDecl) (Result String ProtossTypeEnvReport)))
+  (lambda (externalTypes (List String))
+    (lambda (decls (List ProtossDecl))
+      (let (report ProtossTypeEnvReport ((Protoss.typeEnvReportDeclsWith externalTypes) decls))
+        (case (Protoss.typeEnvFirstError report)
+          (None _ (variant Ok report))
+          (Some err (variant Err err)))))))
+
+(def Protoss.checkTypeEnvDecls (-> (List ProtossDecl) (Result String ProtossTypeEnvReport))
+  (lambda (decls (List ProtossDecl))
+    ((Protoss.checkTypeEnvDeclsWith (Nil String)) decls)))
+
+(def Protoss.checkTypeEnvTextWith
+  (-> (List String) (-> String (Result String ProtossTypeEnvReport)))
+  (lambda (externalTypes (List String))
+    (lambda (source String)
+      (case (Protoss.parseText source)
+        (Err err (variant Err err))
+        (Ok decls ((Protoss.checkTypeEnvDeclsWith externalTypes) decls))))))
+
+(def Protoss.checkTypeEnvText (-> String (Result String ProtossTypeEnvReport))
+  (lambda (source String)
+    ((Protoss.checkTypeEnvTextWith (Nil String)) source)))
 
 (def Json.null Json
   (variant JNull unit))

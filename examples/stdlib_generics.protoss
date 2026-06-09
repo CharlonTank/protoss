@@ -803,6 +803,37 @@
     (Err err (Nil ProtossDepNode))
     (Ok decls (Protoss.declsTypeDepNodes decls))))
 
+(def protossTypeEnvParsedValid (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(variant UseBox (Some Box))\n(record Box (params A) (value A))\n(type Id Nat)"))
+
+(def protossTypeEnvValidEntries (List ProtossTypeEnvEntry)
+  (case protossTypeEnvParsedValid
+    (Err err (Nil ProtossTypeEnvEntry))
+    (Ok report (get report entries))))
+
+(def protossTypeEnvValidOrder (ProtossDepOrder)
+  (case protossTypeEnvParsedValid
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok report (get report order))))
+
+(def protossTypeEnvDuplicateType (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(type Box Nat)\n(record Box (value Nat))"))
+
+(def protossTypeEnvMissingType (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(record Box (value Missing))"))
+
+(def protossTypeEnvDuplicateParam (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(record Box (params A A) (value A))"))
+
+(def protossTypeEnvDuplicateRecordField (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(record Box (value Nat) (value String))"))
+
+(def protossTypeEnvDuplicateVariantCase (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(variant Maybe (Some Nat) (Some String))"))
+
+(def protossTypeEnvCycle (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(type A B)\n(type B A)"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
