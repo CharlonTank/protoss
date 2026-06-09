@@ -1,0 +1,2 @@
+(def a Nat b)
+(def b Nat a)
