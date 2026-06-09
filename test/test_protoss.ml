@@ -2295,6 +2295,29 @@ let () =
   assert_equal "stdlib Protoss.parseText bad defcap"
     "Err \"invalid definition capabilities\""
     (Runtime.value_to_string protoss_parsed_bad_defcap);
+  let protoss_parsed_defrec_nat, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDefRecNat"
+  in
+  assert_equal "stdlib Protoss.parseText defrec Nat"
+    "Ok [PDDefRec {body = PDRNat {acc = \"acc\", param = \"n\", step = PEApply {args = [PEVar \"acc\"], fn = PEVar \"succ\"}, zero = PEVar \"0\"}, name = \"count\", typ = PTFun {first = PTName \"Nat\", second = PTName \"Nat\"}, typeParams = []}]"
+    (Runtime.value_to_string protoss_parsed_defrec_nat);
+  let protoss_parsed_defrec_variant, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDefRecVariant"
+  in
+  assert_equal "stdlib Protoss.parseText defrec Variant"
+    "Ok [PDDefRec {body = PDRVariant {branches = [{binder = Some \"n\", body = PEVar \"1\", constructor = \"Leaf\"}, {binder = Some \"pair\", body = PERecur PEField {field = \"left\", target = PEVar \"pair\"}, constructor = \"Node\"}], param = \"tree\"}, name = \"size\", typ = PTFun {first = PTName \"Tree\", second = PTName \"Nat\"}, typeParams = []}]"
+    (Runtime.value_to_string protoss_parsed_defrec_variant);
+  let protoss_parsed_defrecpoly_list, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedDefRecPolyList"
+  in
+  assert_equal "stdlib Protoss.parseText defrecpoly List"
+    "Ok [PDDefRec {body = PDRList {acc = \"acc\", item = \"item\", nil = PENil {arg = None unit, typ = None unit}, param = \"xs\", step = PECons {head = PEVar \"item\", tail = PEVar \"acc\", typ = None unit}}, name = \"copy\", typ = PTFun {first = PTApply {args = [PTName \"A\"], name = \"List\"}, second = PTApply {args = [PTName \"A\"], name = \"List\"}}, typeParams = [\"A\"]}]"
+    (Runtime.value_to_string protoss_parsed_defrecpoly_list);
+  let protoss_parsed_bad_defrec, _ =
+    Runtime.normalize_def stdlib_generics "protossParsedBadDefRec"
+  in
+  assert_equal "stdlib Protoss.parseText bad defrec" "Err \"expected step clause\""
+    (Runtime.value_to_string protoss_parsed_bad_defrec);
   let protoss_parsed_bad_field, _ =
     Runtime.normalize_def stdlib_generics "protossParsedBadField"
   in
@@ -2357,6 +2380,12 @@ let () =
   assert_equal "stdlib Protoss.formatText poly caps"
     "Ok \"(type Count Nat)\\n(defpoly id (params A) (-> A A) (lambda (x A) x))\\n(defcap askName (capabilities Human.ask) (Process String) (Human.ask \\\"Name?\\\"))\\n(defpolycap pure (params A) (capabilities) (-> A A) (lambda (x A) x))\""
     (Runtime.value_to_string protoss_formatted_poly_caps);
+  let protoss_formatted_defrec, _ =
+    Runtime.normalize_def stdlib_generics "protossFormattedDefRec"
+  in
+  assert_equal "stdlib Protoss.formatText defrec"
+    "Ok \"(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))\\n(defrecpoly copy (params A) (-> (List A) (List A)) (list xs) (nil Nil) (cons item acc (Cons item acc)))\""
+    (Runtime.value_to_string protoss_formatted_defrec);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

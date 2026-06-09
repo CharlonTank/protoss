@@ -736,8 +736,7 @@ let prepared_graph_hash prepared =
 let prepared_host_contract_hash prepared =
   host_contract_hash (Canonical_ir.graph_host_contract prepared.program_graph)
 
-let build ?(write = true) ?lock_hash manifest =
-  let prepared = prepare_build manifest in
+let build_prepared ?(write = true) ?lock_hash manifest prepared =
   let store = store_root manifest in
   if write then (
     project_store_dirs store;
@@ -772,6 +771,9 @@ let build ?(write = true) ?lock_hash manifest =
       ^ "\n");
     write_file (Filename.concat store "world_refs") "");
   { manifest; checked = prepared.checked; stats = prepared.stats; build_id = prepared.build_id; store }
+
+let build ?(write = true) ?lock_hash manifest =
+  build_prepared ~write ?lock_hash manifest (prepare_build manifest)
 
 let lock_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "lock"
 
@@ -1422,9 +1424,7 @@ let write_package ?(locked = false) manifest =
     if locked then check_lock_prepared manifest prepared
     else snd (write_lock_prepared manifest prepared)
   in
-  let build_result =
-    if locked then build_locked manifest else build ~lock_hash manifest
-  in
+  let build_result = build_prepared ~lock_hash manifest prepared in
   let content = package_content manifest prepared lock_hash in
   let package_ref = Kernel.hash_string content in
   let dir = packages_dir manifest in
@@ -2103,13 +2103,6 @@ let audit_program_graph store checked =
   let path = Filename.concat store "program.graph.json" in
   if not (Sys.file_exists path) then fail "missing canonical graph: program.graph.json";
   let stored = trim (read_file path) in
-  let graph_caps, graph_defs =
-    try Canonical_ir.parse_graph stored with Kernel.Error msg -> fail ("invalid canonical graph: " ^ msg)
-  in
-  let graph_canonical = Kernel.serialize_program graph_caps graph_defs in
-  let expected_canonical = Kernel.serialize_checked_program checked in
-  if not (String.equal graph_canonical expected_canonical) then
-    fail "canonical graph program mismatch: program.graph.json";
   let expected = trim (Kernel.checked_to_graph_json checked) in
   if not (String.equal stored expected) then fail "canonical graph mismatch: program.graph.json";
   let graph_hash = Kernel.checked_to_graph_content_hash checked in
@@ -2118,7 +2111,8 @@ let audit_program_graph store checked =
     fail ("missing content-addressed canonical graph: " ^ graph_path);
   let stored_by_hash = trim (read_file graph_path) in
   if not (String.equal stored_by_hash expected) then
-    fail ("content-addressed canonical graph mismatch: " ^ graph_path)
+    fail ("content-addressed canonical graph mismatch: " ^ graph_path);
+  graph_hash
 
 let audit_host_contract store checked =
   let graph_json = Kernel.checked_to_graph_json checked in
@@ -2155,11 +2149,13 @@ let audit_patch_audits store =
     try ignore (Patch_audit.verify_latest_matches_store store) with
     | Patch_audit.Error msg -> fail ("patch audit invalid: " ^ msg)
 
-let audit_all_store_graphs store =
+let audit_all_store_graphs store current_graph_hash =
   graph_hashes_store store
   |> List.iter (fun graph_hash ->
-         try ignore (read_store_graph store graph_hash) with
-         | Error msg -> fail ("invalid content-addressed canonical graph " ^ graph_hash ^ ": " ^ msg))
+         if not (String.equal graph_hash current_graph_hash) then
+           try ignore (read_store_graph store graph_hash) with
+           | Error msg ->
+               fail ("invalid content-addressed canonical graph " ^ graph_hash ^ ": " ^ msg))
 
 let audit manifest =
   let store = store_root manifest in
@@ -2175,9 +2171,9 @@ let audit manifest =
   in
   audit_patch_audits store;
   audit_program_canonical store checked;
-  audit_program_graph store checked;
+  let current_graph_hash = audit_program_graph store checked in
   audit_host_contract store checked;
-  audit_all_store_graphs store;
+  audit_all_store_graphs store current_graph_hash;
   List.iter
     (fun (cd : Kernel.checked_def) ->
       let canonical_path = Store.canonical_path store cd.def.name in

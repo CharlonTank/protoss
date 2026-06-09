@@ -461,8 +461,23 @@ let validate_exact_serialization version ~include_capability_scope_ref graph inp
   if not (String.equal (String.trim input) expected) then
     fail "canonical graph serialization mismatch"
 
-let parse_graph input =
-  let graph = try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg) in
+let graph_json_cache : (string, Json.t) Hashtbl.t = Hashtbl.create 8
+
+let parsed_graph_cache : (string, string list * Kernel.canonical_def list) Hashtbl.t =
+  Hashtbl.create 8
+
+let parse_graph_json input =
+  match Hashtbl.find_opt graph_json_cache input with
+  | Some graph -> graph
+  | None ->
+      let graph =
+        try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg)
+      in
+      Hashtbl.add graph_json_cache input graph;
+      graph
+
+let parse_graph_uncached input =
+  let graph = parse_graph_json input in
   let version = json_string_field "version" graph in
   if
     not
@@ -520,8 +535,16 @@ let parse_graph input =
   validate_exact_serialization version ~include_capability_scope_ref graph input caps defs;
   (caps, defs)
 
+let parse_graph input =
+  match Hashtbl.find_opt parsed_graph_cache input with
+  | Some parsed -> parsed
+  | None ->
+      let parsed = parse_graph_uncached input in
+      Hashtbl.add parsed_graph_cache input parsed;
+      parsed
+
 let graph_content_hash input =
-  let graph = Json.parse input in
+  let graph = parse_graph_json input in
   let version = json_string_field "version" graph in
   let caps, defs = parse_graph input in
   let checked = Kernel.checked_of_canonical caps defs in
@@ -559,7 +582,7 @@ type graph_stats = {
 
 let graph_stats input =
   ignore (checked_of_graph input);
-  let graph = Json.parse input in
+  let graph = parse_graph_json input in
   let node_graph = json_field "nodeGraph" graph in
   let nodes = json_array_field "nodes" node_graph in
   let type_nodes, term_nodes =
@@ -612,7 +635,7 @@ type graph_node = {
 
 let graph_node input node_ref =
   ignore (checked_of_graph input);
-  let graph = Json.parse input in
+  let graph = parse_graph_json input in
   let nodes = json_array_field "nodes" (json_field "nodeGraph" graph) in
   match List.find_opt (fun node -> String.equal (json_string_field "id" node) node_ref) nodes with
   | None -> fail ("canonical graph node not found: " ^ node_ref)
@@ -673,7 +696,7 @@ let graph_definition_of_json def =
 
 let graph_definitions input =
   ignore (checked_of_graph input);
-  let graph = Json.parse input in
+  let graph = parse_graph_json input in
   json_array_field "defs" graph |> List.map graph_definition_of_json
 
 let graph_definition_in defs id =
@@ -801,7 +824,7 @@ let graph_capability_of_json desc =
 
 let graph_capabilities input =
   ignore (checked_of_graph input);
-  let graph = Json.parse input in
+  let graph = parse_graph_json input in
   json_array_field "capabilityDescriptors" graph |> List.map graph_capability_of_json
 
 let graph_capability input id =
@@ -947,7 +970,7 @@ let graph_capability_scope_to_contract_json scope =
 
 let graph_host_contract input =
   ignore (checked_of_graph input);
-  let graph = Json.parse input in
+  let graph = parse_graph_json input in
   let capabilities = graph_capabilities input in
   let scopes = graph_capability_scopes input in
   let format_field = Kernel.json_field "format" (Kernel.json_string "protoss-host-contract-v1") in

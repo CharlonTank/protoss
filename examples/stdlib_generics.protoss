@@ -566,6 +566,18 @@
 (def protossParsedBadDefCap (Result String (List ProtossDecl))
   (Protoss.parseText "(defcap askName Human.ask (Process String) (Human.ask \"Name?\"))"))
 
+(def protossParsedDefRecNat (Result String (List ProtossDecl))
+  (Protoss.parseText "(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))"))
+
+(def protossParsedDefRecVariant (Result String (List ProtossDecl))
+  (Protoss.parseText "(defrec size (-> Tree Nat) (variant tree) (Leaf n 1) (Node pair (recur (get pair left))))"))
+
+(def protossParsedDefRecPolyList (Result String (List ProtossDecl))
+  (Protoss.parseText "(defrecpoly copy (params A) (-> (List A) (List A)) (list xs) (nil Nil) (cons item acc (Cons item acc)))"))
+
+(def protossParsedBadDefRec (Result String (List ProtossDecl))
+  (Protoss.parseText "(defrec bad (-> Nat Nat) (nat n) (zero 0))"))
+
 (def protossParsedBadField (Result String (List ProtossDecl))
   (Protoss.parseText "(record Bad (name))"))
 
@@ -598,6 +610,9 @@
 
 (def protossFormattedPolyCaps (Result String String)
   (Protoss.formatText "(alias Count Nat)\n(defpoly id (params A) (-> A A) (lambda (x A) x))\n(defcap askName (capabilities Human.ask) (Process String) (Human.ask \"Name?\"))\n(defpolycap pure (params A) (capabilities) (-> A A) (lambda (x A) x))"))
+
+(def protossFormattedDefRec (Result String String)
+  (Protoss.formatText "(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))\n(defrecpoly copy (params A) (-> (List A) (List A)) (list xs) (nil Nil) (cons item acc (Cons item acc)))"))
 
 (def jsonProfile Json
   (Json.object

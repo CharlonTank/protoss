@@ -1,4 +1,4 @@
-; Protoss stdlib v0.33. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.34. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -153,6 +153,36 @@
   (capabilities (List String))
   (typ ProtossType)
   (expr ProtossExpr))
+(record ProtossDefRecNat
+  (param String)
+  (zero ProtossExpr)
+  (acc String)
+  (step ProtossExpr))
+(record ProtossDefRecList
+  (param String)
+  (nil ProtossExpr)
+  (item String)
+  (acc String)
+  (step ProtossExpr))
+(record ProtossDefRecVariant
+  (param String)
+  (branches (List ProtossCaseBranch)))
+(record ProtossDefRecStepClause
+  (acc String)
+  (body ProtossExpr))
+(record ProtossDefRecConsClause
+  (item String)
+  (acc String)
+  (body ProtossExpr))
+(variant ProtossDefRecBody
+  (PDRNat ProtossDefRecNat)
+  (PDRList ProtossDefRecList)
+  (PDRVariant ProtossDefRecVariant))
+(record ProtossDefRec
+  (name String)
+  (typeParams (List String))
+  (typ ProtossType)
+  (body ProtossDefRecBody))
 (record ProtossTypeAlias
   (name String)
   (typeParams (List String))
@@ -180,6 +210,7 @@
   (PDDefCap ProtossCapDef)
   (PDDefPoly ProtossPolyDef)
   (PDDefPolyCap ProtossPolyCapDef)
+  (PDDefRec ProtossDefRec)
   (PDExport (List String))
   (PDImport String)
   (PDModule String)
@@ -194,7 +225,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.33")
+(def Stdlib.version String "v0.34")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -2203,6 +2234,125 @@
               (_ (Protoss.stringListErr "invalid definition capabilities"))))))
       (_ (Protoss.stringListErr "invalid definition capabilities")))))
 
+(def Protoss.parseClauseArgs
+  (-> String (-> Sexp (Result String (List Sexp))))
+  (lambda (expected String)
+    (lambda (node Sexp)
+      (case node
+        (SList items
+          (caseList items
+            (Nil (variant Err ((String.concat "expected ") expected)))
+            (Cons head args
+              (case head
+                (SAtom tag
+                  (case ((String.eqString tag) expected)
+                    (true (variant Ok args))
+                    (false (variant Err ((String.concat "expected ") expected)))))
+                (_ (variant Err ((String.concat "expected ") expected)))))))
+        (_ (variant Err ((String.concat "expected ") expected)))))))
+
+(def Protoss.parseNameClause
+  (-> String (-> Sexp (Result String String)))
+  (lambda (tag String)
+    (lambda (node Sexp)
+      (case ((Protoss.parseClauseArgs tag) node)
+        (Err err (Protoss.stringErr err))
+        (Ok args
+          (caseList args
+            (Nil (Protoss.stringErr ((String.concat "expected ") tag)))
+            (Cons nameNode extra
+              (caseList extra
+                (Nil
+                  (case nameNode
+                    (SAtom name (Protoss.stringOk name))
+                    (_ (Protoss.stringErr ((String.concat "expected ") tag)))))
+                (Cons extraHead extraTail
+                  (Protoss.stringErr ((String.concat "too many ") tag)))))))))))
+
+(def Protoss.parseExprClause
+  (-> String (-> Sexp (Result String ProtossExpr)))
+  (lambda (tag String)
+    (lambda (node Sexp)
+      (case ((Protoss.parseClauseArgs tag) node)
+        (Err err (Protoss.exprErr err))
+        (Ok args
+          (caseList args
+            (Nil (Protoss.exprErr ((String.concat "expected ") tag)))
+            (Cons exprNode extra
+              (caseList extra
+                (Nil (Protoss.parseExpr exprNode))
+                (Cons extraHead extraTail
+                  (Protoss.exprErr ((String.concat "too many ") tag)))))))))))
+
+(def Protoss.defRecStepClauseOk
+  (-> ProtossDefRecStepClause (Result String ProtossDefRecStepClause))
+  (lambda (step ProtossDefRecStepClause)
+    (variant Ok step)))
+
+(def Protoss.defRecConsClauseOk
+  (-> ProtossDefRecConsClause (Result String ProtossDefRecConsClause))
+  (lambda (step ProtossDefRecConsClause)
+    (variant Ok step)))
+
+(def Protoss.parseStepClause
+  (-> Sexp (Result String ProtossDefRecStepClause))
+  (lambda (node Sexp)
+    (case ((Protoss.parseClauseArgs "step") node)
+      (Err err (variant Err err))
+      (Ok args
+        (caseList args
+          (Nil (variant Err "expected step accumulator"))
+          (Cons accNode rest
+            (case accNode
+              (SAtom acc
+                (caseList rest
+                  (Nil (variant Err "expected step body"))
+                  (Cons bodyNode extra
+                    (caseList extra
+                      (Nil
+                        (case (Protoss.parseExpr bodyNode)
+                          (Err err (variant Err err))
+                          (Ok body
+                            (Protoss.defRecStepClauseOk
+                              (record (acc acc) (body body))))))
+                      (Cons extraHead extraTail
+                        (variant Err "too many step fields"))))))
+              (_ (variant Err "expected step accumulator")))))))))
+
+(def Protoss.parseConsClause
+  (-> Sexp (Result String ProtossDefRecConsClause))
+  (lambda (node Sexp)
+    (case ((Protoss.parseClauseArgs "cons") node)
+      (Err err (variant Err err))
+      (Ok args
+        (caseList args
+          (Nil (variant Err "expected cons item"))
+          (Cons itemNode rest
+            (case itemNode
+              (SAtom item
+                (caseList rest
+                  (Nil (variant Err "expected cons accumulator"))
+                  (Cons accNode bodyTail
+                    (case accNode
+                      (SAtom acc
+                        (caseList bodyTail
+                          (Nil (variant Err "expected cons body"))
+                          (Cons bodyNode extra
+                            (caseList extra
+                              (Nil
+                                (case (Protoss.parseExpr bodyNode)
+                                  (Err err (variant Err err))
+                                  (Ok body
+                                    (Protoss.defRecConsClauseOk
+                                      (record
+                                        (item item)
+                                        (acc acc)
+                                        (body body))))))
+                              (Cons extraHead extraTail
+                                (variant Err "too many cons fields"))))))
+                      (_ (variant Err "expected cons accumulator"))))))
+              (_ (variant Err "expected cons item")))))))))
+
 (def Protoss.paramTailOk (-> (List String) (-> (List Sexp) (Result String ProtossParamTail)))
   (lambda (params (List String))
     (lambda (rest (List Sexp))
@@ -2318,6 +2468,31 @@
         (case nameNode
           (SAtom name ((Protoss.parseDefPolyCapTail name) defTail))
           (_ (Protoss.declErr "expected defpolycap name")))))))
+
+(def Protoss.parseDefRecDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected defrec name"))
+      (Cons nameNode defTail
+        (case nameNode
+          (SAtom name (((Protoss.parseDefRecTail name) (Nil String)) defTail))
+          (_ (Protoss.declErr "expected defrec name")))))))
+
+(def Protoss.parseDefRecPolyDecl (-> (List Sexp) (Result String ProtossDecl))
+  (lambda (tail (List Sexp))
+    (caseList tail
+      (Nil (Protoss.declErr "expected defrecpoly name"))
+      (Cons nameNode rest
+        (case nameNode
+          (SAtom name
+            (caseList rest
+              (Nil (Protoss.declErr "expected defrecpoly params"))
+              (Cons paramsNode defTail
+                (case (Protoss.parseParamsClause paramsNode)
+                  (Err err (Protoss.declErr err))
+                  (Ok typeParams
+                    (((Protoss.parseDefRecTail name) typeParams) defTail))))))
+          (_ (Protoss.declErr "expected defrecpoly name")))))))
 
 (def Protoss.parseTypeDecl (-> (List Sexp) (Result String ProtossDecl))
   (lambda (tail (List Sexp))
@@ -2478,6 +2653,170 @@
                                                 (expr parsedExpr)))))))))))))
                         (Cons extraHead extraTail
                           (Protoss.declErr "too many defpolycap fields"))))))))))))))
+
+(def Protoss.defRecBodyOk (-> ProtossDefRecBody (Result String ProtossDefRecBody))
+  (lambda (body ProtossDefRecBody)
+    (variant Ok body)))
+
+(def Protoss.defRecBodyErr (-> String (Result String ProtossDefRecBody))
+  (lambda (message String)
+    (variant Err message)))
+
+(def Protoss.clauseTag (-> Sexp (Result String String))
+  (lambda (node Sexp)
+    (case node
+      (SList items
+        (caseList items
+          (Nil (Protoss.stringErr "expected defrec clause"))
+          (Cons head rest
+            (case head
+              (SAtom tag (Protoss.stringOk tag))
+              (_ (Protoss.stringErr "expected defrec clause"))))))
+      (_ (Protoss.stringErr "expected defrec clause")))))
+
+(def Protoss.parseDefRecBranch (-> Sexp (Result String ProtossCaseBranch))
+  (lambda (node Sexp)
+    (case (Protoss.parseExpr node)
+      (Err err (Protoss.caseBranchErr err))
+      (Ok expr (Protoss.parseCaseBranch expr)))))
+
+(def Protoss.parseDefRecBranches
+  (-> (List Sexp) (Result String (List ProtossCaseBranch)))
+  (lambda (branches (List Sexp))
+    (foldList branches (Protoss.caseBranchListOk (Nil ProtossCaseBranch))
+      (lambda (branch Sexp)
+        (lambda (acc (Result String (List ProtossCaseBranch)))
+          (case (Protoss.parseDefRecBranch branch)
+            (Err err (Protoss.caseBranchListErr err))
+            (Ok parsedBranch
+              (case acc
+                (Err err (Protoss.caseBranchListErr err))
+                (Ok parsedBranches
+                  (Protoss.caseBranchListOk
+                    (Cons ProtossCaseBranch parsedBranch parsedBranches)))))))))))
+
+(def Protoss.parseDefRecNatRest
+  (-> String (-> (List Sexp) (Result String ProtossDefRecBody)))
+  (lambda (param String)
+    (lambda (rest (List Sexp))
+      (caseList rest
+        (Nil (Protoss.defRecBodyErr "expected zero clause"))
+        (Cons zeroNode more
+          (caseList more
+            (Nil (Protoss.defRecBodyErr "expected step clause"))
+            (Cons stepNode extra
+              (caseList extra
+                (Nil
+                  (case ((Protoss.parseExprClause "zero") zeroNode)
+                    (Err err (Protoss.defRecBodyErr err))
+                    (Ok zero
+                      (case (Protoss.parseStepClause stepNode)
+                        (Err err (Protoss.defRecBodyErr err))
+                        (Ok step
+                          (Protoss.defRecBodyOk
+                            (variant PDRNat
+                              (record
+                                (param param)
+                                (zero zero)
+                                (acc (get step acc))
+                                (step (get step body))))))))))
+                (Cons extraHead extraTail
+                  (Protoss.defRecBodyErr "too many defrec nat clauses"))))))))))
+
+(def Protoss.parseDefRecListRest
+  (-> String (-> (List Sexp) (Result String ProtossDefRecBody)))
+  (lambda (param String)
+    (lambda (rest (List Sexp))
+      (caseList rest
+        (Nil (Protoss.defRecBodyErr "expected nil clause"))
+        (Cons nilNode more
+          (caseList more
+            (Nil (Protoss.defRecBodyErr "expected cons clause"))
+            (Cons consNode extra
+              (caseList extra
+                (Nil
+                  (case ((Protoss.parseExprClause "nil") nilNode)
+                    (Err err (Protoss.defRecBodyErr err))
+                    (Ok nil
+                      (case (Protoss.parseConsClause consNode)
+                        (Err err (Protoss.defRecBodyErr err))
+                        (Ok cons
+                          (Protoss.defRecBodyOk
+                            (variant PDRList
+                              (record
+                                (param param)
+                                (nil nil)
+                                (item (get cons item))
+                                (acc (get cons acc))
+                                (step (get cons body))))))))))
+                (Cons extraHead extraTail
+                  (Protoss.defRecBodyErr "too many defrec list clauses"))))))))))
+
+(def Protoss.parseDefRecVariantRest
+  (-> String (-> (List Sexp) (Result String ProtossDefRecBody)))
+  (lambda (param String)
+    (lambda (branches (List Sexp))
+      (caseList branches
+        (Nil (Protoss.defRecBodyErr "expected defrec variant branch"))
+        (Cons first rest
+          (case (Protoss.parseDefRecBranches branches)
+            (Err err (Protoss.defRecBodyErr err))
+            (Ok parsedBranches
+              (Protoss.defRecBodyOk
+                (variant PDRVariant
+                  (record
+                    (param param)
+                    (branches parsedBranches)))))))))))
+
+(def Protoss.parseDefRecBody (-> (List Sexp) (Result String ProtossDefRecBody))
+  (lambda (clauses (List Sexp))
+    (caseList clauses
+      (Nil (Protoss.defRecBodyErr "expected defrec clause"))
+      (Cons head rest
+        (case (Protoss.clauseTag head)
+          (Err err (Protoss.defRecBodyErr err))
+          (Ok tag
+            (case ((String.eqString tag) "nat")
+              (true
+                (case ((Protoss.parseNameClause "nat") head)
+                  (Err err (Protoss.defRecBodyErr err))
+                  (Ok param ((Protoss.parseDefRecNatRest param) rest))))
+              (false
+                (case ((String.eqString tag) "list")
+                  (true
+                    (case ((Protoss.parseNameClause "list") head)
+                      (Err err (Protoss.defRecBodyErr err))
+                      (Ok param ((Protoss.parseDefRecListRest param) rest))))
+                  (false
+                    (case ((String.eqString tag) "variant")
+                      (true
+                        (case ((Protoss.parseNameClause "variant") head)
+                          (Err err (Protoss.defRecBodyErr err))
+                          (Ok param ((Protoss.parseDefRecVariantRest param) rest))))
+                      (false
+                        (Protoss.defRecBodyErr "expected defrec clause")))))))))))))
+
+(def Protoss.parseDefRecTail
+  (-> String (-> (List String) (-> (List Sexp) (Result String ProtossDecl))))
+  (lambda (name String)
+    (lambda (typeParams (List String))
+      (lambda (tail (List Sexp))
+        (caseList tail
+          (Nil (Protoss.declErr "expected defrec type"))
+          (Cons typeNode clauses
+            (case (Protoss.parseType typeNode)
+              (Err err (Protoss.declErr err))
+              (Ok typ
+                (case (Protoss.parseDefRecBody clauses)
+                  (Err err (Protoss.declErr err))
+                  (Ok body
+                    (Protoss.declOk
+                      (variant PDDefRec
+                        (record
+                          (name name)
+                          (typeParams typeParams)
+                          (typ typ)
+                          (body body))))))))))))))
 
 (def Protoss.parseTypeAliasTail
   (-> String (-> (List Sexp) (Result String ProtossDecl)))
@@ -2682,20 +3021,26 @@
                                   (case ((String.eqString tag) "defpolycap")
                                     (true (Protoss.parseDefPolyCapDecl tail))
                                     (false
-                                      (case ((String.eqString tag) "type")
-                                        (true (Protoss.parseTypeDecl tail))
+                                      (case ((String.eqString tag) "defrec")
+                                        (true (Protoss.parseDefRecDecl tail))
                                         (false
-                                          (case ((String.eqString tag) "alias")
-                                            (true (Protoss.parseTypeDecl tail))
+                                          (case ((String.eqString tag) "defrecpoly")
+                                            (true (Protoss.parseDefRecPolyDecl tail))
                                             (false
-                                              (case ((String.eqString tag) "record")
-                                                (true (Protoss.parseRecordDecl tail))
+                                              (case ((String.eqString tag) "type")
+                                                (true (Protoss.parseTypeDecl tail))
                                                 (false
-                                                  (case ((String.eqString tag) "variant")
-                                                    (true (Protoss.parseVariantDecl tail))
+                                                  (case ((String.eqString tag) "alias")
+                                                    (true (Protoss.parseTypeDecl tail))
                                                     (false
-                                                      (Protoss.declErr
-                                                        "expected declaration tag"))))))))))))))))))))))))))))
+                                                      (case ((String.eqString tag) "record")
+                                                        (true (Protoss.parseRecordDecl tail))
+                                                        (false
+                                                          (case ((String.eqString tag) "variant")
+                                                            (true (Protoss.parseVariantDecl tail))
+                                                            (false
+                                                              (Protoss.declErr
+                                                                "expected declaration tag"))))))))))))))))))))))))))))))))
 
 (def Protoss.parseDecl (-> Sexp (Result String ProtossDecl))
   (lambda (form Sexp)
@@ -3062,6 +3407,51 @@
   (lambda (capabilities (List String))
     (Protoss.renderForm "capabilities" capabilities)))
 
+(def Protoss.renderDefRecBodyParts (-> ProtossDefRecBody (List String))
+  (lambda (body ProtossDefRecBody)
+    (case body
+      (PDRNat nat
+        (Cons String
+          (Protoss.renderForm "nat"
+            (Cons String (get nat param)
+              (Nil String)))
+          (Cons String
+            (Protoss.renderForm "zero"
+              (Cons String (Protoss.renderExpr (get nat zero))
+                (Nil String)))
+            (Cons String
+              (Protoss.renderForm "step"
+                (Cons String (get nat acc)
+                  (Cons String (Protoss.renderExpr (get nat step))
+                    (Nil String))))
+              (Nil String)))))
+      (PDRList listRec
+        (Cons String
+          (Protoss.renderForm "list"
+            (Cons String (get listRec param)
+              (Nil String)))
+          (Cons String
+            (Protoss.renderForm "nil"
+              (Cons String (Protoss.renderExpr (get listRec nil))
+                (Nil String)))
+            (Cons String
+              (Protoss.renderForm "cons"
+                (Cons String (get listRec item)
+                  (Cons String (get listRec acc)
+                    (Cons String (Protoss.renderExpr (get listRec step))
+                      (Nil String)))))
+              (Nil String)))))
+      (PDRVariant variantRec
+        (Cons String
+          (Protoss.renderForm "variant"
+            (Cons String (get variantRec param)
+              (Nil String)))
+          (((inst List.map ProtossCaseBranch String) (get variantRec branches))
+            (lambda (branch ProtossCaseBranch)
+              (((Protoss.renderBranchForm (get branch constructor))
+                (get branch binder))
+                (Protoss.renderExpr (get branch body))))))))))
+
 (def Protoss.renderDecl (-> ProtossDecl String)
   (lambda (decl ProtossDecl)
     (case decl
@@ -3095,6 +3485,23 @@
                 (Cons String (Protoss.renderType (get def typ))
                   (Cons String (Protoss.renderExpr (get def expr))
                     (Nil String))))))))
+      (PDDefRec def
+        (caseList (get def typeParams)
+          (Nil
+            (Protoss.renderForm "defrec"
+              (((inst List.append String)
+                (Cons String (get def name)
+                  (Cons String (Protoss.renderType (get def typ))
+                    (Nil String))))
+                (Protoss.renderDefRecBodyParts (get def body)))))
+          (Cons first rest
+            (Protoss.renderForm "defrecpoly"
+              (((inst List.append String)
+                (Cons String (get def name)
+                  (Cons String (Protoss.renderForm "params" (get def typeParams))
+                    (Cons String (Protoss.renderType (get def typ))
+                      (Nil String)))))
+                (Protoss.renderDefRecBodyParts (get def body)))))))
       (PDExport names
         (Protoss.renderForm "export" names))
       (PDImport path
