@@ -33,6 +33,18 @@ withLet =
     in
         bumped |> succ
 
+pick : Bool -> Nat -> Nat -> Nat
+pick =
+    \flag yes no -> if flag then yes else no
+
+picked : Nat
+picked =
+    pick true 8 9
+
+nestedPicked : Nat
+nestedPicked =
+    if false then pick true 1 2 else if true then 3 else 4
+
 user : User
 user =
     { name = "Ada"

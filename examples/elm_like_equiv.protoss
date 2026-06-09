@@ -23,6 +23,25 @@
     (let (bumped (double base))
       (succ bumped))))
 
+(def pick (-> Bool (-> Nat (-> Nat Nat)))
+  (lambda flag
+    (lambda yes
+      (lambda no
+        (match flag
+          (true yes)
+          (false no))))))
+
+(def picked Nat
+  (((pick true) 8) 9))
+
+(def nestedPicked Nat
+  (match false
+    (true (((pick true) 1) 2))
+    (false
+      (match true
+        (true 3)
+        (false 4)))))
+
 (def user User
   (record
     (active true)

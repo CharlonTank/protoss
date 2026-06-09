@@ -362,14 +362,20 @@ and parse_expr st =
   match peek st with
   | Some Backslash ->
       ignore (take st);
-      let name =
+      let rec params acc =
         match take st with
-        | Some (Ident name) -> name
+        | Some (Ident name) -> params (name :: acc)
+        | Some Arrow ->
+            if acc = [] then fail "lambda requires at least one parameter";
+            List.rev acc
         | Some tok -> fail ("expected lambda parameter, got " ^ token_name tok)
         | None -> fail "expected lambda parameter"
       in
-      expect st Arrow;
-      Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom name; parse_expr st ]
+      let params = params [] in
+      let body = parse_expr st in
+      List.fold_right
+        (fun name acc -> Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom name; acc ])
+        params body
   | _ -> parse_pipeline st
 
 and parse_pipeline st =
@@ -395,6 +401,7 @@ and parse_app st =
 
 and parse_atom_expr st =
   match take st with
+  | Some (Ident "if") -> parse_if_expr st
   | Some (Ident name) -> Sexp.Atom name
   | Some (Str value) -> Sexp.Str value
   | Some LParen ->
@@ -427,6 +434,73 @@ and parse_record_expr st =
     | None -> fail "unterminated record expression"
   in
   fields []
+
+and parse_if_expr st =
+  let then_index = find_if_then st.pos st in
+  let else_index = find_if_else (then_index + 1) st in
+  let end_index = find_expr_boundary (else_index + 1) st in
+  let cond = parse_expr_slice st.pos then_index st in
+  let if_true = parse_expr_slice (then_index + 1) else_index st in
+  let if_false = parse_expr_slice (else_index + 1) end_index st in
+  st.pos <- end_index;
+  Sexp.List
+    [
+      Sexp.Atom "match";
+      cond;
+      Sexp.List [ Sexp.Atom "true"; if_true ];
+      Sexp.List [ Sexp.Atom "false"; if_false ];
+    ]
+
+and parse_expr_slice start stop st =
+  if stop <= start then fail "expected expression";
+  let slice = Array.sub st.tokens start (stop - start) |> Array.to_list in
+  let nested = stream slice in
+  let expr = parse_expr nested in
+  if not (at_end nested) then
+    fail ("unexpected expression token: " ^ token_name nested.tokens.(nested.pos));
+  expr
+
+and find_if_then start st =
+  let rec loop paren_depth if_depth i =
+    if i >= Array.length st.tokens then fail "if expression missing then"
+    else
+      match st.tokens.(i) with
+      | Ident "if" when paren_depth = 0 -> loop paren_depth (if_depth + 1) (i + 1)
+      | Ident "then" when paren_depth = 0 && if_depth = 0 -> i
+      | Ident "else" when paren_depth = 0 && if_depth > 0 ->
+          loop paren_depth (if_depth - 1) (i + 1)
+      | LParen | LBrace -> loop (paren_depth + 1) if_depth (i + 1)
+      | RParen | RBrace -> loop (max 0 (paren_depth - 1)) if_depth (i + 1)
+      | _ -> loop paren_depth if_depth (i + 1)
+  in
+  loop 0 0 start
+
+and find_if_else start st =
+  let rec loop paren_depth if_depth i =
+    if i >= Array.length st.tokens then fail "if expression missing else"
+    else
+      match st.tokens.(i) with
+      | Ident "if" when paren_depth = 0 -> loop paren_depth (if_depth + 1) (i + 1)
+      | Ident "else" when paren_depth = 0 && if_depth = 0 -> i
+      | Ident "else" when paren_depth = 0 && if_depth > 0 ->
+          loop paren_depth (if_depth - 1) (i + 1)
+      | LParen | LBrace -> loop (paren_depth + 1) if_depth (i + 1)
+      | RParen | RBrace -> loop (max 0 (paren_depth - 1)) if_depth (i + 1)
+      | _ -> loop paren_depth if_depth (i + 1)
+  in
+  loop 0 0 start
+
+and find_expr_boundary start st =
+  let rec loop depth i =
+    if i >= Array.length st.tokens then i
+    else
+      match st.tokens.(i) with
+      | RParen | RBrace | Comma when depth = 0 -> i
+      | LParen | LBrace -> loop (depth + 1) (i + 1)
+      | RParen | RBrace -> loop (max 0 (depth - 1)) (i + 1)
+      | _ -> loop depth (i + 1)
+  in
+  loop 0 start
 
 and append_pipeline_arg stage arg =
   match stage with

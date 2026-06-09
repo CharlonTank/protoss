@@ -226,6 +226,12 @@ let () =
   let elm_like_with_let, _ = Runtime.normalize_def elm_like "withLet" in
   assert_equal "Elm-like let normalizes" "5"
     (Runtime.value_to_string elm_like_with_let);
+  let elm_like_picked, _ = Runtime.normalize_def elm_like "picked" in
+  assert_equal "Elm-like if and multi-parameter lambda normalize" "8"
+    (Runtime.value_to_string elm_like_picked);
+  let elm_like_nested_picked, _ = Runtime.normalize_def elm_like "nestedPicked" in
+  assert_equal "Elm-like nested if normalizes" "3"
+    (Runtime.value_to_string elm_like_nested_picked);
   let elm_like_user, _ = Runtime.normalize_def elm_like "user" in
   assert_equal "Elm-like record literal normalizes" "{active = true, name = \"Ada\"}"
     (Runtime.value_to_string elm_like_user);
