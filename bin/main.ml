@@ -17,6 +17,8 @@ let usage () =
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
+     \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
+     \       protoss self fmt [--check] <file>\n\
      \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check [interface.json]|--json]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref]\n\
@@ -782,6 +784,111 @@ let command_explain = function
       print_endline msg
   | _ -> usage ()
 
+(* ---- Self-hosted frontend bridge ----------------------------------------
+   Runs the Protoss-implemented frontend (stdlib/prelude.protoss) through the
+   normal evaluator: the target source is spliced into a driver definition that
+   applies a stdlib function to it, the combined program is checked, and the
+   result is evaluated. OCaml stays the trusted kernel (parse/check/normalize);
+   the *report* is produced by Protoss code from the prelude. *)
+let rec find_up dir rel =
+  let candidate = Filename.concat dir rel in
+  if Sys.file_exists candidate then Some candidate
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_up parent rel
+
+let prelude_path () =
+  match Sys.getenv_opt "PROTOSS_STDLIB" with
+  | Some p -> p
+  | None -> (
+      match find_up (Sys.getcwd ()) "stdlib/prelude.protoss" with
+      | Some p -> p
+      | None ->
+          Protoss.Kernel.fail "cannot locate stdlib/prelude.protoss (set PROTOSS_STDLIB)")
+
+let read_source path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let self_driver_checked ~typ driver_expr =
+  let prelude = read_source (prelude_path ()) in
+  let driver = prelude ^ "\n(def __self_result " ^ typ ^ " (" ^ driver_expr ^ "))\n" in
+  Protoss.Parser.parse_string driver |> Protoss.Kernel.check_program
+
+let self_eval ~typ driver_expr =
+  let checked = self_driver_checked ~typ driver_expr in
+  let value, _ = Protoss.Runtime.eval_entry checked "__self_result" in
+  (checked, value)
+
+(* String report produced by a Protoss [String -> String] frontend function. *)
+let self_string fn file =
+  let _, value =
+    self_eval ~typ:"String" (fn ^ " " ^ Protoss.Ast.quote (read_source file))
+  in
+  match value with
+  | Protoss.Runtime.VString s -> s
+  | other -> Protoss.Runtime.value_to_string other
+
+(* Content-addressed DefId, computed by the trusted kernel, of a stdlib def. *)
+let self_def_id name =
+  let checked, _ = self_eval ~typ:"String" "(Json.render (variant JNull unit))" in
+  match
+    List.find_opt
+      (fun (d : Protoss.Kernel.checked_def) -> String.equal d.def.name name)
+      checked.defs
+  with
+  | Some d -> d.def_id
+  | None -> "-"
+
+let command_self_fmt check file =
+  let source = read_source file in
+  let _, value =
+    self_eval ~typ:"(Result String String)"
+      ("Protoss.formatText " ^ Protoss.Ast.quote source)
+  in
+  match value with
+  | Protoss.Runtime.VVariant (_, "Ok", Protoss.Runtime.VString formatted) ->
+      if check then
+        if String.equal formatted source then print_endline (file ^ ": formatted")
+        else (
+          prerr_endline (file ^ ": needs formatting");
+          exit 1)
+      else print_string formatted
+  | Protoss.Runtime.VVariant (_, "Err", Protoss.Runtime.VString msg) ->
+      print_error "self fmt error" msg
+  | other ->
+      print_error "self fmt error"
+        ("unexpected result: " ^ Protoss.Runtime.value_to_string other)
+
+let command_self_static json file =
+  if json then (
+    let def_id = self_def_id "Protoss.staticReportText" in
+    let _, value =
+      self_eval ~typ:"String"
+        ("((Protoss.selfStaticJson " ^ Protoss.Ast.quote def_id ^ ") "
+        ^ Protoss.Ast.quote (read_source file)
+        ^ ")")
+    in
+    match value with
+    | Protoss.Runtime.VString s -> print_endline s
+    | other -> print_endline (Protoss.Runtime.value_to_string other))
+  else print_endline (self_string "Protoss.selfStaticText" file)
+
+let command_self = function
+  | [ "parse"; file ] -> print_endline (self_string "Protoss.selfParseJson" file)
+  | [ "fmt"; "--check"; file ] -> command_self_fmt true file
+  | [ "fmt"; file ] -> command_self_fmt false file
+  | [ "resolve"; file ] -> print_endline (self_string "Protoss.selfResolveJson" file)
+  | [ "deps"; file ] -> print_endline (self_string "Protoss.selfDepsJson" file)
+  | [ "capabilities"; file ] ->
+      print_endline (self_string "Protoss.selfCapabilitiesJson" file)
+  | [ "static"; file; "--json" ] | [ "static"; "--json"; file ] ->
+      command_self_static true file
+  | [ "static"; file ] -> command_self_static false file
+  | _ -> usage ()
+
 let command_bench = function
   | [ "build"; project ] ->
       let start = Unix.gettimeofday () in
@@ -830,6 +937,7 @@ let () =
       | "app" :: args -> command_app args
       | "web" :: args -> command_web args
       | "runtime" :: args -> command_runtime args
+      | "self" :: args -> command_self args
       | "project" :: args -> command_project args
       | "build" :: args -> command_project_build args
       | "patch" :: args -> command_patch args

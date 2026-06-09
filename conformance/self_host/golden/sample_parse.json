@@ -1,0 +1,1 @@
+{"status":"ok","definitions":["origin","inc","classify","describe","firstOr","lengthList"],"types":["Count","Point","Color"],"imports":[],"exports":["Point","Color","Count","origin","inc","classify","describe","firstOr","lengthList"]}

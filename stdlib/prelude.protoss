@@ -6017,3 +6017,157 @@
 
 (defpoly Html.onInput (params Msg) (-> Msg (Attr Msg))
   (lambda (m Msg) (on "input" m)))
+
+;; ====================================================================
+;; Self-hosted frontend — JSON report serialization & CLI entrypoints.
+;; These run through the normal Protoss evaluator (see `protoss self ...`).
+;; The trusted OCaml kernel still owns canonicalization, typechecking and
+;; the content-addressed DefIds; everything below only *reports*.
+;; ====================================================================
+
+(def Protoss.jf (-> String (-> Json (Pair String Json)))
+  (lambda (key String)
+    (lambda (value Json)
+      (record (first key) (second value)))))
+
+(def Protoss.jsonObjectOf (-> (List (Pair String Json)) Json)
+  (lambda (fields (List (Pair String Json)))
+    (Json.object
+      (foldList fields (inst Assoc.empty String Json)
+        (lambda (field (Pair String Json))
+          (lambda (acc (Assoc String Json))
+            ((((inst Assoc.insert String Json) (get field first)) (get field second)) acc)))))))
+
+(def Protoss.jsonStrings (-> (List String) Json)
+  (lambda (xs (List String))
+    (Json.array (((inst List.map String Json) xs) Json.string))))
+
+(def Protoss.jsonError (-> String Json)
+  (lambda (message String)
+    (Protoss.jsonObjectOf
+      (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "error"))
+      (Cons (Pair String Json) ((Protoss.jf "diagnostic") (Json.string message))
+      (Nil (Pair String Json)))))))
+
+(def Protoss.depOrderToJson (-> ProtossDepOrder Json)
+  (lambda (order ProtossDepOrder)
+    (case order
+      (PDepOrderOk names
+        (Protoss.jsonObjectOf
+          (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
+          (Cons (Pair String Json) ((Protoss.jf "order") (Protoss.jsonStrings names))
+          (Nil (Pair String Json))))))
+      (PDepOrderCycle names
+        (Protoss.jsonObjectOf
+          (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "cycle"))
+          (Cons (Pair String Json) ((Protoss.jf "cycle") (Protoss.jsonStrings names))
+          (Nil (Pair String Json)))))))))
+
+(def Protoss.resolveReportToJson (-> ProtossResolveReport Json)
+  (lambda (report ProtossResolveReport)
+    (Protoss.jsonObjectOf
+      (Cons (Pair String Json) ((Protoss.jf "definedTerms") (Protoss.jsonStrings (get report definedTerms)))
+      (Cons (Pair String Json) ((Protoss.jf "definedTypes") (Protoss.jsonStrings (get report definedTypes)))
+      (Cons (Pair String Json) ((Protoss.jf "termRefs") (Protoss.jsonStrings (get report termRefs)))
+      (Cons (Pair String Json) ((Protoss.jf "typeRefs") (Protoss.jsonStrings (get report typeRefs)))
+      (Cons (Pair String Json) ((Protoss.jf "exports") (Protoss.jsonStrings (get report exports)))
+      (Cons (Pair String Json) ((Protoss.jf "missingTerms") (Protoss.jsonStrings (get report missingTerms)))
+      (Cons (Pair String Json) ((Protoss.jf "missingTypes") (Protoss.jsonStrings (get report missingTypes)))
+      (Cons (Pair String Json) ((Protoss.jf "missingExports") (Protoss.jsonStrings (get report missingExports)))
+      (Cons (Pair String Json) ((Protoss.jf "duplicateTerms") (Protoss.jsonStrings (get report duplicateTerms)))
+      (Cons (Pair String Json) ((Protoss.jf "duplicateTypes") (Protoss.jsonStrings (get report duplicateTypes)))
+      (Nil (Pair String Json)))))))))))))))
+
+(def Protoss.capabilityReportToJson (-> ProtossCapabilityReport Json)
+  (lambda (report ProtossCapabilityReport)
+    (Protoss.jsonObjectOf
+      (Cons (Pair String Json) ((Protoss.jf "declared") (Protoss.jsonStrings (get report declared)))
+      (Cons (Pair String Json) ((Protoss.jf "used") (Protoss.jsonStrings (get report used)))
+      (Cons (Pair String Json) ((Protoss.jf "scoped") (Protoss.jsonStrings (get report scoped)))
+      (Cons (Pair String Json) ((Protoss.jf "unknownCapabilities") (Protoss.jsonStrings (get report unknownCapabilities)))
+      (Cons (Pair String Json) ((Protoss.jf "missingDeclarations") (Protoss.jsonStrings (get report missingDeclarations)))
+      (Cons (Pair String Json) ((Protoss.jf "duplicateDeclarations") (Protoss.jsonStrings (get report duplicateDeclarations)))
+      (Cons (Pair String Json) ((Protoss.jf "duplicateScopes") (Protoss.jsonStrings (get report duplicateScopes)))
+      (Nil (Pair String Json))))))))))))
+
+(def Protoss.declImportPaths (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    ((inst List.reverse String)
+      (foldList decls (Nil String)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List String))
+            (case decl
+              (PDImport path (Cons String path acc))
+              (_ acc))))))))
+
+(def Protoss.staticReportToJson
+  (-> String (-> (List String) (-> ProtossStaticReport Json)))
+  (lambda (frontendDefId String)
+    (lambda (imports (List String))
+      (lambda (report ProtossStaticReport)
+        (let (resolve ProtossResolveReport (get report resolve))
+          (Protoss.jsonObjectOf
+            (Cons (Pair String Json) ((Protoss.jf "parseStatus") (Json.string "ok"))
+            (Cons (Pair String Json) ((Protoss.jf "definitions") (Protoss.jsonStrings (get resolve definedTerms)))
+            (Cons (Pair String Json) ((Protoss.jf "types") (Protoss.jsonStrings (get resolve definedTypes)))
+            (Cons (Pair String Json) ((Protoss.jf "exports") (Protoss.jsonStrings (get resolve exports)))
+            (Cons (Pair String Json) ((Protoss.jf "imports") (Protoss.jsonStrings imports))
+            (Cons (Pair String Json) ((Protoss.jf "termDeps") (Protoss.depOrderToJson (get report termOrder)))
+            (Cons (Pair String Json) ((Protoss.jf "typeDeps") (Protoss.depOrderToJson (get (get report typeEnv) order)))
+            (Cons (Pair String Json) ((Protoss.jf "capabilityUse") (Protoss.capabilityReportToJson (get report capabilities)))
+            (Cons (Pair String Json) ((Protoss.jf "diagnostics") (Protoss.resolveReportToJson resolve))
+            (Cons (Pair String Json) ((Protoss.jf "frontendDefId") (Json.string frontendDefId))
+            (Nil (Pair String Json))))))))))))))))))
+
+(def Protoss.selfParseJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok decls
+        (let (resolve ProtossResolveReport (Protoss.resolveDecls decls))
+          (Json.render
+            (Protoss.jsonObjectOf
+              (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
+              (Cons (Pair String Json) ((Protoss.jf "definitions") (Protoss.jsonStrings (get resolve definedTerms)))
+              (Cons (Pair String Json) ((Protoss.jf "types") (Protoss.jsonStrings (get resolve definedTypes)))
+              (Cons (Pair String Json) ((Protoss.jf "imports") (Protoss.jsonStrings (Protoss.declImportPaths decls)))
+              (Cons (Pair String Json) ((Protoss.jf "exports") (Protoss.jsonStrings (get resolve exports)))
+              (Nil (Pair String Json))))))))))))))
+
+(def Protoss.selfResolveJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.resolveText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report (Json.render (Protoss.resolveReportToJson report))))))
+
+(def Protoss.selfCapabilitiesJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.capabilityReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report (Json.render (Protoss.capabilityReportToJson report))))))
+
+(def Protoss.selfDepsJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.staticReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report
+        (Json.render
+          (Protoss.jsonObjectOf
+            (Cons (Pair String Json) ((Protoss.jf "termDeps") (Protoss.depOrderToJson (get report termOrder)))
+            (Cons (Pair String Json) ((Protoss.jf "typeDeps") (Protoss.depOrderToJson (get (get report typeEnv) order)))
+            (Nil (Pair String Json))))))))))
+
+(def Protoss.selfStaticJson (-> String (-> String String))
+  (lambda (frontendDefId String)
+    (lambda (source String)
+      (case (Protoss.parseText source)
+        (Err err (Json.render (Protoss.jsonError err)))
+        (Ok decls
+          (Json.render
+            (((Protoss.staticReportToJson frontendDefId)
+               (Protoss.declImportPaths decls))
+              (Protoss.staticReportDecls decls))))))))
+
+(def Protoss.selfStaticText (-> String String)
+  (lambda (source String)
+    ((Protoss.selfStaticJson "-") source)))

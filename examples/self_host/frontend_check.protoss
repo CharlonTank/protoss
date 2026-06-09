@@ -1,0 +1,19 @@
+(import "../../stdlib/prelude.protoss")
+
+;; Exercises the self-hosted frontend API end to end. Checking this file is a
+;; compile-time check that the prelude `Protoss.self*` entrypoints type.
+
+(def sampleSource String
+  "(module Demo) (export greeting) (def greeting String \"hi\")")
+
+(def parseReport String (Protoss.selfParseJson sampleSource))
+
+(def resolveReport String (Protoss.selfResolveJson sampleSource))
+
+(def depsReport String (Protoss.selfDepsJson sampleSource))
+
+(def capabilitiesReport String (Protoss.selfCapabilitiesJson sampleSource))
+
+(def staticReport String (Protoss.selfStaticText sampleSource))
+
+(def staticJson String ((Protoss.selfStaticJson "p2:demo") sampleSource))

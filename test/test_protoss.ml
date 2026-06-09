@@ -5475,3 +5475,104 @@ let () =
     (Array.length (Sys.readdir rt_worlds) = 1);
 
   print_endline "protoss tests ok"
+
+let () =
+  (* ===== Self-hosted frontend: parity with OCaml + conformance goldens =====
+     One program = prelude + every driver def, checked once, then each entry is
+     normalized through the evaluator. This exercises the Protoss-implemented
+     frontend (stdlib/prelude.protoss) end to end. *)
+  let read_all path =
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> really_input_string ic (in_channel_length ic))
+  in
+  let repo rel = find_up (Sys.getcwd ()) rel in
+  let chomp s =
+    let n = String.length s in
+    if n > 0 && s.[n - 1] = '\n' then String.sub s 0 (n - 1) else s
+  in
+  let prelude = read_all (repo "stdlib/prelude.protoss") in
+  let driver = Buffer.create (String.length prelude + 8192) in
+  Buffer.add_string driver prelude;
+  Buffer.add_char driver '\n';
+  let entries = ref [] in
+  let register name typ expr verify =
+    Buffer.add_string driver (Printf.sprintf "(def %s %s (%s))\n" name typ expr);
+    entries := (name, verify) :: !entries
+  in
+  let ocaml_clean src =
+    try
+      ignore (Parser.parse_string src |> Kernel.check_program);
+      true
+    with _ -> false
+  in
+  (* ---- conformance: self-hosted output must equal the checked-in golden ---- *)
+  let conf name fn typ input golden =
+    let src = read_all (repo ("conformance/self_host/inputs/" ^ input)) in
+    let expected = chomp (read_all (repo ("conformance/self_host/golden/" ^ golden))) in
+    register name typ
+      (fn ^ " " ^ Ast.quote src)
+      (fun got -> assert_equal ("self-host conformance " ^ golden) expected (chomp got))
+  in
+  conf "__conf_parse" "Protoss.selfParseJson" "String" "sample_module.protoss"
+    "sample_parse.json";
+  conf "__conf_resolve" "Protoss.selfResolveJson" "String" "sample_module.protoss"
+    "sample_resolve.json";
+  conf "__conf_deps" "Protoss.selfDepsJson" "String" "sample_module.protoss"
+    "sample_deps.json";
+  conf "__conf_caps" "Protoss.selfCapabilitiesJson" "String" "sample_module.protoss"
+    "sample_capabilities.json";
+  conf "__conf_static" "Protoss.selfStaticText" "String" "sample_module.protoss"
+    "sample_static.json";
+  conf "__conf_fmt" "Protoss.formatText" "(Result String String)"
+    "sample_module.protoss" "sample_fmt.protoss";
+  conf "__conf_cycle" "Protoss.selfDepsJson" "String" "cycle.protoss" "cycle_deps.json";
+  conf "__conf_capmis" "Protoss.selfCapabilitiesJson" "String"
+    "capability_mismatch.protoss" "capability_mismatch.json";
+  conf "__conf_malformed" "Protoss.selfParseJson" "String" "malformed.protoss"
+    "malformed_diagnostics.json";
+  (* ---- parity: report-level agreement with the OCaml frontend ---- *)
+  let parity name fn src needle ocaml_ok =
+    register name "String"
+      (fn ^ " " ^ Ast.quote src)
+      (fun got ->
+        assert_true (name ^ " self report contains " ^ needle)
+          (contains_substring got needle));
+    assert_true (name ^ " ocaml parity") (Bool.equal (ocaml_clean src) ocaml_ok)
+  in
+  parity "__par_valid" "Protoss.selfResolveJson" "(def x Nat 1) (def y Nat (succ x))"
+    "\"missingTerms\":[]" true;
+  parity "__par_exports" "Protoss.selfParseJson"
+    "(module M) (export x) (def x Nat 1)" "\"exports\":[\"x\"]" true;
+  parity "__par_unknown" "Protoss.selfResolveJson" "(def x Nat ghost)"
+    "\"missingTerms\":[\"ghost\"]" false;
+  parity "__par_duptype" "Protoss.selfResolveJson"
+    "(record T (a Nat)) (record T (b Nat))" "\"duplicateTypes\":[\"T\"]" false;
+  parity "__par_dupfield" "Protoss.selfResolveJson"
+    "(record T (a Nat)) (record T (b Nat))" "\"duplicateTypes\":[\"T\"]" false;
+  (* duplicate record field: the self-hosted frontend rejects it (parse-level
+     diagnostic), mirroring the OCaml frontend. *)
+  register "__par_dupfield2" "String"
+    ("case (Protoss.checkTypeEnvText "
+    ^ Ast.quote "(record T (a Nat) (a Nat))"
+    ^ ") (Err e (Json.render (Protoss.jsonError e))) (Ok r (Json.render (Protoss.jsonStrings (get r duplicateRecordFields))))")
+    (fun got ->
+      assert_true "self frontend reports duplicate record field"
+        (contains_substring got "duplicate record field"));
+  assert_true "ocaml rejects duplicate record field"
+    (not (ocaml_clean "(record T (a Nat) (a Nat))"));
+  (* ---- run everything in a single checked program ---- *)
+  let checked = Parser.parse_string (Buffer.contents driver) |> Kernel.check_program in
+  List.iter
+    (fun (name, verify) ->
+      let v, _ = Runtime.normalize_def checked name in
+      let got =
+        match v with
+        | Runtime.VString s -> s
+        | Runtime.VVariant (_, "Ok", Runtime.VString s) -> s
+        | other -> Runtime.value_to_string other
+      in
+      verify got)
+    (List.rev !entries);
+  print_endline "self-host frontend tests ok"

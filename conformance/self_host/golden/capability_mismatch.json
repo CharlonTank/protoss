@@ -1,0 +1,1 @@
+{"declared":["Local.storage"],"used":["Clock.read"],"scoped":["Clock.read"],"unknownCapabilities":[],"missingDeclarations":["Clock.read"],"duplicateDeclarations":[],"duplicateScopes":[]}

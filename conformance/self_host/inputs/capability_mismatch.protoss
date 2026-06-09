@@ -1,0 +1,2 @@
+(capabilities Local.storage)
+(defcap readTime (capabilities Clock.read) (Process String) (Clock.read))
