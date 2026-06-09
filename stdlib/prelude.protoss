@@ -1,4 +1,4 @@
-; Protoss stdlib v0.37. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.38. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -245,7 +245,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.37")
+(def Stdlib.version String "v0.38")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -4244,6 +4244,59 @@
     (case (Protoss.parseText source)
       (Err err (variant Err err))
       (Ok decls (variant Ok (Protoss.termDependencyOrderDecls decls))))))
+
+(def Protoss.declTypeDepNode (-> (List String) (-> ProtossDecl (Maybe ProtossDepNode)))
+  (lambda (definedTypes (List String))
+    (lambda (decl ProtossDecl)
+      (case decl
+        (PDRecord recordDecl
+          (variant Some
+            (record
+              (name (get recordDecl name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTypeNames decl)) definedTypes)))))
+        (PDType typeDecl
+          (variant Some
+            (record
+              (name (get typeDecl name))
+              (deps ((Protoss.nameSetIntersect (Protoss.declTypeNames decl)) definedTypes)))))
+        (PDVariant variantDecl
+          (variant Some
+            (record
+              (name (get variantDecl name))
+              (deps
+                ((Protoss.nameSetRemove (get variantDecl name))
+                  ((Protoss.nameSetIntersect (Protoss.declTypeNames decl)) definedTypes))))))
+        (_ (variant None unit))))))
+
+(def Protoss.declsTypeDepNodes (-> (List ProtossDecl) (List ProtossDepNode))
+  (lambda (decls (List ProtossDecl))
+    (let (definedTypes (List String) (Protoss.declsDefinedTypeNames decls))
+      (foldList decls (Nil ProtossDepNode)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List ProtossDepNode))
+            (case ((Protoss.declTypeDepNode definedTypes) decl)
+              (None _ acc)
+              (Some node (Cons ProtossDepNode node acc)))))))))
+
+(def Protoss.typeDependencyOrderDecls (-> (List ProtossDecl) ProtossDepOrder)
+  (lambda (decls (List ProtossDecl))
+    (let (nodes (List ProtossDepNode) (Protoss.declsTypeDepNodes decls))
+      (let (state ProtossDepSortState
+        (foldNat ((inst List.length ProtossDepNode) nodes)
+          (record
+            (remaining nodes)
+            (ordered (Nil String)))
+          (lambda (acc ProtossDepSortState)
+            (Protoss.depSortStep acc))))
+        (caseList (get state remaining)
+          (Nil (variant PDepOrderOk (get state ordered)))
+          (Cons first rest (variant PDepOrderCycle (Protoss.depNodeNames (get state remaining)))))))))
+
+(def Protoss.typeDependencyOrderText (-> String (Result String ProtossDepOrder))
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (variant Err err))
+      (Ok decls (variant Ok (Protoss.typeDependencyOrderDecls decls))))))
 
 (def Json.null Json
   (variant JNull unit))

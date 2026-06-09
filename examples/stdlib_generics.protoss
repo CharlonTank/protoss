@@ -771,6 +771,38 @@
     (Err err (Nil ProtossDepNode))
     (Ok decls (Protoss.declsTermDepNodes decls))))
 
+(def protossTypeDepOrderParsedValid (Result String ProtossDepOrder)
+  (Protoss.typeDependencyOrderText "(variant UseBox (Some Box))\n(record Box (value Id))\n(type Id Nat)"))
+
+(def protossTypeDepOrderValid (ProtossDepOrder)
+  (case protossTypeDepOrderParsedValid
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok order order)))
+
+(def protossTypeDepOrderParsedCycle (Result String ProtossDepOrder)
+  (Protoss.typeDependencyOrderText "(type A B)\n(type B A)"))
+
+(def protossTypeDepOrderCycle (ProtossDepOrder)
+  (case protossTypeDepOrderParsedCycle
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok order order)))
+
+(def protossTypeDepOrderParsedRecursiveVariant (Result String ProtossDepOrder)
+  (Protoss.typeDependencyOrderText "(variant Tree (params A) (Leaf A) (Node (Tree A)))"))
+
+(def protossTypeDepOrderRecursiveVariant (ProtossDepOrder)
+  (case protossTypeDepOrderParsedRecursiveVariant
+    (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
+    (Ok order order)))
+
+(def protossTypeDepNodesParsed (Result String (List ProtossDecl))
+  (Protoss.parseText "(variant UseBox (Some Box))\n(record Box (value Id))\n(type Id Nat)"))
+
+(def protossTypeDepNodes (List ProtossDepNode)
+  (case protossTypeDepNodesParsed
+    (Err err (Nil ProtossDepNode))
+    (Ok decls (Protoss.declsTypeDepNodes decls))))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))

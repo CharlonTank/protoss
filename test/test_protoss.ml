@@ -2489,6 +2489,30 @@ let () =
   assert_equal "stdlib Protoss.declsTermDepNodes"
     "[{deps = [\"b\"], name = \"c\"}, {deps = [\"a\"], name = \"b\"}, {deps = [], name = \"a\"}]"
     (Runtime.value_to_string protoss_dep_nodes);
+  let protoss_type_dep_order_valid, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeDepOrderValid"
+  in
+  assert_equal "stdlib Protoss.typeDependencyOrderText valid"
+    "PDepOrderOk [\"Id\", \"Box\", \"UseBox\"]"
+    (Runtime.value_to_string protoss_type_dep_order_valid);
+  let protoss_type_dep_order_cycle, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeDepOrderCycle"
+  in
+  assert_equal "stdlib Protoss.typeDependencyOrderText cycle"
+    "PDepOrderCycle [\"A\", \"B\"]"
+    (Runtime.value_to_string protoss_type_dep_order_cycle);
+  let protoss_type_dep_order_recursive_variant, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeDepOrderRecursiveVariant"
+  in
+  assert_equal "stdlib Protoss.typeDependencyOrderText recursive variant"
+    "PDepOrderOk [\"Tree\"]"
+    (Runtime.value_to_string protoss_type_dep_order_recursive_variant);
+  let protoss_type_dep_nodes, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeDepNodes"
+  in
+  assert_equal "stdlib Protoss.declsTypeDepNodes"
+    "[{deps = [\"Box\"], name = \"UseBox\"}, {deps = [\"Id\"], name = \"Box\"}, {deps = [], name = \"Id\"}]"
+    (Runtime.value_to_string protoss_type_dep_nodes);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);
