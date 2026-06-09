@@ -1,0 +1,65 @@
+-- Primitives intégrées de Protoss
+--
+-- Ces noms ne sont définis dans aucun fichier .protoss : ils sont câblés dans le
+-- kernel (lib/kernel.ml). Ce fichier documente leurs signatures et sert de cible
+-- de "go to definition" (Cmd/Ctrl+Click) pour l'extension Cursor/VS Code.
+--
+-- Les types listés ci-dessous reflètent les règles du typechecker
+-- (lib/kernel.ml, fonction `infer`). `text` et `image` produisent une vue
+-- indépendante du message ; on les note `View msg` car elles se composent dans
+-- n'importe quelle `List (View msg)`.
+
+
+-- Vue (View msg) ------------------------------------------------------------
+-- Les 8 constructeurs de l'UI déclarative, façon elm-ui.
+
+text : String -> View msg
+
+image : String -> String -> View msg
+
+button : String -> msg -> View msg
+
+input : String -> (String -> msg) -> View msg
+
+column : List (View msg) -> View msg
+
+row : List (View msg) -> View msg
+
+list : List a -> (a -> View msg) -> View msg
+
+when : Bool -> View msg -> View msg
+
+
+-- HTML brut (échappatoire façon Elm `Html`) ---------------------------------
+-- Trois primitifs qui se composent avec `View msg` : un nœud HTML arbitraire,
+-- ses attributs statiques et ses gestionnaires d'événements. `attr` est
+-- indépendant du message (type `Attr Unit`) et s'unifie dans n'importe quelle
+-- `List (Attr msg)`, comme `text` se compose dans une `List (View msg)`.
+
+node : String -> List (Attr msg) -> List (View msg) -> View msg
+
+attr : String -> String -> Attr msg
+
+on : String -> msg -> Attr msg
+
+
+-- Process a -----------------------------------------------------------------
+-- Construction et enchaînement de calculs effectful.
+
+done : a -> Process a
+
+bind : Process a -> (a -> Process b) -> Process b
+
+
+-- Effets externes (suspendent en requêtes typées) ---------------------------
+-- Chaque effet exige la capability correspondante.
+
+AskHuman : String -> Process String
+
+HttpGet : String -> Process String
+
+LoadLocal : String -> Process String
+
+SaveLocal : String -> String -> Process Unit
+
+ServerRequest : String -> String -> Process String

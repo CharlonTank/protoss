@@ -86,6 +86,7 @@ let rec type_of_graph_json obj =
       Ast.TVariant (Ast.sort_fields cases)
   | "List" -> Ast.TList (type_of_graph_json (json_field "item" obj))
   | "View" -> Ast.TView (type_of_graph_json (json_field "message" obj))
+  | "Attr" -> Ast.TAttr (type_of_graph_json (json_field "message" obj))
   | "Process" -> Ast.TProcess (type_of_graph_json (json_field "result" obj))
   | "TypeVar" -> Ast.TVar (json_nat_field "index" obj)
   | "Forall" ->
@@ -212,6 +213,17 @@ let rec term_of_graph_json obj =
   | "WhenView" ->
       Kernel.CWhenView
         (term_of_graph_json (json_field "condition" obj), term_of_graph_json (json_field "view" obj))
+  | "Node" ->
+      Kernel.CNode
+        ( term_of_graph_json (json_field "tagName" obj),
+          term_of_graph_json (json_field "attributes" obj),
+          term_of_graph_json (json_field "children" obj) )
+  | "Attr" ->
+      Kernel.CAttr
+        (term_of_graph_json (json_field "name" obj), term_of_graph_json (json_field "value" obj))
+  | "On" ->
+      Kernel.COn
+        (term_of_graph_json (json_field "event" obj), term_of_graph_json (json_field "message" obj))
   | "Done" -> Kernel.CDone (term_of_graph_json (json_field "value" obj))
   | "Request" -> Kernel.CRequest (req_of_graph_json (json_field "request" obj))
   | "Bind" ->

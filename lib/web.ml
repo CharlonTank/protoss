@@ -111,6 +111,8 @@ let rec value_to_json = function
         ]
   | Runtime.VView view ->
       json_obj [ json_field "tag" (json_string "View"); json_field "view" (view_to_json None view) ]
+  | Runtime.VAttribute attr ->
+      json_obj [ json_field "tag" (json_string "Attribute"); json_field "attribute" (attr_to_json attr) ]
   | Runtime.VClosure _ -> json_obj [ json_field "tag" (json_string "Closure") ]
   | Runtime.VBuiltinSucc -> json_obj [ json_field "tag" (json_string "BuiltinSucc") ]
   | Runtime.VProcessDone v ->
@@ -179,6 +181,30 @@ and view_to_json checked_opt = function
         [
           json_field "kind" (json_string "row");
           json_field "children" (json_array (view_to_json checked_opt) children);
+        ]
+  | Runtime.VNode (tag, attrs, children) ->
+      json_obj
+        [
+          json_field "kind" (json_string "node");
+          json_field "tag" (json_string tag);
+          json_field "attributes" (json_array attr_to_json attrs);
+          json_field "children" (json_array (view_to_json checked_opt) children);
+        ]
+
+and attr_to_json = function
+  | Runtime.VAttr (name, value) ->
+      json_obj
+        [
+          json_field "kind" (json_string "attr");
+          json_field "name" (json_string name);
+          json_field "value" (json_string value);
+        ]
+  | Runtime.VOn (event, msg) ->
+      json_obj
+        [
+          json_field "kind" (json_string "on");
+          json_field "event" (json_string event);
+          json_field "message" (message_to_json msg);
         ]
 
 let initial_model_and_view contract =
@@ -278,6 +304,9 @@ let runtime_js =
   }
   function viewValue(view) {
     return { tag: "View", view: view };
+  }
+  function attrValue(attr) {
+    return { tag: "Attribute", attr: attr };
   }
   function requestExpected(req) {
     if (!req) return "Unit";
@@ -490,6 +519,26 @@ let runtime_js =
           return evalTerm(term.condition, env).value
             ? evalTerm(term.view, env)
             : viewValue({ kind: "column", children: [] });
+        case "Node": {
+          var nodeAttrs = (evalTerm(term.attributes, env).items || []).map(function (a) { return a.attr; });
+          var nodeChildren = (evalTerm(term.children, env).items || []).map(function (v) { return v.view; });
+          return viewValue({
+            kind: "node",
+            tag: evalTerm(term.tagName, env).value || "",
+            attributes: nodeAttrs,
+            children: nodeChildren
+          });
+        }
+        case "Attr": return attrValue({
+          kind: "attr",
+          name: evalTerm(term.name, env).value || "",
+          value: evalTerm(term.value, env).value || ""
+        });
+        case "On": return attrValue({
+          kind: "on",
+          event: evalTerm(term.event, env).value || "",
+          message: evalTerm(term.message, env)
+        });
         case "Done": return { tag: "Done", value: evalTerm(term.value, env) };
         case "Request": {
           var request = term.request || {};
@@ -566,6 +615,21 @@ let runtime_js =
       div.className = "protoss-" + node.kind;
       (node.children || []).forEach(function (child) { div.appendChild(renderView(child, dispatch)); });
       return div;
+    }
+    if (node.kind === "node") {
+      var el = document.createElement(node.tag || "div");
+      (node.attributes || []).forEach(function (attr) {
+        if (attr.kind === "attr") {
+          var name = String(attr.name || "");
+          // Block inline event-handler attributes (onclick, onload, ...) to avoid script injection.
+          if (/^on/i.test(name)) return;
+          el.setAttribute(name, attr.value || "");
+        } else if (attr.kind === "on") {
+          el.addEventListener(attr.event || "", function () { dispatch(attr.message); });
+        }
+      });
+      (node.children || []).forEach(function (child) { el.appendChild(renderView(child, dispatch)); });
+      return el;
     }
     return text("");
   }

@@ -13,6 +13,7 @@ type value =
   | VRecord of (string * value) list
   | VVariant of typ * string * value
   | VView of view
+  | VAttribute of vattr
   | VClosure of typ * Kernel.cterm * value list * string list
   | VBuiltinSucc
   | VProcessDone of value
@@ -31,6 +32,11 @@ and view =
   | VInput of string * value
   | VColumn of view list
   | VRow of view list
+  | VNode of string * vattr list * view list
+
+and vattr =
+  | VAttr of string * string
+  | VOn of string * value
 
 and continuation =
   | KDone
@@ -67,6 +73,7 @@ let rec value_to_string = function
       ^ "}"
   | VVariant (_, con, v) -> con ^ " " ^ value_to_string v
   | VView view -> view_to_string view
+  | VAttribute a -> vattr_to_string a
   | VClosure (t, body, _, _) ->
       "<lambda:" ^ Kernel.type_to_canonical t ^ ":" ^ Kernel.cterm_to_string body ^ ">"
   | VBuiltinSucc -> "<builtin:succ>"
@@ -81,6 +88,16 @@ and view_to_string = function
   | VColumn children ->
       "(column [" ^ String.concat ", " (List.map view_to_string children) ^ "])"
   | VRow children -> "(row [" ^ String.concat ", " (List.map view_to_string children) ^ "])"
+  | VNode (tag, attrs, children) ->
+      "(node " ^ Ast.quote tag ^ " ["
+      ^ String.concat ", " (List.map vattr_to_string attrs)
+      ^ "] ["
+      ^ String.concat ", " (List.map view_to_string children)
+      ^ "])"
+
+and vattr_to_string = function
+  | VAttr (name, value) -> "(attr " ^ Ast.quote name ^ " " ^ Ast.quote value ^ ")"
+  | VOn (event, msg) -> "(on " ^ Ast.quote event ^ " " ^ value_to_string msg ^ ")"
 
 let rec value_to_cache_key = function
   | VUnit -> "(Unit)"
@@ -101,6 +118,7 @@ let rec value_to_cache_key = function
       "(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " "
       ^ value_to_cache_key value ^ ")"
   | VView view -> "(View " ^ view_to_cache_key view ^ ")"
+  | VAttribute a -> "(Attribute " ^ vattr_to_cache_key a ^ ")"
   | VClosure (typ, body, env, cap_scope) ->
       "(Closure " ^ Kernel.type_to_canonical typ ^ " " ^ Kernel.cterm_to_string body
       ^ " (env " ^ String.concat " " (List.map value_to_cache_key env)
@@ -119,6 +137,16 @@ and view_to_cache_key = function
   | VColumn children ->
       "(Column " ^ String.concat " " (List.map view_to_cache_key children) ^ ")"
   | VRow children -> "(Row " ^ String.concat " " (List.map view_to_cache_key children) ^ ")"
+  | VNode (tag, attrs, children) ->
+      "(Node " ^ Ast.quote tag ^ " ("
+      ^ String.concat " " (List.map vattr_to_cache_key attrs)
+      ^ ") ("
+      ^ String.concat " " (List.map view_to_cache_key children)
+      ^ "))"
+
+and vattr_to_cache_key = function
+  | VAttr (name, value) -> "(Attr " ^ Ast.quote name ^ " " ^ Ast.quote value ^ ")"
+  | VOn (event, msg) -> "(On " ^ Ast.quote event ^ " " ^ value_to_cache_key msg ^ ")"
 
 and continuation_to_cache_key = function
   | KDone -> "KDone"
@@ -173,6 +201,7 @@ let rec cache_value_to_canonical = function
       | None -> None
       | Some v -> Some ("(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " " ^ v ^ ")"))
   | VView _ -> None
+  | VAttribute _ -> None
   | VClosure _ | VBuiltinSucc | VProcessDone _ | VProcessRequest _ -> None
 
 and cache_values_to_canonical = function
@@ -445,6 +474,24 @@ let rec eval_cterm st env = function
       | VBool true -> eval_cterm st env view
       | VBool false -> VView (VColumn [])
       | v -> fail ("when condition on non-Bool runtime value: " ^ value_to_string v))
+  | Kernel.CNode (tag, attrs, children) -> (
+      match eval_cterm st env tag with
+      | VString tag -> (
+          match (eval_cterm st env attrs, eval_cterm st env children) with
+          | VList (_, attr_items), VList (_, child_items) ->
+              VView (VNode (tag, List.map expect_attr attr_items, List.map expect_view child_items))
+          | VList _, v -> fail ("node children on non-List runtime value: " ^ value_to_string v)
+          | v, _ -> fail ("node attributes on non-List runtime value: " ^ value_to_string v))
+      | v -> fail ("node tag on non-String runtime value: " ^ value_to_string v))
+  | Kernel.CAttr (name, value) -> (
+      match (eval_cterm st env name, eval_cterm st env value) with
+      | VString name, VString value -> VAttribute (VAttr (name, value))
+      | VString _, v -> fail ("attr value on non-String runtime value: " ^ value_to_string v)
+      | v, _ -> fail ("attr name on non-String runtime value: " ^ value_to_string v))
+  | Kernel.COn (event, msg) -> (
+      match eval_cterm st env event with
+      | VString event -> VAttribute (VOn (event, eval_cterm st env msg))
+      | v -> fail ("on event on non-String runtime value: " ^ value_to_string v))
   | Kernel.CDone e -> VProcessDone (eval_cterm st env e)
   | Kernel.CRequest req -> VProcessRequest { req; cont = KDone; cap_scope = st.cap_scope }
   | Kernel.CBind (p, _, body) -> (
@@ -457,6 +504,10 @@ let rec eval_cterm st env = function
 and expect_view = function
   | VView view -> view
   | v -> fail ("expected View runtime value, got " ^ value_to_string v)
+
+and expect_attr = function
+  | VAttribute a -> a
+  | v -> fail ("expected Attr runtime value, got " ^ value_to_string v)
 
 and eval_app st fv av =
   let key =
@@ -534,18 +585,57 @@ and eval_def st n =
           Hashtbl.add st.def_cache n v;
           v)
 
+(* The default cache scope is a hash of the whole program. [eval_entry] /
+   [normalize_def] are frequently called many times on the *same* checked
+   program, and hashing every definition on each call dominates runtime. The
+   hash is a pure function of [checked], so memoize it by physical identity of
+   the program (single most-recent entry covers the common repeated-call case).
+   The returned value is identical, so cache keys and determinism are unchanged. *)
+let cache_scope_memo : (Kernel.checked * string) option ref = ref None
+
+let program_cache_scope checked =
+  match !cache_scope_memo with
+  | Some (c, h) when c == checked -> h
+  | _ ->
+      let h = Kernel.hash_program checked in
+      cache_scope_memo := Some (checked, h);
+      h
+
+(* Normal forms and sub-evaluations are pure functions of the program, yet the
+   default [eval_entry]/[normalize_def] path rebuilt empty caches on every call —
+   so evaluating N definitions of one program re-parsed and re-evaluated all of
+   their shared dependencies N times. Reuse the def/app caches across calls on
+   the *same* program (matched by physical identity), so shared dependencies are
+   normalized once. Only the all-defaults path shares; any explicit [cache_dir],
+   [trace_cache], or [cache_scope] keeps the previous fresh-cache behavior, so the
+   persistent-cache machinery and its tests are unaffected. Values are identical,
+   so determinism is preserved. *)
+let shared_caches_memo :
+    (Kernel.checked * (string, value) Hashtbl.t * (string, value) Hashtbl.t) option ref =
+  ref None
+
+let shared_caches checked =
+  match !shared_caches_memo with
+  | Some (c, dc, ac) when c == checked -> (dc, ac)
+  | _ ->
+      let dc = Hashtbl.create 256 and ac = Hashtbl.create 512 in
+      shared_caches_memo := Some (checked, dc, ac);
+      (dc, ac)
+
 let state ?(trace_cache = false) ?cache_dir ?cache_scope checked =
-  let cache_scope =
-    match cache_scope with
-    | Some scope -> scope
-    | None -> Kernel.hash_program checked
+  let scope =
+    match cache_scope with Some scope -> scope | None -> program_cache_scope checked
+  in
+  let def_cache, app_cache =
+    if cache_dir = None && (not trace_cache) && cache_scope = None then shared_caches checked
+    else (Hashtbl.create 32, Hashtbl.create 64)
   in
   {
     checked;
-    def_cache = Hashtbl.create 32;
-    app_cache = Hashtbl.create 64;
+    def_cache;
+    app_cache;
     cache_dir;
-    cache_scope;
+    cache_scope = scope;
     trace = [];
     trace_cache;
     recur_stack = [];
@@ -586,6 +676,7 @@ let rec value_to_canonical = function
   | VVariant (typ, con, v) ->
       "(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " " ^ value_to_canonical v ^ ")"
   | VView view -> "(View " ^ view_to_canonical view ^ ")"
+  | VAttribute a -> "(Attribute " ^ vattr_to_canonical a ^ ")"
   | VClosure (typ, body, env, cap_scope) ->
       "(Closure " ^ Kernel.type_to_canonical typ ^ " " ^ Kernel.cterm_to_string body ^ " (env "
       ^ String.concat " " (List.map value_to_canonical env) ^ ") (cap-scope "
@@ -602,6 +693,16 @@ and view_to_canonical = function
   | VColumn children ->
       "(Column " ^ String.concat " " (List.map view_to_canonical children) ^ ")"
   | VRow children -> "(Row " ^ String.concat " " (List.map view_to_canonical children) ^ ")"
+  | VNode (tag, attrs, children) ->
+      "(Node " ^ Ast.quote tag ^ " ("
+      ^ String.concat " " (List.map vattr_to_canonical attrs)
+      ^ ") ("
+      ^ String.concat " " (List.map view_to_canonical children)
+      ^ "))"
+
+and vattr_to_canonical = function
+  | VAttr (name, value) -> "(Attr " ^ Ast.quote name ^ " " ^ Ast.quote value ^ ")"
+  | VOn (event, msg) -> "(On " ^ Ast.quote event ^ " " ^ value_to_canonical msg ^ ")"
 
 and continuation_to_canonical = function
   | KDone -> "KDone"
@@ -647,6 +748,7 @@ let rec value_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "Variant"; typ; Sexp.Atom con; v ] ->
       VVariant (Kernel.type_of_canonical_sexp typ, con, value_of_canonical_sexp v)
   | Sexp.List [ Sexp.Atom "View"; view ] -> VView (view_of_canonical_sexp view)
+  | Sexp.List [ Sexp.Atom "Attribute"; a ] -> VAttribute (vattr_of_canonical_sexp a)
   | Sexp.List [ Sexp.Atom "Closure"; typ; body; Sexp.List (Sexp.Atom "env" :: env) ] ->
       VClosure
         ( Kernel.type_of_canonical_sexp typ,
@@ -682,7 +784,17 @@ and view_of_canonical_sexp = function
   | Sexp.List (Sexp.Atom "Column" :: children) ->
       VColumn (List.map view_of_canonical_sexp children)
   | Sexp.List (Sexp.Atom "Row" :: children) -> VRow (List.map view_of_canonical_sexp children)
+  | Sexp.List [ Sexp.Atom "Node"; Sexp.Str tag; Sexp.List attrs; Sexp.List children ] ->
+      VNode
+        ( tag,
+          List.map vattr_of_canonical_sexp attrs,
+          List.map view_of_canonical_sexp children )
   | x -> fail ("invalid runtime view: " ^ Sexp.to_string x)
+
+and vattr_of_canonical_sexp = function
+  | Sexp.List [ Sexp.Atom "Attr"; Sexp.Str name; Sexp.Str value ] -> VAttr (name, value)
+  | Sexp.List [ Sexp.Atom "On"; Sexp.Str event; msg ] -> VOn (event, value_of_canonical_sexp msg)
+  | x -> fail ("invalid runtime attribute: " ^ Sexp.to_string x)
 
 let rec continuation_of_canonical_sexp = function
   | Sexp.Atom "KDone" -> KDone

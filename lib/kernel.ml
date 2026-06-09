@@ -53,6 +53,7 @@ let rec type_to_canonical = function
       ^ ")"
   | TList t -> "(List " ^ type_to_canonical t ^ ")"
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
+  | TAttr t -> "(Attr " ^ type_to_canonical t ^ ")"
   | TProcess t -> "(Process " ^ type_to_canonical t ^ ")"
   | TVar i -> "(TVar " ^ string_of_int i ^ ")"
   | TForall (arity, body) ->
@@ -306,7 +307,7 @@ let rec direct_self_refs alias guarded = function
   | TRecord fields -> List.concat_map (fun (_, t) -> direct_self_refs alias guarded t) fields
   | TVariant cases -> List.concat_map (fun (_, t) -> direct_self_refs alias true t) cases
   | TList t -> direct_self_refs alias guarded t
-  | TView t | TProcess t -> direct_self_refs alias false t
+  | TView t | TAttr t | TProcess t -> direct_self_refs alias false t
   | TForall (_, body) -> direct_self_refs alias guarded body
   | TNamed (n, args) ->
       let arg_refs = List.concat_map (direct_self_refs alias guarded) args in
@@ -348,6 +349,7 @@ let rec expand_type recursive_names aliases vars stack = function
            (List.map (fun (n, t) -> (n, expand_type recursive_names aliases vars stack t)) cases))
   | TList t -> TList (expand_type recursive_names aliases vars stack t)
   | TView t -> TView (expand_type recursive_names aliases vars stack t)
+  | TAttr t -> TAttr (expand_type recursive_names aliases vars stack t)
   | TProcess t -> TProcess (expand_type recursive_names aliases vars stack t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, expand_type recursive_names aliases vars stack body)
@@ -460,6 +462,15 @@ let rec expand_expr_types recursive_names aliases vars = function
       EListView (expand_expr_types recursive_names aliases vars items, expand_expr_types recursive_names aliases vars render)
   | EWhenView (cond, view) ->
       EWhenView (expand_expr_types recursive_names aliases vars cond, expand_expr_types recursive_names aliases vars view)
+  | ENode (tag, attrs, children) ->
+      ENode
+        ( expand_expr_types recursive_names aliases vars tag,
+          expand_expr_types recursive_names aliases vars attrs,
+          expand_expr_types recursive_names aliases vars children )
+  | EAttr (name, value) ->
+      EAttr (expand_expr_types recursive_names aliases vars name, expand_expr_types recursive_names aliases vars value)
+  | EOn (event, msg) ->
+      EOn (expand_expr_types recursive_names aliases vars event, expand_expr_types recursive_names aliases vars msg)
   | EDone e -> EDone (expand_expr_types recursive_names aliases vars e)
   | ERequest req -> ERequest req
   | EBind (p, x, t, body) ->
@@ -555,8 +566,10 @@ let collect_deps defs =
         expr (head :: tail :: bound) (expr bound (expr bound acc xs) nil_body) cons_body
     | EText e | EColumn e | ERow e -> expr bound acc e
     | EButton (label, msg) | EInput (label, msg) | EImage (label, msg)
-    | EListView (label, msg) | EWhenView (label, msg) ->
+    | EListView (label, msg) | EWhenView (label, msg) | EAttr (label, msg) | EOn (label, msg) ->
         expr bound (expr bound acc label) msg
+    | ENode (tag, attrs, children) ->
+        expr bound (expr bound (expr bound acc tag) attrs) children
     | EDone e -> expr bound acc e
     | EBind (p, x, _, body) | EBindInfer (p, x, body) ->
         expr (x :: bound) (expr bound acc p) body
@@ -657,8 +670,9 @@ let rec expr_names = function
       expr_names xs @ expr_names nil_body @ [ head; tail ] @ expr_names cons_body
   | EText e | EColumn e | ERow e | EDone e -> expr_names e
   | EImage (a, b) | EButton (a, b) | EInput (a, b) | EListView (a, b)
-  | EWhenView (a, b) ->
+  | EWhenView (a, b) | EAttr (a, b) | EOn (a, b) ->
       expr_names a @ expr_names b
+  | ENode (tag, attrs, children) -> expr_names tag @ expr_names attrs @ expr_names children
   | EBind (p, x, _, body) | EBindInfer (p, x, body) -> expr_names p @ (x :: expr_names body)
 
 and branch_names_in_expr = function
@@ -698,6 +712,7 @@ let rec subst_type args = function
   | TVariant cases -> TVariant (sort_fields (List.map (fun (n, t) -> (n, subst_type args t)) cases))
   | TList t -> TList (subst_type args t)
   | TView t -> TView (subst_type args t)
+  | TAttr t -> TAttr (subst_type args t)
   | TProcess t -> TProcess (subst_type args t)
   | TVar i -> option_or_fail ("type argument missing for TVar " ^ string_of_int i) (List.nth_opt args i)
   | TForall (arity, body) -> TForall (arity, subst_type args body)
@@ -729,6 +744,7 @@ let rec subst_named_type_params vars = function
       TVariant (sort_fields (List.map (fun (n, t) -> (n, subst_named_type_params vars t)) cases))
   | TList t -> TList (subst_named_type_params vars t)
   | TView t -> TView (subst_named_type_params vars t)
+  | TAttr t -> TAttr (subst_named_type_params vars t)
   | TProcess t -> TProcess (subst_named_type_params vars t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, subst_named_type_params vars body)
@@ -914,7 +930,7 @@ let rec contains_process_type = function
   | TProcess _ -> true
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
-  | TList t | TView t -> contains_process_type t
+  | TList t | TView t | TAttr t -> contains_process_type t
   | TForall (_, t) -> contains_process_type t
   | TNamed _ -> false
   | TVar _ | TUnit | TBool | TNat | TString -> false
@@ -1137,6 +1153,21 @@ let rec infer ctx = function
       (match infer ctx view with
       | TView _ as t -> t
       | t -> fail ("when expects View msg, got " ^ string_of_typ t))
+  | ENode (tag, attrs, children) -> (
+      require_type TString (infer ctx tag) "node tag";
+      match (infer ctx attrs, infer ctx children) with
+      | TList (TAttr attr_msg), TList (TView view_msg) ->
+          require_type (TAttr attr_msg) (TAttr view_msg) "node attributes message";
+          TView view_msg
+      | TList (TAttr _), t -> fail ("node children must be List (View msg), got " ^ string_of_typ t)
+      | t, _ -> fail ("node attributes must be List (Attr msg), got " ^ string_of_typ t))
+  | EAttr (name, value) ->
+      require_type TString (infer ctx name) "attr name";
+      require_type TString (infer ctx value) "attr value";
+      TAttr TUnit
+  | EOn (event, msg) ->
+      require_type TString (infer ctx event) "on event";
+      TAttr (infer ctx msg)
   | EDone e -> TProcess (infer ctx e)
   | ERequest req ->
       let cap = req_capability req in
@@ -1405,6 +1436,22 @@ let rec infer_elab ctx expr =
       (match view_ty with
       | TView _ as t -> (t, EWhenView (cond, view))
       | t -> fail ("when expects View msg, got " ^ string_of_typ t))
+  | ENode (tag, attrs, children) -> (
+      let _, tag = check_elab ctx TString tag in
+      let children_ty, children = infer_elab ctx children in
+      match children_ty with
+      | TList (TView msg_ty) ->
+          let _, attrs = check_elab ctx (TList (TAttr msg_ty)) attrs in
+          (TView msg_ty, ENode (tag, attrs, children))
+      | t -> fail ("node children must be List (View msg), got " ^ string_of_typ t))
+  | EAttr (name, value) ->
+      let _, name = check_elab ctx TString name in
+      let _, value = check_elab ctx TString value in
+      (TAttr TUnit, EAttr (name, value))
+  | EOn (event, msg) ->
+      let _, event = check_elab ctx TString event in
+      let msg_ty, msg = infer_elab ctx msg in
+      (TAttr msg_ty, EOn (event, msg))
   | EDone e ->
       let t, e = infer_elab ctx e in
       (TProcess t, EDone e)
@@ -1467,6 +1514,11 @@ and check_elab ctx expected expr =
   | TProcess expected_value, EDone e ->
       let _, e = check_elab ctx expected_value e in
       (expected, EDone e)
+  | TView msg_ty, ENode (tag, attrs, children) ->
+      let _, tag = check_elab ctx TString tag in
+      let _, attrs = check_elab ctx (TList (TAttr msg_ty)) attrs in
+      let _, children = check_elab ctx (TList (TView msg_ty)) children in
+      (expected, ENode (tag, attrs, children))
   | TList item_ty, ECons (actual_item_ty, head, tail) ->
       require_type item_ty actual_item_ty "Cons type";
       let _, head = check_elab ctx item_ty head in
@@ -1626,6 +1678,8 @@ and poly_app_elab ctx expected expr =
                 match actual with TList a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected List"))
             | TView p -> (
                 match actual with TView a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected View"))
+            | TAttr p -> (
+                match actual with TAttr a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected Attr"))
             | TProcess p -> (
                 match actual with
                 | TProcess a -> unify p a
@@ -1774,6 +1828,9 @@ type cterm =
   | CRow of cterm
   | CListView of cterm * cterm
   | CWhenView of cterm * cterm
+  | CNode of cterm * cterm * cterm
+  | CAttr of cterm * cterm
+  | COn of cterm * cterm
   | CDone of cterm
   | CRequest of req
   | CBind of cterm * typ * cterm
@@ -1834,6 +1891,10 @@ let rec canonical_expr env = function
   | ERow children -> CRow (canonical_expr env children)
   | EListView (items, render) -> CListView (canonical_expr env items, canonical_expr env render)
   | EWhenView (cond, view) -> CWhenView (canonical_expr env cond, canonical_expr env view)
+  | ENode (tag, attrs, children) ->
+      CNode (canonical_expr env tag, canonical_expr env attrs, canonical_expr env children)
+  | EAttr (name, value) -> CAttr (canonical_expr env name, canonical_expr env value)
+  | EOn (event, msg) -> COn (canonical_expr env event, canonical_expr env msg)
   | EDone e -> CDone (canonical_expr env e)
   | ERequest req -> CRequest req
   | EBind (p, x, t, body) -> CBind (canonical_expr env p, t, canonical_expr (x :: env) body)
@@ -1861,8 +1922,11 @@ let rec cterm_direct_capabilities = function
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CInst _ | CNil _ -> []
   | CLambda (_, body) -> cterm_direct_capabilities body
   | CApp (f, x) | CLet (f, x) | CImage (f, x) | CButton (f, x) | CInput (f, x)
-  | CListView (f, x) | CWhenView (f, x) ->
+  | CListView (f, x) | CWhenView (f, x) | CAttr (f, x) | COn (f, x) ->
       cterm_direct_capabilities f @ cterm_direct_capabilities x
+  | CNode (tag, attrs, children) ->
+      cterm_direct_capabilities tag @ cterm_direct_capabilities attrs
+      @ cterm_direct_capabilities children
   | CRecord fields -> List.concat_map (fun (_, e) -> cterm_direct_capabilities e) fields
   | CField (e, _) | CVariant (_, _, e) | CRecur e | CText e | CColumn e | CRow e
   | CDone e ->
@@ -1889,8 +1953,10 @@ let rec cterm_global_refs = function
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ | CNil _ -> []
   | CLambda (_, body) -> cterm_global_refs body
   | CApp (f, x) | CLet (f, x) | CImage (f, x) | CButton (f, x) | CInput (f, x)
-  | CListView (f, x) | CWhenView (f, x) ->
+  | CListView (f, x) | CWhenView (f, x) | CAttr (f, x) | COn (f, x) ->
       cterm_global_refs f @ cterm_global_refs x
+  | CNode (tag, attrs, children) ->
+      cterm_global_refs tag @ cterm_global_refs attrs @ cterm_global_refs children
   | CRecord fields -> List.concat_map (fun (_, e) -> cterm_global_refs e) fields
   | CField (e, _) | CVariant (_, _, e) | CRecur e | CText e | CColumn e | CRow e
   | CDone e ->
@@ -1965,6 +2031,11 @@ let rec cterm_to_string = function
       "(list " ^ cterm_to_string items ^ " " ^ cterm_to_string render ^ ")"
   | CWhenView (cond, view) ->
       "(when " ^ cterm_to_string cond ^ " " ^ cterm_to_string view ^ ")"
+  | CNode (tag, attrs, children) ->
+      "(node " ^ cterm_to_string tag ^ " " ^ cterm_to_string attrs ^ " "
+      ^ cterm_to_string children ^ ")"
+  | CAttr (name, value) -> "(attr " ^ cterm_to_string name ^ " " ^ cterm_to_string value ^ ")"
+  | COn (event, msg) -> "(on " ^ cterm_to_string event ^ " " ^ cterm_to_string msg ^ ")"
   | CDone e -> "(done " ^ cterm_to_string e ^ ")"
   | CRequest req -> req_to_canonical req
   | CBind (p, t, body) ->
@@ -2057,6 +2128,16 @@ let rec cterm_to_canonical_v2 def_id_of = function
   | CWhenView (cond, view) ->
       "(when " ^ cterm_to_canonical_v2 def_id_of cond ^ " "
       ^ cterm_to_canonical_v2 def_id_of view ^ ")"
+  | CNode (tag, attrs, children) ->
+      "(node " ^ cterm_to_canonical_v2 def_id_of tag ^ " "
+      ^ cterm_to_canonical_v2 def_id_of attrs ^ " "
+      ^ cterm_to_canonical_v2 def_id_of children ^ ")"
+  | CAttr (name, value) ->
+      "(attr " ^ cterm_to_canonical_v2 def_id_of name ^ " "
+      ^ cterm_to_canonical_v2 def_id_of value ^ ")"
+  | COn (event, msg) ->
+      "(on " ^ cterm_to_canonical_v2 def_id_of event ^ " "
+      ^ cterm_to_canonical_v2 def_id_of msg ^ ")"
   | CDone e -> "(done " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
   | CRequest req -> req_to_canonical req
   | CBind (p, t, body) ->
@@ -2156,6 +2237,8 @@ let rec type_to_graph_json = function
       json_obj [ json_field "tag" (json_string "List"); json_field "item" (type_to_graph_json t) ]
   | TView t ->
       json_obj [ json_field "tag" (json_string "View"); json_field "message" (type_to_graph_json t) ]
+  | TAttr t ->
+      json_obj [ json_field "tag" (json_string "Attr"); json_field "message" (type_to_graph_json t) ]
   | TProcess t ->
       json_obj [ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
   | TVar i ->
@@ -2397,6 +2480,28 @@ let rec cterm_to_graph_json def_id_of = function
           json_field "condition" (cterm_to_graph_json def_id_of cond);
           json_field "view" (cterm_to_graph_json def_id_of view);
         ]
+  | CNode (tag, attrs, children) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Node");
+          json_field "tagName" (cterm_to_graph_json def_id_of tag);
+          json_field "attributes" (cterm_to_graph_json def_id_of attrs);
+          json_field "children" (cterm_to_graph_json def_id_of children);
+        ]
+  | CAttr (name, value) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Attr");
+          json_field "name" (cterm_to_graph_json def_id_of name);
+          json_field "value" (cterm_to_graph_json def_id_of value);
+        ]
+  | COn (event, msg) ->
+      json_obj
+        [
+          json_field "tag" (json_string "On");
+          json_field "event" (cterm_to_graph_json def_id_of event);
+          json_field "message" (cterm_to_graph_json def_id_of msg);
+        ]
   | CDone e ->
       json_obj [ json_field "tag" (json_string "Done"); json_field "value" (cterm_to_graph_json def_id_of e) ]
   | CRequest req ->
@@ -2436,6 +2541,7 @@ let type_node_tag = function
   | TVariant _ -> "Variant"
   | TList _ -> "List"
   | TView _ -> "View"
+  | TAttr _ -> "Attr"
   | TProcess _ -> "Process"
   | TVar _ -> "TypeVar"
   | TForall _ -> "Forall"
@@ -2472,6 +2578,9 @@ let cterm_node_tag = function
   | CRow _ -> "Row"
   | CListView _ -> "ListView"
   | CWhenView _ -> "WhenView"
+  | CNode _ -> "Node"
+  | CAttr _ -> "Attr"
+  | COn _ -> "On"
   | CDone _ -> "Done"
   | CRequest _ -> "Request"
   | CBind _ -> "Bind"
@@ -2480,7 +2589,7 @@ let type_node_edges = function
   | TUnit | TBool | TNat | TString | TVar _ -> []
   | TFun (a, b) -> [ type_node_id a; type_node_id b ]
   | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_node_id t)
-  | TList t | TView t | TProcess t -> [ type_node_id t ]
+  | TList t | TView t | TAttr t | TProcess t -> [ type_node_id t ]
   | TForall (_, body) -> [ type_node_id body ]
   | TNamed (_, args) -> List.map type_node_id args
 
@@ -2514,8 +2623,10 @@ let cterm_node_edges def_id_of = function
   | CText value | CColumn value | CRow value | CDone value ->
       [ term_node_id def_id_of value ]
   | CImage (src, alt) | CButton (src, alt) | CInput (src, alt)
-  | CListView (src, alt) | CWhenView (src, alt) ->
+  | CListView (src, alt) | CWhenView (src, alt) | CAttr (src, alt) | COn (src, alt) ->
       [ term_node_id def_id_of src; term_node_id def_id_of alt ]
+  | CNode (tag, attrs, children) ->
+      [ term_node_id def_id_of tag; term_node_id def_id_of attrs; term_node_id def_id_of children ]
   | CBind (process, typ, body) ->
       [ term_node_id def_id_of process; type_node_id typ; term_node_id def_id_of body ]
 
@@ -2546,7 +2657,7 @@ let canonical_node_graph_json program_hash def_id_of defs =
         add_type a;
         add_type b
     | TRecord fields | TVariant fields -> List.iter (fun (_, t) -> add_type t) fields
-    | TList t | TView t | TProcess t | TForall (_, t) -> add_type t
+    | TList t | TView t | TAttr t | TProcess t | TForall (_, t) -> add_type t
     | TNamed (_, args) -> List.iter add_type args
   in
   let rec add_term term =
@@ -2565,9 +2676,13 @@ let canonical_node_graph_json program_hash def_id_of defs =
         add_type typ;
         add_term body
     | CApp (f, arg) | CImage (f, arg) | CButton (f, arg) | CInput (f, arg)
-    | CListView (f, arg) | CWhenView (f, arg) ->
+    | CListView (f, arg) | CWhenView (f, arg) | CAttr (f, arg) | COn (f, arg) ->
         add_term f;
         add_term arg
+    | CNode (tag, attrs, children) ->
+        add_term tag;
+        add_term attrs;
+        add_term children
     | CLet (value, body) ->
         add_term value;
         add_term body
@@ -2670,6 +2785,7 @@ let rec type_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom i ] -> TVar (int_of_string i)
   | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom arity; body ] ->
       TForall (int_of_string arity, type_of_canonical_sexp body)
@@ -2780,6 +2896,15 @@ let rec cterm_of_canonical_sexp = function
       CListView (cterm_of_canonical_sexp items, cterm_of_canonical_sexp render)
   | Sexp.List [ Sexp.Atom "when"; cond; view ] ->
       CWhenView (cterm_of_canonical_sexp cond, cterm_of_canonical_sexp view)
+  | Sexp.List [ Sexp.Atom "node"; tag; attrs; children ] ->
+      CNode
+        ( cterm_of_canonical_sexp tag,
+          cterm_of_canonical_sexp attrs,
+          cterm_of_canonical_sexp children )
+  | Sexp.List [ Sexp.Atom "attr"; name; value ] ->
+      CAttr (cterm_of_canonical_sexp name, cterm_of_canonical_sexp value)
+  | Sexp.List [ Sexp.Atom "on"; event; msg ] ->
+      COn (cterm_of_canonical_sexp event, cterm_of_canonical_sexp msg)
   | Sexp.List [ Sexp.Atom "done"; e ] -> CDone (cterm_of_canonical_sexp e)
   | Sexp.List [ Sexp.Atom "AskHuman"; Sexp.Str _ ] as req -> CRequest (req_of_canonical_sexp req)
   | Sexp.List [ Sexp.Atom "HttpGet"; Sexp.Str _ ] as req -> CRequest (req_of_canonical_sexp req)
@@ -2931,6 +3056,10 @@ let canonical_surface_expr defs term =
     | CRow children -> ERow (expr depth env children)
     | CListView (items, render) -> EListView (expr depth env items, expr depth env render)
     | CWhenView (cond, view) -> EWhenView (expr depth env cond, expr depth env view)
+    | CNode (tag, attrs, children) ->
+        ENode (expr depth env tag, expr depth env attrs, expr depth env children)
+    | CAttr (name, value) -> EAttr (expr depth env name, expr depth env value)
+    | COn (event, msg) -> EOn (expr depth env event, expr depth env msg)
     | CDone value -> EDone (expr depth env value)
     | CRequest req -> ERequest req
     | CBind (process, typ, body) ->
@@ -3323,6 +3452,10 @@ let rec shift amount cutoff = function
   | CRow children -> CRow (shift amount cutoff children)
   | CListView (items, render) -> CListView (shift amount cutoff items, shift amount cutoff render)
   | CWhenView (cond, view) -> CWhenView (shift amount cutoff cond, shift amount cutoff view)
+  | CNode (tag, attrs, children) ->
+      CNode (shift amount cutoff tag, shift amount cutoff attrs, shift amount cutoff children)
+  | CAttr (name, value) -> CAttr (shift amount cutoff name, shift amount cutoff value)
+  | COn (event, msg) -> COn (shift amount cutoff event, shift amount cutoff msg)
   | CDone e -> CDone (shift amount cutoff e)
   | CRequest req -> CRequest req
   | CBind (p, t, body) -> CBind (shift amount cutoff p, t, shift amount (cutoff + 1) body)
@@ -3376,6 +3509,13 @@ let rec subst index replacement = function
       CListView (subst index replacement items, subst index replacement render)
   | CWhenView (cond, view) ->
       CWhenView (subst index replacement cond, subst index replacement view)
+  | CNode (tag, attrs, children) ->
+      CNode
+        ( subst index replacement tag,
+          subst index replacement attrs,
+          subst index replacement children )
+  | CAttr (name, value) -> CAttr (subst index replacement name, subst index replacement value)
+  | COn (event, msg) -> COn (subst index replacement event, subst index replacement msg)
   | CDone e -> CDone (subst index replacement e)
   | CRequest req -> CRequest req
   | CBind (p, t, body) -> CBind (subst index replacement p, t, subst (index + 1) (shift 1 0 replacement) body)
@@ -3433,6 +3573,13 @@ let rec subst_type_in_cterm args = function
   | CRow children -> CRow (subst_type_in_cterm args children)
   | CListView (items, render) -> CListView (subst_type_in_cterm args items, subst_type_in_cterm args render)
   | CWhenView (cond, view) -> CWhenView (subst_type_in_cterm args cond, subst_type_in_cterm args view)
+  | CNode (tag, attrs, children) ->
+      CNode
+        ( subst_type_in_cterm args tag,
+          subst_type_in_cterm args attrs,
+          subst_type_in_cterm args children )
+  | CAttr (name, value) -> CAttr (subst_type_in_cterm args name, subst_type_in_cterm args value)
+  | COn (event, msg) -> COn (subst_type_in_cterm args event, subst_type_in_cterm args msg)
   | CDone e -> CDone (subst_type_in_cterm args e)
   | CRequest req -> CRequest req
   | CBind (p, t, body) ->
@@ -3559,6 +3706,10 @@ let rec normalize_cterm checked = function
         | CRow children -> CRow (rewrite_recur children)
         | CListView (items, render) -> CListView (rewrite_recur items, rewrite_recur render)
         | CWhenView (cond, view) -> CWhenView (rewrite_recur cond, rewrite_recur view)
+        | CNode (tag, attrs, children) ->
+            CNode (rewrite_recur tag, rewrite_recur attrs, rewrite_recur children)
+        | CAttr (name, value) -> CAttr (rewrite_recur name, rewrite_recur value)
+        | COn (event, msg) -> COn (rewrite_recur event, rewrite_recur msg)
         | CDone e -> CDone (rewrite_recur e)
         | CRequest req -> CRequest req
         | CBind (p, t, body) -> CBind (rewrite_recur p, t, rewrite_recur body)
@@ -3605,6 +3756,13 @@ let rec normalize_cterm checked = function
       | CBool true -> normalize_cterm checked view
       | CBool false -> CColumn (CNil (TView TUnit))
       | cond -> CWhenView (cond, normalize_cterm checked view))
+  | CNode (tag, attrs, children) ->
+      CNode
+        ( normalize_cterm checked tag,
+          normalize_cterm checked attrs,
+          normalize_cterm checked children )
+  | CAttr (name, value) -> CAttr (normalize_cterm checked name, normalize_cterm checked value)
+  | COn (event, msg) -> COn (normalize_cterm checked event, normalize_cterm checked msg)
   | CDone e -> CDone (normalize_cterm checked e)
   | CBind (p, t, body) -> (
       match normalize_cterm checked p with

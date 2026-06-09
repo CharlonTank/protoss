@@ -1,0 +1,26 @@
+;; Raw-HTML escape hatch demo: the view is built from `node`/`attr`/`on`
+;; instead of the declarative View constructors. A `<div class="counter">`
+;; wraps a text label and a `<button>` whose click dispatches the typed Msg.
+
+(def init (Process Nat) (done 0))
+
+(def update (-> (Variant (Increment Unit)) (-> Nat (Process Nat)))
+  (lambda (msg (Variant (Increment Unit)))
+    (lambda (model Nat)
+      (done (succ model)))))
+
+(def view (-> Nat (View (Variant (Increment Unit))))
+  (lambda (model Nat)
+    (node "div"
+      (Cons (Attr (Variant (Increment Unit))) (attr "class" "counter")
+        (Nil (Attr (Variant (Increment Unit)))))
+      (Cons (View (Variant (Increment Unit)))
+        (text "Counter")
+        (Cons (View (Variant (Increment Unit)))
+          (node "button"
+            (Cons (Attr (Variant (Increment Unit)))
+              (on "click" (variant (Variant (Increment Unit)) Increment unit))
+              (Nil (Attr (Variant (Increment Unit)))))
+            (Cons (View (Variant (Increment Unit))) (text "increment")
+              (Nil (View (Variant (Increment Unit))))))
+          (Nil (View (Variant (Increment Unit)))))))))

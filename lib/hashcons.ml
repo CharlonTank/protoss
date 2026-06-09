@@ -80,37 +80,35 @@ let k =
     0xc67178f2l;
   |]
 
-let rotr x n =
-  Int32.logor (Int32.shift_right_logical x n) (Int32.shift_left x (32 - n))
+(* SHA-256 over native OCaml [int] (63-bit on 64-bit platforms), masking every
+   32-bit word with [mask]. This avoids the heap-boxing that [Int32] forces on
+   every arithmetic/logical op and the per-operation list allocation the previous
+   [add32] used — hashing is on the hot path for content-addressing everywhere,
+   so this is many times faster. The digest is bit-for-bit identical to a
+   standard SHA-256, so all content refs/hashes are unchanged. *)
+let mask = 0xFFFFFFFF
 
-let logxor3 a b c = Int32.logxor (Int32.logxor a b) c
+let k = Array.map (fun x -> Int32.to_int x land mask) k
 
-let ch x y z = Int32.logxor (Int32.logand x y) (Int32.logand (Int32.lognot x) z)
+let rotr x n = ((x lsr n) lor (x lsl (32 - n))) land mask
 
-let maj x y z =
-  logxor3 (Int32.logand x y) (Int32.logand x z) (Int32.logand y z)
+let ch x y z = (x land y) lxor (lnot x land z)
 
-let big_sigma0 x = logxor3 (rotr x 2) (rotr x 13) (rotr x 22)
+let maj x y z = (x land y) lxor (x land z) lxor (y land z)
 
-let big_sigma1 x = logxor3 (rotr x 6) (rotr x 11) (rotr x 25)
+let big_sigma0 x = rotr x 2 lxor rotr x 13 lxor rotr x 22
 
-let small_sigma0 x =
-  logxor3 (rotr x 7) (rotr x 18) (Int32.shift_right_logical x 3)
+let big_sigma1 x = rotr x 6 lxor rotr x 11 lxor rotr x 25
 
-let small_sigma1 x =
-  logxor3 (rotr x 17) (rotr x 19) (Int32.shift_right_logical x 10)
+let small_sigma0 x = rotr x 7 lxor rotr x 18 lxor (x lsr 3)
 
-let add32 xs = List.fold_left Int32.add 0l xs
+let small_sigma1 x = rotr x 17 lxor rotr x 19 lxor (x lsr 10)
 
-let int32_of_bytes bytes offset =
-  let byte i = Char.code (Bytes.get bytes (offset + i)) in
-  add32
-    [
-      Int32.shift_left (Int32.of_int (byte 0)) 24;
-      Int32.shift_left (Int32.of_int (byte 1)) 16;
-      Int32.shift_left (Int32.of_int (byte 2)) 8;
-      Int32.of_int (byte 3);
-    ]
+let word bytes offset =
+  (Char.code (Bytes.get bytes offset) lsl 24)
+  lor (Char.code (Bytes.get bytes (offset + 1)) lsl 16)
+  lor (Char.code (Bytes.get bytes (offset + 2)) lsl 8)
+  lor Char.code (Bytes.get bytes (offset + 3))
 
 let set_int64_be bytes offset n =
   for i = 0 to 7 do
@@ -130,26 +128,18 @@ let padded_message content =
 
 let digest content =
   let bytes = padded_message content in
-  let h =
-    [|
-      0x6a09e667l;
-      0xbb67ae85l;
-      0x3c6ef372l;
-      0xa54ff53al;
-      0x510e527fl;
-      0x9b05688cl;
-      0x1f83d9abl;
-      0x5be0cd19l;
-    |]
+  let h = [| 0x6a09e667; 0xbb67ae85; 0x3c6ef372; 0xa54ff53a;
+             0x510e527f; 0x9b05688c; 0x1f83d9ab; 0x5be0cd19 |]
   in
-  let w = Array.make 64 0l in
+  let w = Array.make 64 0 in
   for chunk = 0 to (Bytes.length bytes / 64) - 1 do
     let base = chunk * 64 in
     for i = 0 to 15 do
-      w.(i) <- int32_of_bytes bytes (base + (i * 4))
+      w.(i) <- word bytes (base + (i * 4))
     done;
     for i = 16 to 63 do
-      w.(i) <- add32 [ small_sigma1 w.(i - 2); w.(i - 7); small_sigma0 w.(i - 15); w.(i - 16) ]
+      w.(i) <-
+        (small_sigma1 w.(i - 2) + w.(i - 7) + small_sigma0 w.(i - 15) + w.(i - 16)) land mask
     done;
     let a = ref h.(0)
     and b = ref h.(1)
@@ -160,27 +150,29 @@ let digest content =
     and g = ref h.(6)
     and hh = ref h.(7) in
     for i = 0 to 63 do
-      let t1 = add32 [ !hh; big_sigma1 !e; ch !e !f !g; k.(i); w.(i) ] in
-      let t2 = add32 [ big_sigma0 !a; maj !a !b !c ] in
+      let t1 = (!hh + big_sigma1 !e + ch !e !f !g + k.(i) + w.(i)) land mask in
+      let t2 = (big_sigma0 !a + maj !a !b !c) land mask in
       hh := !g;
       g := !f;
       f := !e;
-      e := Int32.add !d t1;
+      e := (!d + t1) land mask;
       d := !c;
       c := !b;
       b := !a;
-      a := Int32.add t1 t2
+      a := (t1 + t2) land mask
     done;
-    h.(0) <- Int32.add h.(0) !a;
-    h.(1) <- Int32.add h.(1) !b;
-    h.(2) <- Int32.add h.(2) !c;
-    h.(3) <- Int32.add h.(3) !d;
-    h.(4) <- Int32.add h.(4) !e;
-    h.(5) <- Int32.add h.(5) !f;
-    h.(6) <- Int32.add h.(6) !g;
-    h.(7) <- Int32.add h.(7) !hh
+    h.(0) <- (h.(0) + !a) land mask;
+    h.(1) <- (h.(1) + !b) land mask;
+    h.(2) <- (h.(2) + !c) land mask;
+    h.(3) <- (h.(3) + !d) land mask;
+    h.(4) <- (h.(4) + !e) land mask;
+    h.(5) <- (h.(5) + !f) land mask;
+    h.(6) <- (h.(6) + !g) land mask;
+    h.(7) <- (h.(7) + !hh) land mask
   done;
-  Array.to_list h |> List.map (Printf.sprintf "%08lx") |> String.concat ""
+  let buf = Buffer.create 64 in
+  Array.iter (fun x -> Buffer.add_string buf (Printf.sprintf "%08x" x)) h;
+  Buffer.contents buf
 
 let hash content = hash_prefix ^ digest content
 

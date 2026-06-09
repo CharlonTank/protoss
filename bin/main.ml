@@ -16,6 +16,7 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|branches [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
+     \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
      \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check [interface.json]|--json]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref]\n\
@@ -78,6 +79,7 @@ let protect f =
   | Protoss.Store.Error msg -> print_error "store error" msg
   | Protoss.Workspace.Error msg -> print_error "workspace error" msg
   | Protoss.Web.Error msg -> print_error "web error" msg
+  | Protoss.Runtime_store.Error msg -> print_error "runtime error" msg
   | Unix.Unix_error (err, fn, arg) ->
       print_error "system error" (fn ^ "(" ^ arg ^ "): " ^ Unix.error_message err)
   | Failure msg -> print_error "error" msg
@@ -526,6 +528,19 @@ let command_web = function
       Protoss.Web.serve ~port project
   | _ -> usage ()
 
+let command_runtime = function
+  | [ "init"; project ] -> print_string (Protoss.Runtime_store.init project)
+  | [ "status"; project ] -> print_string (Protoss.Runtime_store.status project)
+  | [ "inspect"; project ] -> print_string (Protoss.Runtime_store.inspect project)
+  | [ "world"; project ] -> print_string (Protoss.Runtime_store.world project)
+  | [ "audit"; project ] -> print_string (Protoss.Runtime_store.audit project)
+  | [ "reset"; project ] -> print_string (Protoss.Runtime_store.reset ~confirm:false project)
+  | [ "reset"; project; "--yes" ] ->
+      print_string (Protoss.Runtime_store.reset ~confirm:true project)
+  | [ "reset"; "--yes"; project ] ->
+      print_string (Protoss.Runtime_store.reset ~confirm:true project)
+  | _ -> usage ()
+
 let command_diff = function
   | [ "--json"; a; b ] ->
       print_string
@@ -814,6 +829,7 @@ let () =
       | "ledger" :: args -> command_ledger args
       | "app" :: args -> command_app args
       | "web" :: args -> command_web args
+      | "runtime" :: args -> command_runtime args
       | "project" :: args -> command_project args
       | "build" :: args -> command_project_build args
       | "patch" :: args -> command_patch args

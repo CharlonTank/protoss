@@ -8,6 +8,7 @@ type typ =
   | TVariant of (string * typ) list
   | TList of typ
   | TView of typ
+  | TAttr of typ
   | TProcess of typ
   | TVar of int
   | TForall of int * typ
@@ -56,6 +57,9 @@ type expr =
   | ERow of expr
   | EListView of expr * expr
   | EWhenView of expr * expr
+  | ENode of expr * expr * expr
+  | EAttr of expr * expr
+  | EOn of expr * expr
   | EDone of expr
   | ERequest of req
   | EBind of expr * string * typ * expr
@@ -101,6 +105,8 @@ let rec equal_typ a b =
   | TList a, TList b -> equal_typ a b
   | TView TUnit, TView _ | TView _, TView TUnit -> true
   | TView a, TView b -> equal_typ a b
+  | TAttr TUnit, TAttr _ | TAttr _, TAttr TUnit -> true
+  | TAttr a, TAttr b -> equal_typ a b
   | TProcess a, TProcess b -> equal_typ a b
   | TVar a, TVar b -> a = b
   | TForall (arity_a, body_a), TForall (arity_b, body_b) ->
@@ -155,6 +161,7 @@ let rec string_of_typ_with_params params = function
       ^ ")"
   | TList t -> "(List " ^ string_of_typ_with_params params t ^ ")"
   | TView t -> "(View " ^ string_of_typ_with_params params t ^ ")"
+  | TAttr t -> "(Attr " ^ string_of_typ_with_params params t ^ ")"
   | TProcess t -> "(Process " ^ string_of_typ_with_params params t ^ ")"
   | TVar i -> (
       match List.nth_opt params i with Some name -> name | None -> "(TVar " ^ string_of_int i ^ ")")
@@ -270,6 +277,16 @@ let rec string_of_expr_with_params params = function
   | EWhenView (cond, view) ->
       "(when " ^ string_of_expr_with_params params cond ^ " "
       ^ string_of_expr_with_params params view ^ ")"
+  | ENode (tag, attrs, children) ->
+      "(node " ^ string_of_expr_with_params params tag ^ " "
+      ^ string_of_expr_with_params params attrs ^ " "
+      ^ string_of_expr_with_params params children ^ ")"
+  | EAttr (name, value) ->
+      "(attr " ^ string_of_expr_with_params params name ^ " "
+      ^ string_of_expr_with_params params value ^ ")"
+  | EOn (event, msg) ->
+      "(on " ^ string_of_expr_with_params params event ^ " "
+      ^ string_of_expr_with_params params msg ^ ")"
   | EDone e -> "(done " ^ string_of_expr_with_params params e ^ ")"
   | ERequest req -> string_of_req req
   | EBind (p, x, t, body) ->
