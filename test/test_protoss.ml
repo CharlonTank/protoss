@@ -2616,6 +2616,52 @@ let () =
   assert_equal "stdlib Protoss.typeEnvReportText arity issues"
     "[{actual = 2, expected = 1, name = \"Box\"}]"
     (Runtime.value_to_string protoss_type_env_arity_issues);
+  let protoss_capability_valid_declared, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityValidDeclared"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText declared"
+    "[\"Human.ask\", \"Clock.read\"]"
+    (Runtime.value_to_string protoss_capability_valid_declared);
+  let protoss_capability_valid_used, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityValidUsed"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText used"
+    "[\"Clock.read\", \"Human.ask\"]"
+    (Runtime.value_to_string protoss_capability_valid_used);
+  let protoss_capability_valid_scoped, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityValidScoped"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText scoped" "[\"Human.ask\"]"
+    (Runtime.value_to_string protoss_capability_valid_scoped);
+  let protoss_capability_valid_missing, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityValidMissing"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText valid missing" "[]"
+    (Runtime.value_to_string protoss_capability_valid_missing);
+  let protoss_capability_missing_declaration, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityMissingDeclaration"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText missing declaration"
+    "Err \"missing capability declaration: Human.ask\""
+    (Runtime.value_to_string protoss_capability_missing_declaration);
+  let protoss_capability_unknown, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityUnknown"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText unknown"
+    "Err \"unknown capability: Space.laser\""
+    (Runtime.value_to_string protoss_capability_unknown);
+  let protoss_capability_duplicate_declaration, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityDuplicateDeclaration"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText duplicate declaration"
+    "Err \"duplicate capability declaration: Human.ask\""
+    (Runtime.value_to_string protoss_capability_duplicate_declaration);
+  let protoss_capability_duplicate_scope, _ =
+    Runtime.normalize_def stdlib_generics "protossCapabilityDuplicateScope"
+  in
+  assert_equal "stdlib Protoss.checkCapabilityText duplicate scope"
+    "Err \"duplicate scoped capability: ask.Human.ask\""
+    (Runtime.value_to_string protoss_capability_duplicate_scope);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

@@ -1,4 +1,4 @@
-; Protoss stdlib v0.40. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.41. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -258,6 +258,14 @@
   (duplicateRecordFields (List String))
   (duplicateVariantCases (List String))
   (typeArityIssues (List ProtossTypeArityIssue)))
+(record ProtossCapabilityReport
+  (declared (List String))
+  (used (List String))
+  (scoped (List String))
+  (unknownCapabilities (List String))
+  (missingDeclarations (List String))
+  (duplicateDeclarations (List String))
+  (duplicateScopes (List String)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -266,7 +274,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.40")
+(def Stdlib.version String "v0.41")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -4799,6 +4807,256 @@
 (def Protoss.checkTypeEnvText (-> String (Result String ProtossTypeEnvReport))
   (lambda (source String)
     ((Protoss.checkTypeEnvTextWith (Nil String)) source)))
+
+(def Protoss.capabilityCatalog (List String)
+  (Cons String "Human.ask"
+    (Cons String "Http.get"
+      (Cons String "Clock.read"
+        (Cons String "Local.storage"
+          (Cons String "Server.request"
+            (Nil String)))))))
+
+(def Protoss.requestCapability (-> ProtossRequest String)
+  (lambda (request ProtossRequest)
+    (case request
+      (PRAskHuman prompt "Human.ask")
+      (PRHttpGet url "Http.get")
+      (PRClockRead _ "Clock.read")
+      (PRSaveLocal save "Local.storage")
+      (PRLoadLocal key "Local.storage")
+      (PRServerRequest payload "Server.request"))))
+
+(defrec Protoss.exprCapabilities (-> ProtossExpr (List String))
+  (variant expr)
+  (PEApply call
+    ((Protoss.nameSetUnion (recur (get call fn)))
+      (foldList (get call args) (Nil String)
+        (lambda (arg ProtossExpr)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion (recur arg)) acc))))))
+  (PEBind bindExpr
+    ((Protoss.nameSetUnion (recur (get bindExpr process)))
+      ((Protoss.nameSetRemove (get bindExpr param)) (recur (get bindExpr body)))))
+  (PEBool value
+    (Nil String))
+  (PECase caseExpr
+    ((Protoss.nameSetUnion (recur (get caseExpr scrutinee)))
+      (foldList (get caseExpr branches) (Nil String)
+        (lambda (branch ProtossCaseBranch)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion
+              (case (get branch binder)
+                (None _ (recur (get branch body)))
+                (Some name ((Protoss.nameSetRemove name) (recur (get branch body))))))
+              acc))))))
+  (PECaseList caseListExpr
+    ((Protoss.nameSetUnion (recur (get caseListExpr target)))
+      ((Protoss.nameSetUnion (recur (get caseListExpr nilBody)))
+        ((Protoss.nameSetRemoveMany
+          (Cons String (get caseListExpr head)
+            (Cons String (get caseListExpr tail)
+              (Nil String))))
+          (recur (get caseListExpr consBody))))))
+  (PEDone value
+    (recur value))
+  (PEField fieldExpr
+    (recur (get fieldExpr target)))
+  (PEFoldNat foldNatExpr
+    ((Protoss.nameSetUnion (recur (get foldNatExpr target)))
+      ((Protoss.nameSetUnion (recur (get foldNatExpr zero)))
+        (recur (get foldNatExpr step)))))
+  (PEFoldVariant foldVariantExpr
+    ((Protoss.nameSetUnion (recur (get foldVariantExpr scrutinee)))
+      (foldList (get foldVariantExpr branches) (Nil String)
+        (lambda (branch ProtossCaseBranch)
+          (lambda (acc (List String))
+            ((Protoss.nameSetUnion
+              (case (get branch binder)
+                (None _ (recur (get branch body)))
+                (Some name ((Protoss.nameSetRemove name) (recur (get branch body))))))
+              acc))))))
+  (PEFoldList foldListExpr
+    ((Protoss.nameSetUnion (recur (get foldListExpr target)))
+      ((Protoss.nameSetUnion (recur (get foldListExpr zero)))
+        (recur (get foldListExpr step)))))
+  (PEInst instExpr
+    (Nil String))
+  (PELambda lam
+    ((Protoss.nameSetRemove (get (get lam param) name))
+      (recur (get lam body))))
+  (PELet letExpr
+    ((Protoss.nameSetUnion (recur (get letExpr value)))
+      ((Protoss.nameSetRemove (get letExpr name))
+        (recur (get letExpr body)))))
+  (PECons consExpr
+    ((Protoss.nameSetUnion (recur (get consExpr head)))
+      (recur (get consExpr tail))))
+  (PENil nilExpr
+    (Nil String))
+  (PERecord fields
+    (foldList fields (Nil String)
+      (lambda (field ProtossRecordFieldExpr)
+        (lambda (acc (List String))
+            ((Protoss.nameSetUnion (recur (get field expr))) acc)))))
+  (PERecur value
+    (recur value))
+  (PERequest request
+    (Cons String (Protoss.requestCapability request) (Nil String)))
+  (PEString value
+    (Nil String))
+  (PEUnit
+    (Nil String))
+  (PEVariant variantExpr
+    (recur (get variantExpr payload)))
+  (PEVar name
+    (Nil String)))
+
+(def Protoss.defRecBodyCapabilities (-> ProtossDefRecBody (List String))
+  (lambda (body ProtossDefRecBody)
+    (case body
+      (PDRNat nat
+        ((Protoss.nameSetUnion (Protoss.exprCapabilities (get nat zero)))
+          (Protoss.exprCapabilities (get nat step))))
+      (PDRList listRec
+        ((Protoss.nameSetUnion (Protoss.exprCapabilities (get listRec nil)))
+          (Protoss.exprCapabilities (get listRec step))))
+      (PDRVariant variantRec
+        (foldList (get variantRec branches) (Nil String)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List String))
+              ((Protoss.nameSetUnion (Protoss.exprCapabilities (get branch body))) acc))))))))
+
+(def Protoss.declCapabilities (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDCapabilities caps caps)
+      (_ (Nil String)))))
+
+(def Protoss.declScopedCapabilities (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDefCap def (get def capabilities))
+      (PDDefPolyCap def (get def capabilities))
+      (_ (Nil String)))))
+
+(def Protoss.declUsedCapabilities (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def (Protoss.exprCapabilities (get def expr)))
+      (PDDefCap def (Protoss.exprCapabilities (get def expr)))
+      (PDDefPoly def (Protoss.exprCapabilities (get def expr)))
+      (PDDefPolyCap def (Protoss.exprCapabilities (get def expr)))
+      (PDDefRec def (Protoss.defRecBodyCapabilities (get def body)))
+      (_ (Nil String)))))
+
+(def Protoss.declDuplicateScopeCapabilities (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDefCap def
+        (((inst List.map String String)
+          (Protoss.nameSetDuplicates (get def capabilities)))
+          (Protoss.qualifyName (get def name))))
+      (PDDefPolyCap def
+        (((inst List.map String String)
+          (Protoss.nameSetDuplicates (get def capabilities)))
+          (Protoss.qualifyName (get def name))))
+      (_ (Nil String)))))
+
+(def Protoss.declsCapabilities (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (Protoss.nameSetUnique
+      (foldList decls (Nil String)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List String))
+            (((inst List.append String) (Protoss.declCapabilities decl)) acc)))))))
+
+(def Protoss.declsRawCapabilities (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          (((inst List.append String) (Protoss.declCapabilities decl)) acc))))))
+
+(def Protoss.declsScopedCapabilities (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (Protoss.nameSetUnique
+      (foldList decls (Nil String)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List String))
+            (((inst List.append String) (Protoss.declScopedCapabilities decl)) acc)))))))
+
+(def Protoss.declsUsedCapabilities (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (Protoss.nameSetUnique
+      (foldList decls (Nil String)
+        (lambda (decl ProtossDecl)
+          (lambda (acc (List String))
+            (((inst List.append String) (Protoss.declUsedCapabilities decl)) acc)))))))
+
+(def Protoss.declsDuplicateScopeCapabilities (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          (((inst List.append String) (Protoss.declDuplicateScopeCapabilities decl)) acc))))))
+
+(def Protoss.capabilityReportDecls (-> (List ProtossDecl) ProtossCapabilityReport)
+  (lambda (decls (List ProtossDecl))
+    (let (declared (List String) (Protoss.declsCapabilities decls))
+      (let (used (List String) (Protoss.declsUsedCapabilities decls))
+        (let (scoped (List String) (Protoss.declsScopedCapabilities decls))
+          (let (mentioned (List String)
+            ((Protoss.nameSetUnion declared) ((Protoss.nameSetUnion used) scoped)))
+            (record
+              (declared declared)
+              (used used)
+              (scoped scoped)
+              (unknownCapabilities
+                ((Protoss.nameSetMissingFrom mentioned) Protoss.capabilityCatalog))
+              (missingDeclarations
+                ((Protoss.nameSetMissingFrom ((Protoss.nameSetUnion used) scoped)) declared))
+              (duplicateDeclarations
+                (Protoss.nameSetDuplicates (Protoss.declsRawCapabilities decls)))
+              (duplicateScopes
+                (Protoss.declsDuplicateScopeCapabilities decls)))))))))
+
+(def Protoss.capabilityReportText (-> String (Result String ProtossCapabilityReport))
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (variant Err err))
+      (Ok decls (variant Ok (Protoss.capabilityReportDecls decls))))))
+
+(def Protoss.capabilityFirstError (-> ProtossCapabilityReport (Maybe String))
+  (lambda (report ProtossCapabilityReport)
+    (caseList (get report unknownCapabilities)
+      (Nil
+        (caseList (get report duplicateDeclarations)
+          (Nil
+            (caseList (get report duplicateScopes)
+              (Nil
+                (caseList (get report missingDeclarations)
+                  (Nil (variant None unit))
+                  (Cons first rest
+                    (variant Some ((String.concat "missing capability declaration: ") first)))))
+              (Cons first rest
+                (variant Some ((String.concat "duplicate scoped capability: ") first)))))
+          (Cons first rest
+            (variant Some ((String.concat "duplicate capability declaration: ") first)))))
+      (Cons first rest
+        (variant Some ((String.concat "unknown capability: ") first))))))
+
+(def Protoss.checkCapabilityDecls (-> (List ProtossDecl) (Result String ProtossCapabilityReport))
+  (lambda (decls (List ProtossDecl))
+    (let (report ProtossCapabilityReport (Protoss.capabilityReportDecls decls))
+      (case (Protoss.capabilityFirstError report)
+        (None _ (variant Ok report))
+        (Some err (variant Err err))))))
+
+(def Protoss.checkCapabilityText (-> String (Result String ProtossCapabilityReport))
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (variant Err err))
+      (Ok decls (Protoss.checkCapabilityDecls decls)))))
 
 (def Json.null Json
   (variant JNull unit))

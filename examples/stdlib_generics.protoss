@@ -856,6 +856,42 @@
     (Err err (Nil ProtossTypeArityIssue))
     (Ok report (get report typeArityIssues))))
 
+(def protossCapabilityParsedValid (Result String ProtossCapabilityReport)
+  (Protoss.checkCapabilityText
+    "(capabilities Human.ask Clock.read)\n(def ask (Process String) (Human.ask \"Name?\"))\n(defcap askAgain (capabilities Human.ask) (Process String) ask)\n(def both (Process String) (bind (Clock.read) (lambda (now String) (Human.ask \"Again?\"))))"))
+
+(def protossCapabilityValidDeclared (List String)
+  (case protossCapabilityParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report declared))))
+
+(def protossCapabilityValidUsed (List String)
+  (case protossCapabilityParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report used))))
+
+(def protossCapabilityValidScoped (List String)
+  (case protossCapabilityParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report scoped))))
+
+(def protossCapabilityValidMissing (List String)
+  (case protossCapabilityParsedValid
+    (Err err (Cons String err (Nil String)))
+    (Ok report (get report missingDeclarations))))
+
+(def protossCapabilityMissingDeclaration (Result String ProtossCapabilityReport)
+  (Protoss.checkCapabilityText "(def ask (Process String) (Human.ask \"Name?\"))"))
+
+(def protossCapabilityUnknown (Result String ProtossCapabilityReport)
+  (Protoss.checkCapabilityText "(capabilities Space.laser)\n(def main Nat 0)"))
+
+(def protossCapabilityDuplicateDeclaration (Result String ProtossCapabilityReport)
+  (Protoss.checkCapabilityText "(capabilities Human.ask Human.ask)\n(def main Nat 0)"))
+
+(def protossCapabilityDuplicateScope (Result String ProtossCapabilityReport)
+  (Protoss.checkCapabilityText "(capabilities Human.ask)\n(defcap ask (capabilities Human.ask Human.ask) (Process String) (Human.ask \"Name?\"))"))
+
 (def jsonProfile Json
   (Json.object
     ((((inst Assoc.insert String Json) "name") (Json.string "Ada"))
