@@ -1181,6 +1181,42 @@ let () =
     "(image \"https://example.com/hero.jpg\" \"Hero\")"
     (Runtime.value_to_string hero);
 
+  (* Raw HTML escape hatch: node/attr/on primitives and the Attr type. *)
+  let node_sexp =
+    check
+      "(def page (View (Variant (Click Unit))) \
+       (node \"div\" \
+       (Cons (Attr (Variant (Click Unit))) (attr \"class\" \"card\") \
+       (Cons (Attr (Variant (Click Unit))) (on \"click\" (variant (Variant (Click Unit)) Click unit)) \
+       (Nil (Attr (Variant (Click Unit)))))) \
+       (Cons (View (Variant (Click Unit))) (text \"hi\") \
+       (Nil (View (Variant (Click Unit)))))))"
+  in
+  let node_elm =
+    check
+      "page : View (Variant (Click Unit))\npage =\n  node \"div\" [ attr \"class\" \"card\", on \"click\" (variant (Variant (Click Unit)) Click unit) ] [ text \"hi\" ]\n"
+  in
+  assert_equal "node Elm-like surface hashes as S-expression surface"
+    (Kernel.hash_program node_sexp) (Kernel.hash_program node_elm);
+  let node_page, _ = Runtime.normalize_def node_sexp "page" in
+  assert_equal "node view normalization"
+    "(node \"div\" [(attr \"class\" \"card\"), (on \"click\" Click unit)] [(text \"hi\")])"
+    (Runtime.value_to_string node_page);
+  assert_true "node is a canonical primitive (not desugared away)"
+    (contains_substring (Kernel.serialize_checked_program node_sexp) "node");
+  (* children must be List (View msg): an Attr where a View child is expected is rejected *)
+  expect_check_error
+    "(def page (View (Variant (Click Unit))) \
+     (node \"div\" (Nil (Attr (Variant (Click Unit)))) \
+     (Cons (Attr (Variant (Click Unit))) (attr \"x\" \"y\") (Nil (Attr (Variant (Click Unit)))))))";
+  (* on must produce the node's own msg type: a foreign variant is rejected *)
+  expect_check_error
+    "(def page (View (Variant (Click Unit))) \
+     (node \"div\" \
+     (Cons (Attr (Variant (Click Unit))) (on \"click\" (variant (Variant (Other Unit)) Other unit)) \
+     (Nil (Attr (Variant (Click Unit))))) \
+     (Nil (View (Variant (Click Unit))))))";
+
   let variant =
     check
       "(def value (Variant (None Unit) (Some Nat)) \
@@ -5359,5 +5395,83 @@ let () =
      ignore (Runtime.parse_suspended "(protoss-runtime-v2 (suspended (request ReadClock)))");
      fail "invalid resume suspension should be rejected"
    with Kernel.Error _ -> ());
+
+  (* -- Runtime Store Foundation -------------------------------------------- *)
+  let rt_stdlib = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
+  let rt_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
+  let rt_project = temp_dir "runtime-todo" in
+  copy_tree rt_src rt_project;
+  write_file (Filename.concat rt_project "protoss.toml")
+    ("name = \"todo-runtime-alpha\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
+    ^ rt_stdlib
+    ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Local.storage\"]\n");
+  let rt_dir = Runtime_store.runtime_path rt_project in
+  ignore (Runtime_store.init rt_project);
+  assert_true "runtime init creates runtime.json"
+    (Sys.file_exists (Filename.concat rt_dir "runtime.json"));
+  assert_true "runtime init creates latest-world"
+    (Sys.file_exists (Filename.concat rt_dir "latest-world"));
+  List.iter
+    (fun d ->
+      assert_true ("runtime init creates dir " ^ d)
+        (Sys.is_directory (Filename.concat rt_dir d)))
+    [ "worlds"; "events"; "requests"; "responses"; "snapshots" ];
+  let rt_worlds = Filename.concat rt_dir "worlds" in
+  assert_true "runtime init writes one genesis world object"
+    (Array.length (Sys.readdir rt_worlds) = 1);
+  (* idempotent: re-init yields identical runtime.json and no duplicate worlds *)
+  let rt_json_1 = Store.read_file (Filename.concat rt_dir "runtime.json") in
+  ignore (Runtime_store.init rt_project);
+  let rt_json_2 = Store.read_file (Filename.concat rt_dir "runtime.json") in
+  assert_equal "runtime init idempotent runtime.json" rt_json_1 rt_json_2;
+  assert_true "runtime init idempotent single world"
+    (Array.length (Sys.readdir rt_worlds) = 1);
+  (* status *)
+  let rt_status = Runtime_store.status rt_project in
+  assert_true "runtime status reports genesis" (contains_substring rt_status "GenesisWorld p2:");
+  assert_true "runtime status reports latest" (contains_substring rt_status "LatestWorld p2:");
+  (* inspect: deterministic and valid JSON *)
+  let rt_inspect_1 = Runtime_store.inspect rt_project in
+  let rt_inspect_2 = Runtime_store.inspect rt_project in
+  assert_equal "runtime inspect deterministic" rt_inspect_1 rt_inspect_2;
+  ignore (Json.parse rt_inspect_1);
+  (* world: returns an existing genesis object *)
+  assert_true "runtime world shows genesis kind"
+    (contains_substring (Runtime_store.world rt_project) "genesis");
+  (* audit: passes on a clean runtime *)
+  assert_true "runtime audit clean"
+    (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
+  (* corruption: latest-world points to an unknown world object *)
+  let rt_latest_path = Filename.concat rt_dir "latest-world" in
+  let rt_latest_good = Store.read_file rt_latest_path in
+  Store.write_file_atomic rt_latest_path "p2:deadbeef";
+  (try
+     ignore (Runtime_store.audit rt_project);
+     fail "runtime audit should reject an unknown latest-world"
+   with Runtime_store.Error _ -> ());
+  Store.write_file_atomic rt_latest_path rt_latest_good;
+  assert_true "runtime audit clean after latest-world restored"
+    (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
+  (* corruption: world object content no longer matches its content-address *)
+  let rt_world_file = Filename.concat rt_worlds (Sys.readdir rt_worlds).(0) in
+  let rt_world_good = Store.read_file rt_world_file in
+  Store.write_file rt_world_file (rt_world_good ^ "tampered");
+  (try
+     ignore (Runtime_store.audit rt_project);
+     fail "runtime audit should reject a tampered world object"
+   with Runtime_store.Error _ -> ());
+  Store.write_file rt_world_file rt_world_good;
+  assert_true "runtime audit clean after world object restored"
+    (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
+  (* reset: refused without confirmation, recreates a clean runtime with --yes *)
+  (try
+     ignore (Runtime_store.reset ~confirm:false rt_project);
+     fail "runtime reset without --yes should be refused"
+   with Runtime_store.Error _ -> ());
+  ignore (Runtime_store.reset ~confirm:true rt_project);
+  assert_true "runtime reset recreates a clean runtime"
+    (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
+  assert_true "runtime reset keeps a single world"
+    (Array.length (Sys.readdir rt_worlds) = 1);
 
   print_endline "protoss tests ok"

@@ -1,7 +1,32 @@
 "use strict";
 
+const path = require("path");
+
 const IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_.]*/g;
 const WORD_RE = /[A-Za-z_][A-Za-z0-9_.]*/;
+
+// Primitives intégrées au kernel (aucune définition .protoss). Cmd/Ctrl+Click
+// les renvoie vers les signatures documentées dans builtins.protoss.
+const BUILTINS = new Set([
+  "text",
+  "image",
+  "button",
+  "input",
+  "column",
+  "row",
+  "list",
+  "when",
+  "node",
+  "attr",
+  "on",
+  "done",
+  "bind",
+  "AskHuman",
+  "HttpGet",
+  "LoadLocal",
+  "SaveLocal",
+  "ServerRequest"
+]);
 
 function stripLineComment(line) {
   let inString = false;
@@ -140,6 +165,23 @@ function activate(context) {
     return null;
   }
 
+  async function builtinDefinition(symbol) {
+    if (!BUILTINS.has(symbol)) {
+      return null;
+    }
+    const builtinsUri = vscode.Uri.file(path.join(__dirname, "builtins.protoss"));
+    try {
+      const doc = await vscode.workspace.openTextDocument(builtinsUri);
+      const def = findDefinitionInText(doc.getText(), symbol);
+      if (def) {
+        return locationFor(builtinsUri, def);
+      }
+    } catch (err) {
+      // builtins.protoss missing or unreadable — fall through to no result.
+    }
+    return null;
+  }
+
   const provider = {
     async provideDefinition(document, position, token) {
       const range = document.getWordRangeAtPosition(position, WORD_RE);
@@ -153,7 +195,12 @@ function activate(context) {
         return locationFor(document, local);
       }
 
-      return searchWorkspace(document, symbol, token);
+      const workspaceHit = await searchWorkspace(document, symbol, token);
+      if (workspaceHit) {
+        return workspaceHit;
+      }
+
+      return builtinDefinition(symbol);
     }
   };
 

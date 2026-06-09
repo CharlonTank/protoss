@@ -123,6 +123,7 @@ let rec parse_type = function
   | Sexp.Atom "String" -> TString
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (parse_type t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (parse_type t)
+  | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (parse_type t)
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (parse_type t)
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> TVar (int_of_string n)
   | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom n; t ] -> TForall (int_of_string n, parse_type t)
@@ -282,6 +283,12 @@ let rec parse_expr = function
       EListView (parse_expr items, parse_expr render)
   | Sexp.List [ Sexp.Atom "when"; cond; view ] ->
       EWhenView (parse_expr cond, parse_expr view)
+  | Sexp.List [ Sexp.Atom "node"; tag; attrs; children ] ->
+      ENode (parse_expr tag, parse_expr attrs, parse_expr children)
+  | Sexp.List [ Sexp.Atom "attr"; name; value ] ->
+      EAttr (parse_expr name, parse_expr value)
+  | Sexp.List [ Sexp.Atom "on"; event; msg ] ->
+      EOn (parse_expr event, parse_expr msg)
   | Sexp.List [ Sexp.Atom "done"; e ] -> EDone (parse_expr e)
   | Sexp.List [ Sexp.Atom "Human.ask"; Sexp.Str prompt ] ->
       ERequest (AskHuman prompt)
@@ -461,6 +468,7 @@ let rec qualify_type local_types params = function
       TVariant (sort_fields (List.map (fun (n, t) -> (n, qualify_type local_types params t)) cases))
   | TList t -> TList (qualify_type local_types params t)
   | TView t -> TView (qualify_type local_types params t)
+  | TAttr t -> TAttr (qualify_type local_types params t)
   | TProcess t -> TProcess (qualify_type local_types params t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, qualify_type local_types params body)
@@ -591,6 +599,19 @@ let rec qualify_expr local_defs local_types type_params bound = function
       EWhenView
         ( qualify_expr local_defs local_types type_params bound cond,
           qualify_expr local_defs local_types type_params bound view )
+  | ENode (tag, attrs, children) ->
+      ENode
+        ( qualify_expr local_defs local_types type_params bound tag,
+          qualify_expr local_defs local_types type_params bound attrs,
+          qualify_expr local_defs local_types type_params bound children )
+  | EAttr (name, value) ->
+      EAttr
+        ( qualify_expr local_defs local_types type_params bound name,
+          qualify_expr local_defs local_types type_params bound value )
+  | EOn (event, msg) ->
+      EOn
+        ( qualify_expr local_defs local_types type_params bound event,
+          qualify_expr local_defs local_types type_params bound msg )
   | EDone e -> EDone (qualify_expr local_defs local_types type_params bound e)
   | ERequest req -> ERequest req
   | EBind (p, x, t, body) ->

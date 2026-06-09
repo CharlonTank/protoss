@@ -381,7 +381,7 @@ let rec type_refs = function
   | TUnit | TBool | TNat | TString -> []
   | TFun (a, b) -> type_refs a @ type_refs b
   | TRecord fields | TVariant fields -> List.concat_map (fun (_, t) -> type_refs t) fields
-  | TList t | TView t | TProcess t -> type_refs t
+  | TList t | TView t | TAttr t | TProcess t -> type_refs t
   | TVar _ -> []
   | TForall (_, t) -> type_refs t
   | TNamed (n, args) -> n :: List.concat_map type_refs args
@@ -413,8 +413,10 @@ let rec expr_type_refs = function
       expr_type_refs xs @ expr_type_refs nil_body @ expr_type_refs cons_body
   | EText e | EColumn e | ERow e | EDone e -> expr_type_refs e
   | EImage (a, b) | EButton (a, b) | EInput (a, b) | EListView (a, b)
-  | EWhenView (a, b) ->
+  | EWhenView (a, b) | EAttr (a, b) | EOn (a, b) ->
       expr_type_refs a @ expr_type_refs b
+  | ENode (tag, attrs, children) ->
+      expr_type_refs tag @ expr_type_refs attrs @ expr_type_refs children
   | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
   | EBindInfer (p, _, body) -> expr_type_refs p @ expr_type_refs body
 

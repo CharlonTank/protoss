@@ -134,3 +134,36 @@ let field name = function
 let string = function String s -> Some s | _ -> None
 
 let array = function Array xs -> Some xs | _ -> None
+
+let escape s =
+  let buf = Buffer.create (String.length s + 2) in
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | '\b' -> Buffer.add_string buf "\\b"
+      | '\012' -> Buffer.add_string buf "\\f"
+      | c when Char.code c < 0x20 -> Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.code c))
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+(* Canonical, deterministic encoder: object keys are emitted in sorted order so
+   the same logical value always serializes to identical bytes regardless of how
+   it was constructed. Used for content-addressed runtime objects. *)
+let rec to_string = function
+  | Null -> "null"
+  | Bool b -> if b then "true" else "false"
+  | Num n -> string_of_int n
+  | String s -> "\"" ^ escape s ^ "\""
+  | Array xs -> "[" ^ String.concat "," (List.map to_string xs) ^ "]"
+  | Object fields ->
+      let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) fields in
+      "{"
+      ^ String.concat ","
+          (List.map (fun (k, v) -> "\"" ^ escape k ^ "\":" ^ to_string v) sorted)
+      ^ "}"

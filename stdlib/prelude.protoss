@@ -5957,3 +5957,63 @@
         (case ((Json.expectField key) json)
           (Err err (variant Err err))
           (Ok value (decode value)))))))
+
+;; Html helpers -------------------------------------------------------------
+;; Ergonomic, fully-applicable wrappers over the node/attr/on primitives.
+;; Qualified Html.* names avoid collisions. Each is polymorphic in Msg, so the
+;; produced Attr/View threads the caller's message type. attr-based helpers
+;; build an Attr Unit that unifies into any (List (Attr Msg)).
+
+(defpoly Html.div (params Msg)
+  (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
+  (lambda (attrs (List (Attr Msg)))
+    (lambda (children (List (View Msg)))
+      (node "div" attrs children))))
+
+(defpoly Html.span (params Msg)
+  (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
+  (lambda (attrs (List (Attr Msg)))
+    (lambda (children (List (View Msg)))
+      (node "span" attrs children))))
+
+(defpoly Html.p (params Msg)
+  (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
+  (lambda (attrs (List (Attr Msg)))
+    (lambda (children (List (View Msg)))
+      (node "p" attrs children))))
+
+(defpoly Html.ul (params Msg)
+  (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
+  (lambda (attrs (List (Attr Msg)))
+    (lambda (children (List (View Msg)))
+      (node "ul" attrs children))))
+
+(defpoly Html.li (params Msg)
+  (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
+  (lambda (attrs (List (Attr Msg)))
+    (lambda (children (List (View Msg)))
+      (node "li" attrs children))))
+
+(defpoly Html.a (params Msg)
+  (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
+  (lambda (attrs (List (Attr Msg)))
+    (lambda (children (List (View Msg)))
+      (node "a" attrs children))))
+
+(defpoly Html.class (params Msg) (-> String (Attr Msg))
+  (lambda (value String) (attr "class" value)))
+
+(defpoly Html.id (params Msg) (-> String (Attr Msg))
+  (lambda (value String) (attr "id" value)))
+
+(defpoly Html.href (params Msg) (-> String (Attr Msg))
+  (lambda (value String) (attr "href" value)))
+
+(defpoly Html.style (params Msg) (-> String (Attr Msg))
+  (lambda (value String) (attr "style" value)))
+
+(defpoly Html.onClick (params Msg) (-> Msg (Attr Msg))
+  (lambda (m Msg) (on "click" m)))
+
+(defpoly Html.onInput (params Msg) (-> Msg (Attr Msg))
+  (lambda (m Msg) (on "input" m)))
