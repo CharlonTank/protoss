@@ -804,7 +804,7 @@
     (Ok decls (Protoss.declsTypeDepNodes decls))))
 
 (def protossTypeEnvParsedValid (Result String ProtossTypeEnvReport)
-  (Protoss.checkTypeEnvText "(variant UseBox (Some Box))\n(record Box (params A) (value A))\n(type Id Nat)"))
+  (Protoss.checkTypeEnvText "(variant UseBox (Some (Box Nat)))\n(record Box (params A) (value A))\n(type Id Nat)"))
 
 (def protossTypeEnvValidEntries (List ProtossTypeEnvEntry)
   (case protossTypeEnvParsedValid
@@ -815,6 +815,11 @@
   (case protossTypeEnvParsedValid
     (Err err (variant PDepOrderCycle (Cons String err (Nil String))))
     (Ok report (get report order))))
+
+(def protossTypeEnvValidArityIssues (List ProtossTypeArityIssue)
+  (case protossTypeEnvParsedValid
+    (Err err (Nil ProtossTypeArityIssue))
+    (Ok report (get report typeArityIssues))))
 
 (def protossTypeEnvDuplicateType (Result String ProtossTypeEnvReport)
   (Protoss.checkTypeEnvText "(type Box Nat)\n(record Box (value Nat))"))
@@ -833,6 +838,23 @@
 
 (def protossTypeEnvCycle (Result String ProtossTypeEnvReport)
   (Protoss.checkTypeEnvText "(type A B)\n(type B A)"))
+
+(def protossTypeEnvWrongArityNamed (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(record Box (params A) (value A))\n(record Use (value (Box Nat String)))"))
+
+(def protossTypeEnvWrongArityBuiltin (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(record Use (value List))"))
+
+(def protossTypeEnvWrongArityParam (Result String ProtossTypeEnvReport)
+  (Protoss.checkTypeEnvText "(record Box (params A) (value (A Nat)))"))
+
+(def protossTypeEnvArityReportParsed (Result String ProtossTypeEnvReport)
+  (Protoss.typeEnvReportText "(record Box (params A) (value A))\n(record Use (value (Box Nat String)))"))
+
+(def protossTypeEnvArityIssues (List ProtossTypeArityIssue)
+  (case protossTypeEnvArityReportParsed
+    (Err err (Nil ProtossTypeArityIssue))
+    (Ok report (get report typeArityIssues))))
 
 (def jsonProfile Json
   (Json.object

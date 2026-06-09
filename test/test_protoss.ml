@@ -2525,6 +2525,12 @@ let () =
   assert_equal "stdlib Protoss.checkTypeEnvText order"
     "PDepOrderOk [\"Box\", \"Id\", \"UseBox\"]"
     (Runtime.value_to_string protoss_type_env_order);
+  let protoss_type_env_valid_arity_issues, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvValidArityIssues"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText valid arity"
+    "[]"
+    (Runtime.value_to_string protoss_type_env_valid_arity_issues);
   let protoss_type_env_duplicate_type, _ =
     Runtime.normalize_def stdlib_generics "protossTypeEnvDuplicateType"
   in
@@ -2561,6 +2567,30 @@ let () =
   assert_equal "stdlib Protoss.checkTypeEnvText cycle"
     "Err \"cyclic type dependency: A,B\""
     (Runtime.value_to_string protoss_type_env_cycle);
+  let protoss_type_env_wrong_arity_named, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvWrongArityNamed"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText named arity"
+    "Err \"wrong type arity: Box expected 1 got 2\""
+    (Runtime.value_to_string protoss_type_env_wrong_arity_named);
+  let protoss_type_env_wrong_arity_builtin, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvWrongArityBuiltin"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText builtin arity"
+    "Err \"wrong type arity: List expected 1 got 0\""
+    (Runtime.value_to_string protoss_type_env_wrong_arity_builtin);
+  let protoss_type_env_wrong_arity_param, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvWrongArityParam"
+  in
+  assert_equal "stdlib Protoss.checkTypeEnvText param arity"
+    "Err \"wrong type arity: A expected 0 got 1\""
+    (Runtime.value_to_string protoss_type_env_wrong_arity_param);
+  let protoss_type_env_arity_issues, _ =
+    Runtime.normalize_def stdlib_generics "protossTypeEnvArityIssues"
+  in
+  assert_equal "stdlib Protoss.typeEnvReportText arity issues"
+    "[{actual = 2, expected = 1, name = \"Box\"}]"
+    (Runtime.value_to_string protoss_type_env_arity_issues);
   let json_name, _ = Runtime.normalize_def stdlib_generics "jsonName" in
   assert_equal "stdlib Json.getField hit" "Some JString \"Ada\""
     (Runtime.value_to_string json_name);

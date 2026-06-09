@@ -1,4 +1,4 @@
-; Protoss stdlib v0.39. This is ordinary Protoss source imported by programs.
+; Protoss stdlib v0.40. This is ordinary Protoss source imported by programs.
 
 (type Maybe (A) (Variant (None Unit) (Some A)))
 (type Option (A) (Maybe A))
@@ -242,6 +242,13 @@
   (kind String)
   (arity Nat)
   (deps (List String)))
+(record ProtossTypeArityUse
+  (name String)
+  (actual Nat))
+(record ProtossTypeArityIssue
+  (name String)
+  (expected Nat)
+  (actual Nat))
 (record ProtossTypeEnvReport
   (entries (List ProtossTypeEnvEntry))
   (order ProtossDepOrder)
@@ -249,7 +256,8 @@
   (duplicateTypes (List String))
   (duplicateTypeParams (List String))
   (duplicateRecordFields (List String))
-  (duplicateVariantCases (List String)))
+  (duplicateVariantCases (List String))
+  (typeArityIssues (List ProtossTypeArityIssue)))
 (variant Json
   (JArray (List Json))
   (JBool Bool)
@@ -258,7 +266,7 @@
   (JObject (Assoc String Json))
   (JString String))
 
-(def Stdlib.version String "v0.39")
+(def Stdlib.version String "v0.40")
 
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
@@ -3612,7 +3620,10 @@
         (Cons String "String"
           (Cons String "Process"
             (Cons String "List"
-              (Nil String))))))))
+              (Cons String "View"
+                (Cons String "Record"
+                  (Cons String "Variant"
+                    (Nil String)))))))))))
 
 (def Protoss.nameSetContains (-> String (-> (List String) Bool))
   (lambda (name String)
@@ -4431,19 +4442,288 @@
               (None _ acc)
               (Some entry (Cons ProtossTypeEnvEntry entry acc)))))))))
 
+(def Protoss.typeArityUseOf (-> String (-> Nat ProtossTypeArityUse))
+  (lambda (name String)
+    (lambda (actual Nat)
+      (record (name name) (actual actual)))))
+
+(defrec Protoss.typeArityUses (-> ProtossType (List ProtossTypeArityUse))
+  (variant typ)
+  (PTName name
+    (Cons ProtossTypeArityUse ((Protoss.typeArityUseOf name) 0) (Nil ProtossTypeArityUse)))
+  (PTFun pair
+    (((inst List.append ProtossTypeArityUse) (recur (get pair first)))
+      (recur (get pair second))))
+  (PTApply app
+    (Cons ProtossTypeArityUse
+      ((Protoss.typeArityUseOf (get app name)) ((inst List.length ProtossType) (get app args)))
+      (foldList (get app args) (Nil ProtossTypeArityUse)
+        (lambda (arg ProtossType)
+          (lambda (acc (List ProtossTypeArityUse))
+            (((inst List.append ProtossTypeArityUse) (recur arg)) acc)))))))
+
+(def Protoss.typeArityUsesMaybe (-> (Maybe ProtossType) (List ProtossTypeArityUse))
+  (lambda (maybeType (Maybe ProtossType))
+    (case maybeType
+      (None _ (Nil ProtossTypeArityUse))
+      (Some typ (Protoss.typeArityUses typ)))))
+
+(defrec Protoss.exprTypeArityUses (-> ProtossExpr (List ProtossTypeArityUse))
+  (variant expr)
+  (PEApply call
+    (((inst List.append ProtossTypeArityUse) (recur (get call fn)))
+      (foldList (get call args) (Nil ProtossTypeArityUse)
+        (lambda (arg ProtossExpr)
+          (lambda (acc (List ProtossTypeArityUse))
+            (((inst List.append ProtossTypeArityUse) (recur arg)) acc))))))
+  (PEBind bindExpr
+    (((inst List.append ProtossTypeArityUse) (recur (get bindExpr process)))
+      (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get bindExpr typ)))
+        (recur (get bindExpr body)))))
+  (PEBool value
+    (Nil ProtossTypeArityUse))
+  (PECase caseExpr
+    (((inst List.append ProtossTypeArityUse) (recur (get caseExpr scrutinee)))
+      (foldList (get caseExpr branches) (Nil ProtossTypeArityUse)
+        (lambda (branch ProtossCaseBranch)
+          (lambda (acc (List ProtossTypeArityUse))
+            (((inst List.append ProtossTypeArityUse) (recur (get branch body))) acc))))))
+  (PECaseList caseListExpr
+    (((inst List.append ProtossTypeArityUse) (recur (get caseListExpr target)))
+      (((inst List.append ProtossTypeArityUse) (recur (get caseListExpr nilBody)))
+        (recur (get caseListExpr consBody)))))
+  (PEDone value
+    (recur value))
+  (PEField fieldExpr
+    (recur (get fieldExpr target)))
+  (PEFoldNat foldNatExpr
+    (((inst List.append ProtossTypeArityUse) (recur (get foldNatExpr target)))
+      (((inst List.append ProtossTypeArityUse) (recur (get foldNatExpr zero)))
+        (recur (get foldNatExpr step)))))
+  (PEFoldVariant foldVariantExpr
+    (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get foldVariantExpr target)))
+      (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get foldVariantExpr result)))
+        (((inst List.append ProtossTypeArityUse) (recur (get foldVariantExpr scrutinee)))
+          (foldList (get foldVariantExpr branches) (Nil ProtossTypeArityUse)
+            (lambda (branch ProtossCaseBranch)
+              (lambda (acc (List ProtossTypeArityUse))
+                (((inst List.append ProtossTypeArityUse) (recur (get branch body))) acc))))))))
+  (PEFoldList foldListExpr
+    (((inst List.append ProtossTypeArityUse) (recur (get foldListExpr target)))
+      (((inst List.append ProtossTypeArityUse) (recur (get foldListExpr zero)))
+        (recur (get foldListExpr step)))))
+  (PEInst instExpr
+    (foldList (get instExpr typeArgs) (Nil ProtossTypeArityUse)
+      (lambda (typ ProtossType)
+        (lambda (acc (List ProtossTypeArityUse))
+          (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses typ)) acc)))))
+  (PELambda lam
+    (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get (get lam param) typ)))
+      (recur (get lam body))))
+  (PELet letExpr
+    (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUsesMaybe (get letExpr typ)))
+      (((inst List.append ProtossTypeArityUse) (recur (get letExpr value)))
+        (recur (get letExpr body)))))
+  (PECons consExpr
+    (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUsesMaybe (get consExpr typ)))
+      (((inst List.append ProtossTypeArityUse) (recur (get consExpr head)))
+        (recur (get consExpr tail)))))
+  (PENil nilExpr
+    (Protoss.typeArityUsesMaybe (get nilExpr typ)))
+  (PERecord fields
+    (foldList fields (Nil ProtossTypeArityUse)
+      (lambda (field ProtossRecordFieldExpr)
+        (lambda (acc (List ProtossTypeArityUse))
+          (((inst List.append ProtossTypeArityUse) (recur (get field expr))) acc)))))
+  (PERecur value
+    (recur value))
+  (PERequest request
+    (Nil ProtossTypeArityUse))
+  (PEString value
+    (Nil ProtossTypeArityUse))
+  (PEUnit
+    (Nil ProtossTypeArityUse))
+  (PEVariant variantExpr
+    (((inst List.append ProtossTypeArityUse)
+      (Protoss.typeArityUsesMaybe (get variantExpr typeHint)))
+      (recur (get variantExpr payload))))
+  (PEVar name
+    (Nil ProtossTypeArityUse)))
+
+(def Protoss.defRecBodyTypeArityUses (-> ProtossDefRecBody (List ProtossTypeArityUse))
+  (lambda (body ProtossDefRecBody)
+    (case body
+      (PDRNat nat
+        (((inst List.append ProtossTypeArityUse) (Protoss.exprTypeArityUses (get nat zero)))
+          (Protoss.exprTypeArityUses (get nat step))))
+      (PDRList listRec
+        (((inst List.append ProtossTypeArityUse) (Protoss.exprTypeArityUses (get listRec nil)))
+          (Protoss.exprTypeArityUses (get listRec step))))
+      (PDRVariant variantRec
+        (foldList (get variantRec branches) (Nil ProtossTypeArityUse)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List ProtossTypeArityUse))
+              (((inst List.append ProtossTypeArityUse)
+                (Protoss.exprTypeArityUses (get branch body)))
+                acc))))))))
+
+(def Protoss.declTypeArityUses (-> ProtossDecl (List ProtossTypeArityUse))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def
+        (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get def typ)))
+          (Protoss.exprTypeArityUses (get def expr))))
+      (PDDefCap def
+        (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get def typ)))
+          (Protoss.exprTypeArityUses (get def expr))))
+      (PDDefPoly def
+        (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get def typ)))
+          (Protoss.exprTypeArityUses (get def expr))))
+      (PDDefPolyCap def
+        (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get def typ)))
+          (Protoss.exprTypeArityUses (get def expr))))
+      (PDDefRec def
+        (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get def typ)))
+          (Protoss.defRecBodyTypeArityUses (get def body))))
+      (PDRecord recordDecl
+        (foldList (get recordDecl fields) (Nil ProtossTypeArityUse)
+          (lambda (field ProtossField)
+            (lambda (acc (List ProtossTypeArityUse))
+              (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get field typ))) acc)))))
+      (PDType typeDecl
+        (Protoss.typeArityUses (get typeDecl body)))
+      (PDVariant variantDecl
+        (foldList (get variantDecl cases) (Nil ProtossTypeArityUse)
+          (lambda (caseDecl ProtossVariantCase)
+            (lambda (acc (List ProtossTypeArityUse))
+              (((inst List.append ProtossTypeArityUse) (Protoss.typeArityUses (get caseDecl payload))) acc)))))
+      (_ (Nil ProtossTypeArityUse)))))
+
+(def Protoss.declTypeParams (-> ProtossDecl (List String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDefPoly def (get def typeParams))
+      (PDDefPolyCap def (get def typeParams))
+      (PDDefRec def (get def typeParams))
+      (PDRecord recordDecl (get recordDecl typeParams))
+      (PDType typeDecl (get typeDecl typeParams))
+      (PDVariant variantDecl (get variantDecl typeParams))
+      (_ (Nil String)))))
+
+(def Protoss.builtinTypeArity (-> String (Maybe Nat))
+  (lambda (name String)
+    (case ((String.eqString name) "Unit")
+      (true (variant Some 0))
+      (false
+        (case ((String.eqString name) "Bool")
+          (true (variant Some 0))
+          (false
+            (case ((String.eqString name) "Nat")
+              (true (variant Some 0))
+              (false
+                (case ((String.eqString name) "String")
+                  (true (variant Some 0))
+                  (false
+                    (case ((String.eqString name) "List")
+                      (true (variant Some 1))
+                      (false
+                        (case ((String.eqString name) "Process")
+                          (true (variant Some 1))
+                          (false
+                            (case ((String.eqString name) "View")
+                              (true (variant Some 1))
+                              (false (variant None unit)))))))))))))))))
+
+(def Protoss.typeEnvEntryByName
+  (-> String (-> (List ProtossTypeEnvEntry) (Maybe ProtossTypeEnvEntry)))
+  (lambda (name String)
+    (lambda (entries (List ProtossTypeEnvEntry))
+      (((inst List.find ProtossTypeEnvEntry) entries)
+        (lambda (entry ProtossTypeEnvEntry)
+          ((String.eqString (get entry name)) name))))))
+
+(def Protoss.expectedTypeArity
+  (-> (List ProtossTypeEnvEntry) (-> (List String) (-> (List String) (-> String (Maybe Nat)))))
+  (lambda (entries (List ProtossTypeEnvEntry))
+    (lambda (externalTypes (List String))
+      (lambda (bound (List String))
+        (lambda (name String)
+          (case ((Protoss.nameSetContains name) bound)
+            (true (variant Some 0))
+            (false
+              (case ((Protoss.typeEnvEntryByName name) entries)
+                (Some entry (variant Some (get entry arity)))
+                (None _
+                  (case (Protoss.builtinTypeArity name)
+                    (Some arity (variant Some arity))
+                    (None _ (variant None unit))))))))))))
+
+(def Protoss.typeArityIssueFromUse
+  (-> (List ProtossTypeEnvEntry) (-> (List String) (-> (List String) (-> ProtossTypeArityUse (Maybe ProtossTypeArityIssue)))))
+  (lambda (entries (List ProtossTypeEnvEntry))
+    (lambda (externalTypes (List String))
+      (lambda (bound (List String))
+        (lambda (use ProtossTypeArityUse)
+          (case ((((Protoss.expectedTypeArity entries) externalTypes) bound) (get use name))
+            (None _ (variant None unit))
+            (Some expected
+              (case ((Nat.eqNat expected) (get use actual))
+                (true (variant None unit))
+                (false
+                  (variant Some
+                    (record
+                      (name (get use name))
+                      (expected expected)
+                      (actual (get use actual)))))))))))))
+
+(def Protoss.typeArityIssuesFromUses
+  (-> (List ProtossTypeEnvEntry) (-> (List String) (-> (List String) (-> (List ProtossTypeArityUse) (List ProtossTypeArityIssue)))))
+  (lambda (entries (List ProtossTypeEnvEntry))
+    (lambda (externalTypes (List String))
+      (lambda (bound (List String))
+        (lambda (uses (List ProtossTypeArityUse))
+          (foldList uses (Nil ProtossTypeArityIssue)
+            (lambda (use ProtossTypeArityUse)
+              (lambda (acc (List ProtossTypeArityIssue))
+                (case ((((Protoss.typeArityIssueFromUse entries) externalTypes) bound) use)
+                  (None _ acc)
+                  (Some issue (Cons ProtossTypeArityIssue issue acc)))))))))))
+
+(def Protoss.declTypeArityIssuesWith
+  (-> (List ProtossTypeEnvEntry) (-> (List String) (-> ProtossDecl (List ProtossTypeArityIssue))))
+  (lambda (entries (List ProtossTypeEnvEntry))
+    (lambda (externalTypes (List String))
+      (lambda (decl ProtossDecl)
+        ((((Protoss.typeArityIssuesFromUses entries) externalTypes) (Protoss.declTypeParams decl))
+          (Protoss.declTypeArityUses decl))))))
+
+(def Protoss.declsTypeArityIssuesWith
+  (-> (List ProtossTypeEnvEntry) (-> (List String) (-> (List ProtossDecl) (List ProtossTypeArityIssue))))
+  (lambda (entries (List ProtossTypeEnvEntry))
+    (lambda (externalTypes (List String))
+      (lambda (decls (List ProtossDecl))
+        (foldList decls (Nil ProtossTypeArityIssue)
+          (lambda (decl ProtossDecl)
+            (lambda (acc (List ProtossTypeArityIssue))
+              (((inst List.append ProtossTypeArityIssue)
+                (((Protoss.declTypeArityIssuesWith entries) externalTypes) decl))
+                acc))))))))
+
 (def Protoss.typeEnvReportDeclsWith
   (-> (List String) (-> (List ProtossDecl) ProtossTypeEnvReport))
   (lambda (externalTypes (List String))
     (lambda (decls (List ProtossDecl))
       (let (resolve ProtossResolveReport (((Protoss.resolveDeclsWith (Nil String)) externalTypes) decls))
+        (let (entries (List ProtossTypeEnvEntry) (Protoss.declsTypeEnvEntries decls))
         (record
-          (entries (Protoss.declsTypeEnvEntries decls))
+          (entries entries)
           (order (Protoss.typeDependencyOrderDecls decls))
           (missingTypes (get resolve missingTypes))
           (duplicateTypes (get resolve duplicateTypes))
           (duplicateTypeParams (Protoss.declsDuplicateTypeParams decls))
           (duplicateRecordFields (Protoss.declsDuplicateRecordFields decls))
-          (duplicateVariantCases (Protoss.declsDuplicateVariantCases decls)))))))
+          (duplicateVariantCases (Protoss.declsDuplicateVariantCases decls))
+          (typeArityIssues (((Protoss.declsTypeArityIssuesWith entries) externalTypes) decls))))))))
 
 (def Protoss.typeEnvReportDecls (-> (List ProtossDecl) ProtossTypeEnvReport)
   (lambda (decls (List ProtossDecl))
@@ -4461,6 +4741,14 @@
   (lambda (source String)
     ((Protoss.typeEnvReportTextWith (Nil String)) source)))
 
+(def Protoss.typeArityIssueMessage (-> ProtossTypeArityIssue String)
+  (lambda (issue ProtossTypeArityIssue)
+    ((String.concat "wrong type arity: ")
+      ((String.concat (get issue name))
+        ((String.concat " expected ")
+          ((String.concat (Nat.toString (get issue expected)))
+            ((String.concat " got ") (Nat.toString (get issue actual)))))))))
+
 (def Protoss.typeEnvFirstError (-> ProtossTypeEnvReport (Maybe String))
   (lambda (report ProtossTypeEnvReport)
     (caseList (get report duplicateTypes)
@@ -4473,11 +4761,14 @@
                   (Nil
                     (caseList (get report missingTypes)
                       (Nil
-                        (case (get report order)
-                          (PDepOrderOk ordered (variant None unit))
-                          (PDepOrderCycle names
-                            (variant Some
-                              ((String.concat "cyclic type dependency: ") ((String.join ",") names))))))
+                        (caseList (get report typeArityIssues)
+                          (Nil
+                            (case (get report order)
+                              (PDepOrderOk ordered (variant None unit))
+                              (PDepOrderCycle names
+                                (variant Some
+                                  ((String.concat "cyclic type dependency: ") ((String.join ",") names))))))
+                          (Cons first rest (variant Some (Protoss.typeArityIssueMessage first)))))
                       (Cons first rest (variant Some ((String.concat "missing type: ") first)))))
                   (Cons first rest (variant Some ((String.concat "duplicate variant case: ") first)))))
               (Cons first rest (variant Some ((String.concat "duplicate record field: ") first)))))
