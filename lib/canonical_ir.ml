@@ -88,6 +88,9 @@ let rec type_of_graph_json obj =
   | "View" -> Ast.TView (type_of_graph_json (json_field "message" obj))
   | "Attr" -> Ast.TAttr (type_of_graph_json (json_field "message" obj))
   | "Process" -> Ast.TProcess (type_of_graph_json (json_field "result" obj))
+  | "SecretRef" ->
+      Ast.TSecretRef
+        (json_string_field "scope" obj, type_of_graph_json (json_field "value" obj))
   | "TypeVar" -> Ast.TVar (json_nat_field "index" obj)
   | "Forall" ->
       Ast.TForall (json_nat_field "arity" obj, type_of_graph_json (json_field "body" obj))

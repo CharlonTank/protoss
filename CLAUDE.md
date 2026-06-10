@@ -131,6 +131,8 @@ dispatcher (pattern-matches argv → `command_*` functions → `Protoss.<Module>
   run/resume/replay/diff, deterministic branch/merge, and typed external-error events.
 - `patch.ml` / `patch_audit.ml` — atomic content-addressed edits to a store, with a hash-linked
   audit chain (`store/patches/latest`).
+- `secrets.ml` — sealed secret envelopes for typed `SecretRef scope a` handles; it hashes the
+  scope/type/handle reference and must not hash or store raw secret values.
 - `agent_protocol.ml` — native agent mutation contract, canonical-write guard, commit wrapper,
   duplicate-DefId factorization patch proposals, and patch-candidate comparison reports.
 - `benchmark.ml` — content-addressed benchmark report formatting and persistence.

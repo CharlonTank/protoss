@@ -64,6 +64,7 @@ let rec type_to_canonical = function
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
   | TAttr t -> "(Attr " ^ type_to_canonical t ^ ")"
   | TProcess t -> "(Process " ^ type_to_canonical t ^ ")"
+  | TSecretRef (scope, t) -> "(SecretRef " ^ scope ^ " " ^ type_to_canonical t ^ ")"
   | TVar i -> "(TVar " ^ string_of_int i ^ ")"
   | TForall (arity, body) ->
       "(Forall " ^ string_of_int arity ^ " " ^ type_to_canonical body ^ ")"
@@ -316,7 +317,7 @@ let rec direct_self_refs alias guarded = function
   | TRecord fields -> List.concat_map (fun (_, t) -> direct_self_refs alias guarded t) fields
   | TVariant cases -> List.concat_map (fun (_, t) -> direct_self_refs alias true t) cases
   | TList t -> direct_self_refs alias guarded t
-  | TView t | TAttr t | TProcess t -> direct_self_refs alias false t
+  | TView t | TAttr t | TProcess t | TSecretRef (_, t) -> direct_self_refs alias false t
   | TForall (_, body) -> direct_self_refs alias guarded body
   | TNamed (n, args) ->
       let arg_refs = List.concat_map (direct_self_refs alias guarded) args in
@@ -360,6 +361,7 @@ let rec expand_type recursive_names aliases vars stack = function
   | TView t -> TView (expand_type recursive_names aliases vars stack t)
   | TAttr t -> TAttr (expand_type recursive_names aliases vars stack t)
   | TProcess t -> TProcess (expand_type recursive_names aliases vars stack t)
+  | TSecretRef (scope, t) -> TSecretRef (scope, expand_type recursive_names aliases vars stack t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, expand_type recursive_names aliases vars stack body)
   | TNamed (n, args) -> (
@@ -779,6 +781,7 @@ let rec subst_type args = function
   | TView t -> TView (subst_type args t)
   | TAttr t -> TAttr (subst_type args t)
   | TProcess t -> TProcess (subst_type args t)
+  | TSecretRef (scope, t) -> TSecretRef (scope, subst_type args t)
   | TVar i -> option_or_fail ("type argument missing for TVar " ^ string_of_int i) (List.nth_opt args i)
   | TForall (arity, body) -> TForall (arity, subst_type args body)
   | TNamed (n, ts) -> TNamed (n, List.map (subst_type args) ts)
@@ -811,6 +814,7 @@ let rec subst_named_type_params vars = function
   | TView t -> TView (subst_named_type_params vars t)
   | TAttr t -> TAttr (subst_named_type_params vars t)
   | TProcess t -> TProcess (subst_named_type_params vars t)
+  | TSecretRef (scope, t) -> TSecretRef (scope, subst_named_type_params vars t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, subst_named_type_params vars body)
   | TNamed (n, []) -> Option.value (assoc_opt n vars) ~default:(TNamed (n, []))
@@ -995,7 +999,7 @@ let rec contains_process_type = function
   | TProcess _ -> true
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
-  | TList t | TView t | TAttr t -> contains_process_type t
+  | TList t | TView t | TAttr t | TSecretRef (_, t) -> contains_process_type t
   | TForall (_, t) -> contains_process_type t
   | TNamed _ -> false
   | TVar _ | TUnit | TBool | TNat | TString -> false
@@ -2428,6 +2432,13 @@ let rec type_to_graph_json = function
       json_obj [ json_field "tag" (json_string "Attr"); json_field "message" (type_to_graph_json t) ]
   | TProcess t ->
       json_obj [ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
+  | TSecretRef (scope, t) ->
+      json_obj
+        [
+          json_field "tag" (json_string "SecretRef");
+          json_field "scope" (json_string scope);
+          json_field "value" (type_to_graph_json t);
+        ]
   | TVar i ->
       json_obj [ json_field "tag" (json_string "TypeVar"); json_field "index" (string_of_int i) ]
   | TForall (arity, body) ->
@@ -2739,6 +2750,7 @@ let type_node_tag = function
   | TView _ -> "View"
   | TAttr _ -> "Attr"
   | TProcess _ -> "Process"
+  | TSecretRef _ -> "SecretRef"
   | TVar _ -> "TypeVar"
   | TForall _ -> "Forall"
   | TNamed _ -> "Named"
@@ -2789,7 +2801,7 @@ let type_node_edges_via type_id = function
   | TUnit | TBool | TNat | TString | TVar _ -> []
   | TFun (a, b) -> [ type_id a; type_id b ]
   | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_id t)
-  | TList t | TView t | TAttr t | TProcess t -> [ type_id t ]
+  | TList t | TView t | TAttr t | TProcess t | TSecretRef (_, t) -> [ type_id t ]
   | TForall (_, body) -> [ type_id body ]
   | TNamed (_, args) -> List.map type_id args
 
@@ -2924,7 +2936,8 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
         add_type a;
         add_type b
     | TRecord fields | TVariant fields -> List.iter (fun (_, t) -> add_type t) fields
-    | TList t | TView t | TAttr t | TProcess t | TForall (_, t) -> add_type t
+    | TList t | TView t | TAttr t | TProcess t | TSecretRef (_, t) | TForall (_, t) ->
+        add_type t
     | TNamed (_, args) -> List.iter add_type args
   in
   let rec add_term term =
@@ -3072,6 +3085,8 @@ let rec type_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "Fun"; a; b ] ->
       TFun (type_of_canonical_sexp a, type_of_canonical_sexp b)
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "SecretRef"; Sexp.Atom scope; t ] ->
+      TSecretRef (scope, type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (type_of_canonical_sexp t)

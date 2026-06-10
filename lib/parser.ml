@@ -125,6 +125,8 @@ let rec parse_type = function
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (parse_type t)
   | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (parse_type t)
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (parse_type t)
+  | Sexp.List [ Sexp.Atom "SecretRef"; Sexp.Atom scope; t ] ->
+      TSecretRef (scope, parse_type t)
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> TVar (int_of_string n)
   | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom n; t ] -> TForall (int_of_string n, parse_type t)
   | Sexp.List [ Sexp.Atom "->"; a; b ] -> TFun (parse_type a, parse_type b)
@@ -486,6 +488,7 @@ let rec qualify_type local_types params = function
   | TView t -> TView (qualify_type local_types params t)
   | TAttr t -> TAttr (qualify_type local_types params t)
   | TProcess t -> TProcess (qualify_type local_types params t)
+  | TSecretRef (scope, t) -> TSecretRef (scope, qualify_type local_types params t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, qualify_type local_types params body)
   | TNamed (n, args) ->

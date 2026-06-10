@@ -10,6 +10,7 @@ type typ =
   | TView of typ
   | TAttr of typ
   | TProcess of typ
+  | TSecretRef of string * typ
   | TVar of int
   | TForall of int * typ
   | TNamed of string * typ list
@@ -116,6 +117,8 @@ let rec equal_typ a b =
   | TAttr TUnit, TAttr _ | TAttr _, TAttr TUnit -> true
   | TAttr a, TAttr b -> equal_typ a b
   | TProcess a, TProcess b -> equal_typ a b
+  | TSecretRef (scope_a, a), TSecretRef (scope_b, b) ->
+      String.equal scope_a scope_b && equal_typ a b
   | TVar a, TVar b -> a = b
   | TForall (arity_a, body_a), TForall (arity_b, body_b) ->
       arity_a = arity_b && equal_typ body_a body_b
@@ -171,6 +174,8 @@ let rec string_of_typ_with_params params = function
   | TView t -> "(View " ^ string_of_typ_with_params params t ^ ")"
   | TAttr t -> "(Attr " ^ string_of_typ_with_params params t ^ ")"
   | TProcess t -> "(Process " ^ string_of_typ_with_params params t ^ ")"
+  | TSecretRef (scope, t) ->
+      "(SecretRef " ^ scope ^ " " ^ string_of_typ_with_params params t ^ ")"
   | TVar i -> (
       match List.nth_opt params i with Some name -> name | None -> "(TVar " ^ string_of_int i ^ ")")
   | TForall (arity, body) ->

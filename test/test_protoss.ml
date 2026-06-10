@@ -3676,6 +3676,35 @@ let () =
          && contains_substring line "Local.storage"
          && contains_substring line "Http.get")
        (Kernel.secret_leak_risks secret_leak_risk));
+  let secret_ref_type = Ast.TSecretRef ("user", Ast.TString) in
+  assert_equal "SecretRef type canonical" "(SecretRef user String)"
+    (Kernel.type_to_canonical secret_ref_type);
+  let secret_ref_program =
+    check "(type ApiToken (SecretRef user String))\n(def main Nat 0)"
+  in
+  assert_equal "SecretRef type alias parses" "(SecretRef user String)"
+    (Ast.string_of_typ (List.hd secret_ref_program.Kernel.program.type_aliases).Ast.type_body);
+  let sealed_a =
+    Json.parse
+      (Secrets.seal_json ~scope:"user" ~typ:Ast.TString ~handle:"token-handle"
+         ~value:"raw-secret-a")
+  in
+  let sealed_b =
+    Json.parse
+      (Secrets.seal_json ~scope:"user" ~typ:Ast.TString ~handle:"token-handle"
+         ~value:"raw-secret-b")
+  in
+  assert_equal "sealed secret hashes handle not value"
+    (json_string_field "handleRef" sealed_a)
+    (json_string_field "handleRef" sealed_b);
+  assert_true "sealed secret never stores raw value"
+    (not
+       (contains_substring
+          (Secrets.seal_json ~scope:"user" ~typ:Ast.TString ~handle:"token-handle"
+             ~value:"raw-secret-a")
+          "raw-secret-a"));
+  assert_true "sealed secret JSON marks value un-hashed"
+    (not (json_bool_field "valueHashed" sealed_a));
   let defcap_process =
     check
       "(capabilities Human.ask)\n\

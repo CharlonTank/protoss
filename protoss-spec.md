@@ -306,8 +306,8 @@ assertions ledger inspect/replay/diff/fork/merge/metadata dans
 ## 9. Capabilities et secrets
 
 Preuves de section: `lib/kernel.ml`, `lib/canonical_ir.ml`,
-`lib/workspace.ml`, commande `protoss capabilities`, assertions capabilities,
-scope refs, package negative capabilities et SecretLeakRisk dans
+`lib/workspace.ml`, `lib/secrets.ml`, commande `protoss capabilities`, assertions capabilities,
+scope refs, package negative capabilities, SecretRef, secrets scelles et SecretLeakRisk dans
 `test/test_protoss.ml`.
 
 - [x] Declarer des capabilities sur `defcap` et `defpolycap`.
@@ -315,8 +315,15 @@ scope refs, package negative capabilities et SecretLeakRisk dans
 - [x] Propager les scopes de capabilities dans le graphe.
 - [x] Exporter refs de capability et signatures request/response.
 - [x] Rejeter les changements web qui violent les capabilities attendues.
-- [ ] Ajouter `SecretRef scope a` au langage.
-- [ ] Sceller les secrets de facon a hasher le handle sans hasher la valeur.
+- [x] Ajouter `SecretRef scope a` au langage.
+  Preuves: `Ast.TSecretRef`, `Parser.parse_type`, `Kernel.type_to_canonical`,
+  `Kernel.type_to_graph_json`, `Canonical_ir.type_of_graph_json`,
+  `Surface_syntax.human_grammar_text`, assertions "SecretRef type canonical" et
+  "SecretRef type alias parses" dans `test/test_protoss.ml`, `README.md`.
+- [x] Sceller les secrets de facon a hasher le handle sans hasher la valeur.
+  Preuves: `Secrets.handle_ref`, `Secrets.seal_json`, assertions "sealed secret
+  hashes handle not value", "sealed secret never stores raw value" et "sealed
+  secret JSON marks value un-hashed" dans `test/test_protoss.ml`, `README.md`.
 - [x] Partitionner caches et evaluation par `CapScope`.
   Preuves: `Runtime.runtime_policy_text` inclut `cap-scope`, les `EvalKey`
   utilisent la capability scope effective, et assertions "eval key partitions
@@ -582,8 +589,8 @@ d'exceptions brutes dans `test/test_protoss.ml`, `README.md` et `CLAUDE.md`.
 ## 18. Securite
 
 Preuves de section: `lib/kernel.ml`, `lib/workspace.ml`, `lib/web.ml`,
-`lib/patch_audit.ml`, assertions capabilities, imports hashes, rendu HTML,
-package policies, SecretLeakRisk et negative capabilities dans
+`lib/patch_audit.ml`, `lib/secrets.ml`, assertions capabilities, imports hashes, rendu HTML,
+package policies, secrets scelles, SecretLeakRisk et negative capabilities dans
 `test/test_protoss.ml`.
 
 - [x] Pas d'IO implicite pour les programmes Protoss.
@@ -591,7 +598,9 @@ package policies, SecretLeakRisk et negative capabilities dans
 - [x] Patches audites.
 - [x] Imports packages verrouilles par hashes.
 - [x] Rendu HTML sans injection `innerHTML`.
-- [ ] Secrets scelles.
+- [x] Secrets scelles.
+  Preuves: `Secrets.seal_json`, assertions "sealed secret hashes handle not
+  value" et "sealed secret never stores raw value" dans `test/test_protoss.ml`.
 - [x] Cache partitionne par capability scope.
   Preuves: `Runtime.runtime_policy_text`, `Runtime.eval_key_for_def`,
   assertion "runtime policy records capability scope" dans `test/test_protoss.ml`
@@ -745,7 +754,10 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 - [x] Le ledger monde supporte branches et merges.
   Preuves: `Ledger.branches`, `Ledger.merge`, `protoss ledger merge` et
   assertions "ledger merged" dans `test/test_protoss.ml`.
-- [ ] Les secrets sont scelles et jamais hashes en clair.
+- [x] Les secrets sont scelles et jamais hashes en clair.
+  Preuves: `Secrets.seal_json`, assertion "sealed secret JSON marks value
+  un-hashed" et verification que "raw-secret-a" est absent du JSON scelle dans
+  `test/test_protoss.ml`.
 - [ ] Le self-hosted path couvre parser, canonicalizer, normalizer, typechecker,
   patch validator, harness runner, package resolver et MCP server.
 - [ ] `dune build @fulltest` passe sur une branche propre.
