@@ -576,6 +576,15 @@ let validate_event root event content =
         failwith ("maltyped event " ^ event ^ ": merge-left world not found: " ^ left);
       if not (Sys.file_exists (world_path root right)) then
         failwith ("maltyped event " ^ event ^ ": merge-right world not found: " ^ right)
+  | Some "patch-provenance" ->
+      List.iter need
+        [
+          "patch-ref";
+          "patch-provenance-ref";
+          "previous-root";
+          "root-ref";
+          "program-hash";
+        ]
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
   fields

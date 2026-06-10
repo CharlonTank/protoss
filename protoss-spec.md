@@ -294,7 +294,10 @@ assertions ledger inspect/replay/diff/fork/merge/metadata dans
   variables `PROTOSS_LEDGER_SIGN_KEY` / `PROTOSS_LEDGER_VERIFY_KEY`, assertion
   "ledger signed event rejects signature mismatch" dans `test/test_protoss.ml`,
   `README.md`.
-- [ ] Lier le ledger de provenance des patches au ledger monde.
+- [x] Lier le ledger de provenance des patches au ledger monde.
+  Preuves: `Patch_audit.write_patch_provenance`, `Ledger.add_event`, event
+  `kind=patch-provenance`, assertion "patch provenance links to world ledger"
+  dans `test/test_protoss.ml`, `README.md`.
 - [x] Ajouter politiques de retention et garbage collection content-addressed.
   Preuves: `Store.gc`, commande `protoss store gc [--sweep --yes]`,
   assertions "store gc reports unreachable object" dans `test/test_protoss.ml`

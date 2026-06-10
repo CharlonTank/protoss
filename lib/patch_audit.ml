@@ -24,6 +24,13 @@ let latest_root_path store_root = Filename.concat (provenance_dir store_root) "l
 let latest_patch_provenance_path store_root =
   Filename.concat (provenance_dir store_root) "latest-patch"
 
+let world_ledger_dir store_root = Filename.concat (provenance_dir store_root) "world-ledger"
+
+let latest_world_path store_root = Filename.concat (provenance_dir store_root) "latest-world"
+
+let latest_world_event_path store_root =
+  Filename.concat (provenance_dir store_root) "latest-world-event"
+
 let root_state_path store_root root_ref =
   try Filename.concat (root_states_dir store_root) (Store.sanitize_name root_ref ^ ".root")
   with Store.Error msg -> fail msg
@@ -272,6 +279,28 @@ let write_patch_provenance store_root ~patch_ref ~previous_ref ~previous_root ~r
   Store.ensure_dir_cached (provenance_dir store_root);
   Store.write_file_atomic (patch_provenance_path store_root provenance_ref) (content ^ "\n");
   Store.write_file_atomic (latest_patch_provenance_path store_root) (provenance_ref ^ "\n");
+  let ledger = world_ledger_dir store_root in
+  let previous_world =
+    let path = latest_world_path store_root in
+    if Sys.file_exists path then
+      let world = String.trim (read_file path) in
+      if world = "" then Ledger.init ledger else world
+    else Ledger.init ledger
+  in
+  let payload =
+    String.concat "\n"
+      [
+        "kind=patch-provenance";
+        "patch-ref=" ^ patch_ref;
+        "patch-provenance-ref=" ^ provenance_ref;
+        "previous-root=" ^ Option.value previous_root ~default:"none";
+        "root-ref=" ^ root_ref;
+        "program-hash=" ^ program_hash;
+      ]
+  in
+  let event_ref, world_ref = Ledger.add_event ledger previous_world payload in
+  Store.write_file_atomic (latest_world_path store_root) (world_ref ^ "\n");
+  Store.write_file_atomic (latest_world_event_path store_root) (event_ref ^ "\n");
   provenance_ref
 
 let verify_root_state store_root root_ref =

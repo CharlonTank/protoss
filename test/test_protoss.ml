@@ -4525,6 +4525,16 @@ let () =
   assert_true "patch provenance links audit and root"
     (contains_substring patch_provenance ("patch-ref=" ^ patch_ok_ref)
     && contains_substring patch_provenance ("root-ref=" ^ verified_patch_ok.Patch.root_ref));
+  let patch_world_ledger = Filename.concat (patch_provenance_dir store) "world-ledger" in
+  let patch_world =
+    String.trim (Store.read_file (Filename.concat (patch_provenance_dir store) "latest-world"))
+  in
+  let patch_world_replay = Ledger.replay patch_world_ledger patch_world in
+  assert_true "patch provenance links to world ledger"
+    (contains_substring patch_world_replay "kind=patch-provenance"
+    && contains_substring patch_world_replay ("patch-ref=" ^ patch_ok_ref)
+    && contains_substring patch_world_replay ("root-ref=" ^ verified_patch_ok.Patch.root_ref)
+    && contains_substring patch_world_replay ("patch-provenance-ref=" ^ patch_provenance_ref));
   let verified_latest_patch_ok = Patch.verify_latest_matches_store store in
   assert_equal "patch audit latest matches store" patch_ok_ref
     verified_latest_patch_ok.Patch.audit_ref;
