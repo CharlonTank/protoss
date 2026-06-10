@@ -34,9 +34,15 @@ Preuves de section: `protoss-spec.md`, `lib/spec_audit.ml`,
   marquee done n'a plus de test ou de preuve documentaire.
   Preuves: `lib/spec_audit.ml`, commande `protoss spec check
   protoss-spec.md`, assertions `spec audit ...` dans `test/test_protoss.ml`.
-- [ ] Synchroniser `README.md`, `CLAUDE.md` et ce TODO quand une fonctionnalite
+- [x] Synchroniser `README.md`, `CLAUDE.md` et ce TODO quand une fonctionnalite
   change de statut.
-- [ ] Documenter pour chaque case l'emplacement de son test principal.
+  Preuves: commits de fonctionnalite mettent a jour `README.md`, `CLAUDE.md`
+  et `protoss-spec.md`; exemples recents: indentation significative,
+  `Process caps A`, architecture `Cmd caps Msg`.
+- [x] Documenter pour chaque case l'emplacement de son test principal.
+  Preuves: `lib/spec_audit.ml`, commande `protoss spec check
+  protoss-spec.md`, assertions `spec audit accepts section evidence` et
+  `spec audit reports missing evidence` dans `test/test_protoss.ml`.
 
 ## 1. Vision et modele de source de verite
 
