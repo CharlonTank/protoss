@@ -4344,13 +4344,38 @@ let () =
     (json_string_field "decision" agent_guard_direct);
   let agent_guard_patch = Json.parse (Agent_protocol.guard_write_json patch_ok) in
   assert_true "agent guard allows patch candidate" (json_bool_field "allowed" agent_guard_patch);
+  let agent_no_harness_store = temp_dir "agent-commit-no-harness" in
+  let agent_no_harness_before = snapshot agent_no_harness_store in
+  (try
+     ignore (Agent_protocol.commit_patch_json agent_no_harness_store patch_ok);
+     fail "agent commit should require an attached harness"
+   with Kernel.Error msg ->
+     assert_true "agent commit rejects missing harness"
+       (contains_substring msg "HARNESS001"
+       && contains_substring msg "requires at least one attached harness"));
+  assert_true "agent missing harness commit mutates nothing"
+    (snapshot agent_no_harness_store = agent_no_harness_before);
+  let agent_commit_harness =
+    patch_file "protoss-agent-commit.pth" "harness two_ok = unit two == 2\n"
+  in
   let agent_commit_store = temp_dir "agent-commit" in
-  let agent_commit = Json.parse (Agent_protocol.commit_patch_json agent_commit_store patch_ok) in
+  let agent_commit =
+    Json.parse
+      (Agent_protocol.commit_patch_json ~harnesses:[ agent_commit_harness ]
+         agent_commit_store patch_ok)
+  in
   assert_equal "agent commit format" "protoss-agent-commit-v1"
     (json_string_field "format" agent_commit);
   assert_equal "agent commit protocol" "protoss-agent-protocol-v1"
     (json_string_field "protocol" agent_commit);
   assert_equal "agent commit stage" "Commit" (json_string_field "stage" agent_commit);
+  assert_equal "agent commit harness status" "pass"
+    (json_string_field "harnessStatus" agent_commit);
+  assert_equal "agent commit harness count" "1"
+    (string_of_int (json_nat_field "harnessCount" agent_commit));
+  let agent_commit_harness_report = List.hd (json_array_field "harnessReports" agent_commit) in
+  assert_equal "agent commit embeds harness report" "pass"
+    (json_string_field "status" agent_commit_harness_report);
   assert_true "agent commit denies direct canonical writes"
     (not (json_bool_field "directCanonicalWrites" agent_commit));
   assert_true "agent commit patch ref" (contains_substring (json_string_field "patchRef" agent_commit) "p2:");
@@ -4361,6 +4386,23 @@ let () =
   let agent_committed_two, _ = Runtime.normalize_def agent_committed "two" in
   assert_equal "agent commit applies validated patch" "2"
     (Runtime.value_to_string agent_committed_two);
+  let agent_failing_harness_store = temp_dir "agent-commit-failing-harness" in
+  let agent_failing_harness_before = snapshot agent_failing_harness_store in
+  let agent_failing_harness =
+    patch_file "protoss-agent-commit-fail.pth" "harness two_bad = unit two == 3\n"
+  in
+  (try
+     ignore
+       (Agent_protocol.commit_patch_json ~harnesses:[ agent_failing_harness ]
+          agent_failing_harness_store patch_ok);
+     fail "agent commit should reject a failing harness"
+   with Kernel.Error msg ->
+     assert_true "agent commit rejects failing harness"
+       (contains_substring msg "HARNESS001"
+       && contains_substring msg "attached harness failed"
+       && contains_substring msg "two_bad"));
+  assert_true "agent failing harness commit mutates nothing"
+    (snapshot agent_failing_harness_store = agent_failing_harness_before);
   let agent_test_synthesis = Json.parse (Agent_protocol.synthesize_tests_json agent_committed) in
   assert_equal "agent test synthesis format" "protoss-agent-test-synthesis-v1"
     (json_string_field "format" agent_test_synthesis);

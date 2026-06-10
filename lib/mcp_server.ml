@@ -37,6 +37,15 @@ let arg_string_opt args name =
       | Some s -> Some s
       | None -> fail ("tool argument must be string: " ^ name))
 
+let arg_string_array args name =
+  match Json.field name args with
+  | Some (Json.Array xs) ->
+      List.map
+        (function Json.String s -> s | _ -> fail ("tool argument must be string array: " ^ name))
+        xs
+  | Some _ -> fail ("tool argument must be string array: " ^ name)
+  | None -> fail ("missing JSON field: " ^ name)
+
 let arg_bool_default args name default = json_bool_field_default name default args
 
 let text_content text =
@@ -96,6 +105,15 @@ let bool_property description =
       Kernel.json_field "description" (Kernel.json_string description);
     ]
 
+let string_array_property description =
+  Kernel.json_obj
+    [
+      Kernel.json_field "type" (Kernel.json_string "array");
+      Kernel.json_field "items"
+        (Kernel.json_obj [ Kernel.json_field "type" (Kernel.json_string "string") ]);
+      Kernel.json_field "description" (Kernel.json_string description);
+    ]
+
 let tool name title description schema =
   { tool_name = name; tool_title = title; tool_description = description; tool_schema = schema }
 
@@ -144,13 +162,15 @@ let tools =
          ]
          [ "store"; "patchPath" ]);
     tool "protoss.applyPatch" "Apply patch"
-      "Apply a validated patch through the native agent commit path."
+      "Apply a validated patch through the native agent commit path after attached harnesses pass."
       (object_schema
          [
            Kernel.json_field "store" (string_property "Store path");
            Kernel.json_field "patchPath" (string_property "Patch JSON path");
+           Kernel.json_field "harnesses"
+             (string_array_property "Harness .pth files that must pass before commit");
          ]
-         [ "store"; "patchPath" ]);
+         [ "store"; "patchPath"; "harnesses" ]);
     tool "protoss.runHarness" "Run harness" "Run the attached harness set for a store."
       (object_schema [ Kernel.json_field "store" (string_property "Store path") ] [ "store" ]);
     tool "protoss.explain" "Explain definition"
@@ -283,7 +303,8 @@ let check_patch args =
   ^ "\n"
 
 let apply_patch args =
-  Agent_protocol.commit_patch_json (arg_string args "store") (arg_string args "patchPath")
+  Agent_protocol.commit_patch_json ~harnesses:(arg_string_array args "harnesses")
+    (arg_string args "store") (arg_string args "patchPath")
 
 let run_harness args =
   let store = arg_string args "store" in
@@ -405,8 +426,8 @@ let handle_call params =
   in
   try call_tool name args with
   | Error msg | Kernel.Error msg | Store.Error msg | Workspace.Error msg | Patch.Error msg
-  | Patch_audit.Error msg | Web.Error msg | Parser.Error msg | Json.Error msg | Failure msg
-  | Sys_error msg ->
+  | Harness.Error msg | Patch_audit.Error msg | Web.Error msg | Parser.Error msg | Json.Error msg
+  | Failure msg | Sys_error msg ->
       tool_error_json msg
   | Unix.Unix_error (err, fn, arg) ->
       tool_error_json (fn ^ "(" ^ arg ^ "): " ^ Unix.error_message err)

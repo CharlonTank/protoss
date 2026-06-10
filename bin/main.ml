@@ -56,7 +56,7 @@ let usage () =
      \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent explain <graph.json> <nameOrDefId> | protoss agent explain --store-graph <project-or-store> <graphHash> <nameOrDefId>\n\
-     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json> | factor-identical <project-or-store> [--out <patch.json>] | synthesize-tests <project-or-store> | generate-migration <old-project-or-store> <new-project-or-store> | compare-candidates <project-or-store> <left.patch.json> <right.patch.json>\n\
+     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json> --harness <harness.pth> [--harness <harness.pth> ...] | factor-identical <project-or-store> [--out <patch.json>] | synthesize-tests <project-or-store> | generate-migration <old-project-or-store> <new-project-or-store> | compare-candidates <project-or-store> <left.patch.json> <right.patch.json>\n\
      \       protoss mcp serve\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
@@ -1042,14 +1042,24 @@ let command_agent_graph_query source input = function
         (Protoss.Canonical_ir.agent_graph_definition_explanation_json ~source input id)
   | _ -> usage ()
 
+let harness_args args =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | "--harness" :: harness :: rest -> loop (harness :: acc) rest
+    | _ -> usage ()
+  in
+  loop [] args
+
 let command_agent = function
   | [ "protocol" ] -> print_string (Protoss.Agent_protocol.protocol_json ())
   | [ "guard-write"; path ] ->
       let guard = Protoss.Agent_protocol.guard_write path in
       print_string (Protoss.Agent_protocol.guard_write_result_json guard);
       if not guard.guard_allowed then exit 1
-  | [ "commit"; store; patch ] ->
-      print_string (Protoss.Agent_protocol.commit_patch_json store patch)
+  | "commit" :: store :: patch :: args ->
+      print_string
+        (Protoss.Agent_protocol.commit_patch_json ~harnesses:(harness_args args)
+           store patch)
   | [ "factor-identical"; project_or_store ] ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       let checked = Protoss.Store.load_program store |> Protoss.Kernel.check_program in

@@ -22,6 +22,8 @@ name/version or advertised policy before resolving to the locked package hash.
 `lib/harness.ml` owns `.pth` harness parsing, canonical bytes, `HarnessId` derivation, and
 the JSON runner used by `protoss harness run`; package/universe harness refs must use those
 canonical IDs rather than raw file hashes.
+`protoss agent commit` is intentionally stricter than `protoss patch apply`: it requires
+at least one `--harness` file and rejects failing harness reports before mutating the store.
 `protoss grammar kernel` is the stable executable grammar surface for the trusted core; update
 `Kernel.executable_grammar_text` when adding core forms. `protoss grammar human` is the shipped
 Protoss/H grammar surface; update `Surface_syntax.human_grammar_text` when adding human syntax.

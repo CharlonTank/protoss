@@ -19,6 +19,9 @@ let test_synthesis_format = "protoss-agent-test-synthesis-v1"
 
 let migration_generation_format = "protoss-agent-migration-generation-v1"
 
+let commit_command =
+  "protoss agent commit <store> <patch.json> --harness <harness.pth>"
+
 let json_string_list xs = Kernel.json_array Kernel.json_string xs
 
 let sort_uniq_strings xs = List.sort_uniq String.compare xs
@@ -79,7 +82,7 @@ let guard_write path =
         guard_path = path;
         guard_allowed = false;
         guard_reason = reason;
-        guard_required_command = "protoss agent commit <store> <patch.json>";
+        guard_required_command = commit_command;
       }
   | None ->
       {
@@ -140,11 +143,11 @@ let protocol_json () =
              ( "Harness",
                "checked patch and attached harness set",
                "harness pass/fail report",
-               "reserved: protoss harness run <store>" );
+               "protoss harness run <store> <harness.pth>" );
              ( "Commit",
                "validated patch and passing harness report",
                "content-addressed patch audit",
-               "protoss agent commit <store> <patch.json>" );
+               commit_command );
            ]);
       Kernel.json_field "mutationPolicy"
         (Kernel.json_obj
@@ -152,8 +155,7 @@ let protocol_json () =
              Kernel.json_field "directCanonicalWrites" (Kernel.json_string "forbidden");
              Kernel.json_field "guardCommand"
                (Kernel.json_string "protoss agent guard-write <path>");
-             Kernel.json_field "commitCommand"
-               (Kernel.json_string "protoss agent commit <store> <patch.json>");
+             Kernel.json_field "commitCommand" (Kernel.json_string commit_command);
            ]);
     ]
   ^ "\n"
@@ -327,8 +329,7 @@ let factor_identical_json checked =
       Kernel.json_field "patchCandidate" (factor_patch_candidate_json plan);
       Kernel.json_field "validationCommand"
         (Kernel.json_string "protoss patch check <store> <patch.json>");
-      Kernel.json_field "commitCommand"
-        (Kernel.json_string "protoss agent commit <store> <patch.json>");
+      Kernel.json_field "commitCommand" (Kernel.json_string commit_command);
     ]
   ^ "\n"
 
@@ -566,9 +567,54 @@ let generate_migration_json old_store new_store =
     ]
   ^ "\n"
 
-let commit_patch_json store patch =
+type harness_validation = {
+  harness_path : string;
+  harness_report : string;
+  harness_status : string;
+}
+
+let json_string_field name obj =
+  match Json.field name obj with
+  | Some value -> (
+      match Json.string value with
+      | Some s -> s
+      | None -> Kernel.fail ("harness report field must be string: " ^ name))
+  | None -> Kernel.fail ("harness report missing field: " ^ name)
+
+let harness_status report =
+  try json_string_field "status" (Json.parse report) with
+  | Json.Error msg -> Kernel.fail ("invalid harness report JSON: " ^ msg)
+
+let validate_harness checked path =
+  let report = Harness.run_json checked ~source:path (Patch.read_file path) in
+  { harness_path = path; harness_report = report; harness_status = harness_status report }
+
+let harness_report_json validation =
+  let report = String.trim validation.harness_report in
+  ignore (Json.parse report);
+  report
+
+let validate_harnesses checked = function
+  | [] ->
+      Kernel.fail
+        "HARNESS001 HarnessRegression: agent commit requires at least one attached harness"
+  | harnesses ->
+      let validations = List.map (validate_harness checked) harnesses in
+      (match
+         List.find_opt
+           (fun validation -> not (String.equal validation.harness_status "pass"))
+           validations
+       with
+      | Some failed ->
+          Kernel.fail
+            ("HARNESS001 HarnessRegression: attached harness failed: "
+            ^ failed.harness_path ^ "\n" ^ String.trim failed.harness_report)
+      | None -> validations)
+
+let commit_patch_json ?(harnesses = []) store patch =
   let checked = Patch.check store patch in
   let result = Patch.describe_checked checked in
+  let harness_validations = validate_harnesses checked.Patch.checked harnesses in
   let patch_ref = Patch.apply store patch in
   Kernel.json_obj
     [
@@ -578,7 +624,10 @@ let commit_patch_json store patch =
       Kernel.json_field "store" (Kernel.json_string store);
       Kernel.json_field "patch" (Kernel.json_string patch);
       Kernel.json_field "mutation" (Kernel.json_string "validated-patch");
-      Kernel.json_field "harnessStatus" (Kernel.json_string "empty-harness-set");
+      Kernel.json_field "harnessStatus" (Kernel.json_string "pass");
+      Kernel.json_field "harnessCount" (string_of_int (List.length harness_validations));
+      Kernel.json_field "harnessReports"
+        (Kernel.json_array harness_report_json harness_validations);
       Kernel.json_field "directCanonicalWrites" (Kernel.json_bool false);
       Kernel.json_field "result" (Kernel.json_string result);
       Kernel.json_field "patchRef" (Kernel.json_string patch_ref);

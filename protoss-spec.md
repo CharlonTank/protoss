@@ -416,7 +416,12 @@ serveur MCP stdio `Mcp_server.serve_stdio`, outils `protoss.*` dans
 - [x] Refuser les modifications textuelles ambigues avec erreur d'intention.
   Preuves: `Patch.from_text_diff`, assertion "patch text diff ambiguity names
   intent" dans `test/test_protoss.ml`, `README.md`.
-- [ ] Exiger validation de harness avant commit de patch.
+- [x] Exiger validation de harness avant commit de patch.
+  Preuves: `Agent_protocol.commit_patch_json`, option CLI
+  `protoss agent commit --harness`, schema MCP `protoss.applyPatch`
+  `harnesses`, assertions "agent commit rejects missing harness", "agent
+  commit harness status" et "agent commit applies validated patch" dans
+  `test/test_protoss.ml`, `README.md`.
 
 ## 12. Harness integre
 
@@ -453,7 +458,11 @@ parser", "harness report" et "harness failing" dans `test/test_protoss.ml`,
 - [ ] Supporter politiques de securite.
 - [ ] Supporter prompts de diagnostic.
 - [ ] Supporter evaluations IA.
-- [ ] Faire echouer les patches qui regressent un harness attache.
+- [x] Faire echouer les patches qui regressent un harness attache.
+  Preuves: `Agent_protocol.validate_harnesses`, erreur `HARNESS001`, taxonomy
+  `HarnessRegression`, assertion "agent commit rejects failing harness" et
+  "agent failing harness commit mutates nothing" dans `test/test_protoss.ml`,
+  `README.md`.
 
 ## 13. IA comme acteur natif
 
@@ -772,7 +781,12 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 - [ ] Tests de proprietes.
 - [ ] Generation de tests par IA.
-- [ ] Validation de patches par harness.
+- [x] Validation de patches par harness.
+  Preuves: `Agent_protocol.commit_patch_json`, option CLI
+  `protoss agent commit --harness`, assertions "agent commit rejects missing
+  harness", "agent commit embeds harness report" et "agent commit rejects
+  failing harness" dans
+  `test/test_protoss.ml`, `README.md`.
 - [x] Comparaison de candidats.
   Preuves: `Agent_protocol.compare_candidates_json`, commande
   `protoss agent compare-candidates`, assertion "agent candidate comparison"

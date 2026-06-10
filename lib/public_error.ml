@@ -276,8 +276,10 @@ let code_for_cli_kind kind msg =
       | "check error" -> code_for_check_message msg
       | "patch error" ->
           if contains msg "migration" then "MIGRATION001"
+          else if contains msg "harness" then "HARNESS001"
           else if contains msg "policy" then "POLICY001"
           else "PATCH001"
+      | "harness error" -> "HARNESS001"
       | "store error" -> "STORE001"
       | "workspace error" ->
           if contains msg "policy" then "POLICY001" else "WORKSPACE001"
