@@ -97,6 +97,24 @@ let () =
     (match pv with Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true | _ -> false);
   expect_check_error "(def askName (Process String) (Human.ask \"Name?\"))";
 
+  let pt_workspace = temp_dir "pt-workspace" in
+  let pt_src = Filename.concat pt_workspace "src" in
+  Store.ensure_dir pt_src;
+  write_file (Filename.concat pt_workspace "protoss.toml")
+    "name = \"pt-workspace\"\n\
+     version = \"0.1.0\"\n\
+     entrypoints = [\"src/main.pt\"]\n\
+     stdlib = \"none\"\n\
+     source_dirs = [\"src\"]\n\
+     store_dir = \".protoss/store\"\n\
+     cache_dir = \".protoss/cache\"\n\
+     capabilities = []\n";
+  write_file (Filename.concat pt_src "math.pt") "(def base Nat 2)\n";
+  write_file (Filename.concat pt_src "main.pt") "(import \"math.pt\")\n(def main Nat (succ base))\n";
+  let pt_build = Workspace.build (Workspace.parse_manifest pt_workspace) in
+  let pt_main, _ = Runtime.normalize_def pt_build.Workspace.checked "main" in
+  assert_equal ".pt workspace source discovery" "3" (Runtime.value_to_string pt_main);
+
   let store = temp_dir "patch" in
   let valid_patch = Filename.concat (Filename.get_temp_dir_name ())
       (string_of_int (Unix.getpid ()) ^ "-protoss-smoke-valid-patch.json") in

@@ -237,12 +237,16 @@ let init ?(force = false) root =
   if not (Sys.file_exists main) then write_file main "(def main Nat 0)\n";
   manifest
 
-let rec collect_protoss_files dir =
+let source_extensions = [ ".protoss"; ".pt" ]
+
+let is_source_file path = List.exists (fun suffix -> has_suffix suffix path) source_extensions
+
+let rec collect_source_files dir =
   if not (Sys.file_exists dir) then []
   else if Sys.is_directory dir then
     Sys.readdir dir |> Array.to_list |> List.sort String.compare
-    |> List.concat_map (fun f -> collect_protoss_files (Filename.concat dir f))
-  else if has_suffix ".protoss" dir then [ realpath_or dir ]
+    |> List.concat_map (fun f -> collect_source_files (Filename.concat dir f))
+  else if is_source_file dir then [ realpath_or dir ]
   else []
 
 let sort_uniq xs = xs |> List.sort_uniq String.compare
@@ -533,7 +537,7 @@ let manifest_roots manifest =
   let source_files =
     manifest.source_dirs
     |> List.map (path_in_project manifest)
-    |> List.concat_map collect_protoss_files
+    |> List.concat_map collect_source_files
   in
   sort_uniq (stdlib @ entrypoints @ source_files)
 

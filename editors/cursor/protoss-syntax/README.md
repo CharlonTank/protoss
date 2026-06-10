@@ -1,6 +1,6 @@
 # Protoss Syntax for Cursor
 
-Local Cursor/VS Code extension for `.protoss` syntax highlighting and Ctrl+Click go-to-definition.
+Local Cursor/VS Code extension for `.protoss`/`.pt` syntax highlighting and Ctrl+Click go-to-definition.
 
 Install from this repository:
 
@@ -16,7 +16,7 @@ mkdir -p ~/.cursor-server/extensions
 cp -R editors/cursor/protoss-syntax ~/.cursor-server/extensions/protoss.protoss-syntax-0.3.2
 ```
 
-Restart Cursor and open any `.protoss` file. Cursor should select the `Protoss` language automatically.
+Restart Cursor and open any `.protoss` or `.pt` file. Cursor should select the `Protoss` language automatically.
 
 Supported navigation:
 

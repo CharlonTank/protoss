@@ -1,0 +1,7 @@
+; Core pure definitions.
+(def one Nat (succ 0))
+(def two Nat (foldNat 2 0 (lambda (x Nat) (succ x))))
+(def choose Bool true)
+(def main Nat (case choose (true two) (false one)))
+(def rec (Record (ok Bool) (count Nat)) (record (count main) (ok true)))
+(def readCount Nat (get rec count))

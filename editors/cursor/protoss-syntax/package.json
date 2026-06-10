@@ -1,7 +1,7 @@
 {
   "name": "protoss-syntax",
   "displayName": "Protoss Syntax",
-  "description": "Syntax highlighting for Protoss .protoss files in Cursor and VS Code.",
+  "description": "Syntax highlighting for Protoss .protoss and .pt files in Cursor and VS Code.",
   "version": "0.3.2",
   "publisher": "protoss",
   "license": "MIT",
@@ -31,7 +31,8 @@
           "protoss"
         ],
         "extensions": [
-          ".protoss"
+          ".protoss",
+          ".pt"
         ],
         "configuration": "./language-configuration.json"
       }
@@ -49,7 +50,7 @@
         "protoss.diagnostics.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Run Protoss checks and publish editor diagnostics for .protoss files."
+          "description": "Run Protoss checks and publish editor diagnostics for .protoss and .pt files."
         },
         "protoss.diagnostics.command": {
           "type": "string",

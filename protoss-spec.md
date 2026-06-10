@@ -55,12 +55,13 @@ listees dans la section "Gates de validation".
 - [x] Conserver `.protoss` comme syntaxe source actuelle du prototype.
 - [x] Produire `program.canon` comme texte canonique interne.
 - [x] Produire `program.graph.json` et des objets `graphs/<hash>.graph.json`.
-- [ ] Supporter `.pt` comme syntaxe humaine officielle Protoss/H.
+- [x] Supporter `.pt` comme syntaxe humaine officielle Protoss/H.
 - [ ] Supporter `.ptc` comme texte canonique officiel Protoss/C.
 - [ ] Supporter `.ptb` comme binaire canonique officiel Protoss/B.
 - [ ] Fournir `protoss convert --to pt|ptc|ptb`.
 - [ ] Garantir `hash(parse(.pt)) == hash(parse(.ptc)) == hash(.ptb)`.
-- [ ] Ajouter des fixtures equivalentes `.pt`, `.ptc`, `.ptb`.
+- [x] Ajouter une fixture equivalente `.pt`.
+- [ ] Ajouter des fixtures equivalentes `.ptc` et `.ptb`.
 - [ ] Rejeter toute vue dont le hash diverge du canon.
 - [ ] Documenter la version du format canonique binaire.
 
