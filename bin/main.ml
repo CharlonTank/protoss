@@ -55,7 +55,7 @@ let usage () =
      \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent explain <graph.json> <nameOrDefId> | protoss agent explain --store-graph <project-or-store> <graphHash> <nameOrDefId>\n\
-     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json>\n\
+     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json> | factor-identical <project-or-store> [--out <patch.json>]\n\
      \       protoss mcp serve\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
@@ -1014,6 +1014,15 @@ let command_agent = function
       if not guard.guard_allowed then exit 1
   | [ "commit"; store; patch ] ->
       print_string (Protoss.Agent_protocol.commit_patch_json store patch)
+  | [ "factor-identical"; project_or_store ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      let checked = Protoss.Store.load_program store |> Protoss.Kernel.check_program in
+      print_string (Protoss.Agent_protocol.factor_identical_json checked)
+  | [ "factor-identical"; project_or_store; "--out"; out ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      let checked = Protoss.Store.load_program store |> Protoss.Kernel.check_program in
+      Protoss.Store.write_file_atomic out (Protoss.Agent_protocol.factor_identical_patch_json checked);
+      print_string (Protoss.Agent_protocol.factor_identical_json checked)
   | "graph" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       let source =

@@ -414,7 +414,11 @@ commande `protoss agent graph` et assertions "agent graph" dans
 `Agent_protocol.protocol_json`, `Agent_protocol.guard_write_json`,
 `Agent_protocol.commit_patch_json`, commandes `protoss agent protocol`,
 `protoss agent guard-write`, `protoss agent commit`, assertions
-"agent protocol" et "agent commit" dans `test/test_protoss.ml`.
+"agent protocol" et "agent commit" dans `test/test_protoss.ml`;
+factorisation des doublons via `Agent_protocol.factor_identical_json`,
+`Agent_protocol.factor_identical_patch_json`, commande
+`protoss agent factor-identical`, assertion "agent factor identical" dans
+`test/test_protoss.ml`.
 
 - [x] Definir le protocole agent: `AI -> PatchCandidate -> Validator -> Harness -> Commit`.
   Preuves: `Agent_protocol.protocol_json`, commande
@@ -432,7 +436,11 @@ commande `protoss agent graph` et assertions "agent graph" dans
   `protoss agent explain`, assertion "agent graph explanation" dans
   `test/test_protoss.ml`.
 - [x] Detecter doublons semantiques.
-- [ ] Factoriser fonctions identiques.
+- [x] Factoriser fonctions identiques.
+  Preuves: `Agent_protocol.factor_identical_json`,
+  `Agent_protocol.factor_identical_patch_json`, commande
+  `protoss agent factor-identical`, assertions "agent factor identical" dans
+  `test/test_protoss.ml`.
 - [ ] Simuler changements dans un `WorldRef` forke.
 - [ ] Comparer deux branches par harness.
 - [x] Generer des vues humaines lisibles depuis le graphe.
@@ -647,7 +655,10 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
   dans `Workspace.load_units` et test de mismatch dans `test/test_protoss.ml`.
 - [x] Cache d'evaluation.
 - [x] Diff structurel prototype.
-- [ ] Store global cross-project.
+- [x] Store global cross-project.
+  Preuves: `Store.global_store_root`, `Store.put_object`, variable
+  `PROTOSS_GLOBAL_STORE`, assertion "global store writes shared object" dans
+  `test/test_protoss.ml`, `README.md`.
 
 ### v0.3 - MCP-first
 

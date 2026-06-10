@@ -11,7 +11,11 @@ let commit_format = "protoss-agent-commit-v1"
 
 let guard_format = "protoss-agent-write-guard-v1"
 
+let factor_format = "protoss-factor-identical-v1"
+
 let json_string_list xs = Kernel.json_array Kernel.json_string xs
+
+let sort_uniq_strings xs = List.sort_uniq String.compare xs
 
 let contains haystack needle =
   let haystack_len = String.length haystack and needle_len = String.length needle in
@@ -145,6 +149,180 @@ let protocol_json () =
              Kernel.json_field "commitCommand"
                (Kernel.json_string "protoss agent commit <store> <patch.json>");
            ]);
+    ]
+  ^ "\n"
+
+type factor_delete = {
+  delete_name : string;
+  delete_def_id : string;
+  delete_representative : string;
+  delete_deps : string list;
+}
+
+type factor_blocked = {
+  blocked_name : string;
+  blocked_def_id : string;
+  blocked_representative : string;
+  blocked_dependents : string list;
+}
+
+type factor_group = {
+  group_def_id : string;
+  group_representative : string;
+  group_names : string list;
+  group_deletes : factor_delete list;
+  group_blocked : factor_blocked list;
+}
+
+type factor_plan = {
+  factor_groups : factor_group list;
+  factor_deletes : factor_delete list;
+  factor_blocked : factor_blocked list;
+}
+
+let source_dependents defs name =
+  defs
+  |> List.filter (fun (d : Ast.def) ->
+         not (String.equal d.name name)
+         && List.exists (String.equal name) (Kernel.dependencies_of_defs defs d.name))
+  |> List.map (fun (d : Ast.def) -> d.name)
+  |> sort_uniq_strings
+
+let duplicate_groups checked =
+  let groups = Hashtbl.create (List.length checked.Kernel.defs) in
+  List.iter
+    (fun (d : Kernel.checked_def) ->
+      let existing = Option.value (Hashtbl.find_opt groups d.Kernel.def_id) ~default:[] in
+      Hashtbl.replace groups d.Kernel.def_id (d :: existing))
+    checked.Kernel.defs;
+  Hashtbl.fold
+    (fun def_id defs acc ->
+      let defs =
+        List.sort
+          (fun (a : Kernel.checked_def) (b : Kernel.checked_def) ->
+            String.compare a.Kernel.def.name b.Kernel.def.name)
+          defs
+      in
+      match defs with _ :: _ :: _ -> (def_id, defs) :: acc | _ -> acc)
+    groups []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+let factor_group checked (def_id, defs) =
+  let source_defs = checked.Kernel.program.defs in
+  let representative =
+    match defs with
+    | first :: _ -> first.Kernel.def.name
+    | [] -> Kernel.fail "internal empty duplicate group"
+  in
+  let names = List.map (fun (d : Kernel.checked_def) -> d.Kernel.def.name) defs in
+  let deletes, blocked =
+    match defs with
+    | [] | [ _ ] -> ([], [])
+    | _representative :: duplicates ->
+        duplicates
+        |> List.fold_left
+             (fun (deletes, blocked) (d : Kernel.checked_def) ->
+               let dependents = source_dependents source_defs d.Kernel.def.name in
+               if dependents = [] then
+                 ( {
+                     delete_name = d.Kernel.def.name;
+                     delete_def_id = def_id;
+                     delete_representative = representative;
+                     delete_deps =
+                       Kernel.dependencies_of_defs source_defs d.Kernel.def.name
+                       |> sort_uniq_strings;
+                   }
+                   :: deletes,
+                   blocked )
+               else
+                 ( deletes,
+                   {
+                     blocked_name = d.Kernel.def.name;
+                     blocked_def_id = def_id;
+                     blocked_representative = representative;
+                     blocked_dependents = dependents;
+                   }
+                   :: blocked ))
+             ([], [])
+  in
+  {
+    group_def_id = def_id;
+    group_representative = representative;
+    group_names = names;
+    group_deletes = List.rev deletes;
+    group_blocked = List.rev blocked;
+  }
+
+let factor_identical_plan checked =
+  let groups = duplicate_groups checked |> List.map (factor_group checked) in
+  {
+    factor_groups = groups;
+    factor_deletes = List.concat_map (fun group -> group.group_deletes) groups;
+    factor_blocked = List.concat_map (fun group -> group.group_blocked) groups;
+  }
+
+let factor_delete_op_json delete =
+  Kernel.json_obj
+    [
+      Kernel.json_field "op" (Kernel.json_string "DeleteDef");
+      Kernel.json_field "name" (Kernel.json_string delete.delete_name);
+      Kernel.json_field "deps" (json_string_list delete.delete_deps);
+    ]
+
+let factor_patch_candidate_json plan =
+  Kernel.json_obj
+    [ Kernel.json_field "ops" (Kernel.json_array factor_delete_op_json plan.factor_deletes) ]
+
+let factor_delete_json delete =
+  Kernel.json_obj
+    [
+      Kernel.json_field "name" (Kernel.json_string delete.delete_name);
+      Kernel.json_field "defId" (Kernel.json_string delete.delete_def_id);
+      Kernel.json_field "representative" (Kernel.json_string delete.delete_representative);
+      Kernel.json_field "deps" (json_string_list delete.delete_deps);
+    ]
+
+let factor_blocked_json blocked =
+  Kernel.json_obj
+    [
+      Kernel.json_field "name" (Kernel.json_string blocked.blocked_name);
+      Kernel.json_field "defId" (Kernel.json_string blocked.blocked_def_id);
+      Kernel.json_field "representative" (Kernel.json_string blocked.blocked_representative);
+      Kernel.json_field "dependents" (json_string_list blocked.blocked_dependents);
+      Kernel.json_field "reason"
+        (Kernel.json_string "source dependents must be rewritten before deletion");
+    ]
+
+let factor_group_json group =
+  Kernel.json_obj
+    [
+      Kernel.json_field "defId" (Kernel.json_string group.group_def_id);
+      Kernel.json_field "representative" (Kernel.json_string group.group_representative);
+      Kernel.json_field "names" (json_string_list group.group_names);
+      Kernel.json_field "safeDeletes" (Kernel.json_array factor_delete_json group.group_deletes);
+      Kernel.json_field "blocked" (Kernel.json_array factor_blocked_json group.group_blocked);
+    ]
+
+let factor_identical_patch_json checked =
+  factor_patch_candidate_json (factor_identical_plan checked) ^ "\n"
+
+let factor_identical_json checked =
+  let plan = factor_identical_plan checked in
+  Kernel.json_obj
+    [
+      Kernel.json_field "format" (Kernel.json_string factor_format);
+      Kernel.json_field "protocol" (Kernel.json_string format);
+      Kernel.json_field "stage" (Kernel.json_string "PatchCandidate");
+      Kernel.json_field "programHash" (Kernel.json_string (Kernel.hash_program checked));
+      Kernel.json_field "duplicateGroups" (string_of_int (List.length plan.factor_groups));
+      Kernel.json_field "safeDeleteCount" (string_of_int (List.length plan.factor_deletes));
+      Kernel.json_field "blockedCount" (string_of_int (List.length plan.factor_blocked));
+      Kernel.json_field "groups" (Kernel.json_array factor_group_json plan.factor_groups);
+      Kernel.json_field "patchCandidate" (factor_patch_candidate_json plan);
+      Kernel.json_field "validationCommand"
+        (Kernel.json_string "protoss patch check <store> <patch.json>");
+      Kernel.json_field "commitCommand"
+        (Kernel.json_string "protoss agent commit <store> <patch.json>");
     ]
   ^ "\n"
 

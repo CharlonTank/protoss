@@ -4256,6 +4256,61 @@ let () =
   let agent_committed_two, _ = Runtime.normalize_def agent_committed "two" in
   assert_equal "agent commit applies validated patch" "2"
     (Runtime.value_to_string agent_committed_two);
+
+  let factor_store = temp_dir "factor-identical" in
+  let factor_seed =
+    patch_file "protoss-factor-seed.json"
+      "{ \"ops\": [\n\
+       \  { \"op\":\"AddDef\", \"name\":\"a\", \"deps\":[], \"type\":\"Nat\", \"expr\":1 },\n\
+       \  { \"op\":\"AddDef\", \"name\":\"b\", \"deps\":[], \"type\":\"Nat\", \"expr\":1 },\n\
+       \  { \"op\":\"AddDef\", \"name\":\"c\", \"deps\":[\"b\"], \"type\":\"Nat\", \"expr\":\"b\" },\n\
+       \  { \"op\":\"AddDef\", \"name\":\"d\", \"deps\":[], \"type\":\"Nat\", \"expr\":1 }\n\
+       ] }"
+  in
+  ignore (Patch.apply factor_store factor_seed);
+  let factor_checked = Store.load_program factor_store |> Kernel.check_program in
+  let factor_report = Json.parse (Agent_protocol.factor_identical_json factor_checked) in
+  assert_equal "agent factor identical format" "protoss-factor-identical-v1"
+    (json_string_field "format" factor_report);
+  assert_equal "agent factor identical duplicate groups" "1"
+    (string_of_int (json_nat_field "duplicateGroups" factor_report));
+  assert_equal "agent factor identical safe delete count" "1"
+    (string_of_int (json_nat_field "safeDeleteCount" factor_report));
+  assert_equal "agent factor identical blocked count" "1"
+    (string_of_int (json_nat_field "blockedCount" factor_report));
+  let factor_group = List.hd (json_array_field "groups" factor_report) in
+  assert_equal "agent factor identical representative" "a"
+    (json_string_field "representative" factor_group);
+  assert_equal "agent factor identical names" "a,b,d"
+    (String.concat "," (json_string_array_field "names" factor_group));
+  let factor_safe = List.hd (json_array_field "safeDeletes" factor_group) in
+  assert_equal "agent factor identical safe delete" "d"
+    (json_string_field "name" factor_safe);
+  let factor_blocked = List.hd (json_array_field "blocked" factor_group) in
+  assert_equal "agent factor identical blocked duplicate" "b"
+    (json_string_field "name" factor_blocked);
+  assert_equal "agent factor identical blocked dependent" "c"
+    (String.concat "," (json_string_array_field "dependents" factor_blocked));
+  let factor_patch_candidate = json_field "patchCandidate" factor_report in
+  let factor_patch_op = List.hd (json_array_field "ops" factor_patch_candidate) in
+  assert_equal "agent factor identical patch op" "DeleteDef"
+    (json_string_field "op" factor_patch_op);
+  assert_equal "agent factor identical patch target" "d"
+    (json_string_field "name" factor_patch_op);
+  let factor_patch =
+    patch_file "protoss-factor-identical.json"
+      (Agent_protocol.factor_identical_patch_json factor_checked)
+  in
+  ignore (Patch.check factor_store factor_patch);
+  ignore (Patch.apply factor_store factor_patch);
+  let factor_after_names =
+    (Store.load_program factor_store).defs
+    |> List.map (fun (d : Ast.def) -> d.name)
+    |> List.sort String.compare
+  in
+  assert_equal "agent factor identical keeps dependent duplicate" "a,b,c"
+    (String.concat "," factor_after_names);
+
   let patch_audit_path store ref =
     Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
   in
