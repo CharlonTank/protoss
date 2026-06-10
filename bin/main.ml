@@ -595,11 +595,14 @@ let command_project_build args =
   let paths, target, stats, locked = parse_build_args args in
   let root = match paths with [] -> "." | [ path ] -> path | _ -> usage () in
   let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
+  let compiled_artifact = ref None in
   let result =
     match target with
     | Some "web" ->
         if locked then ignore (Protoss.Workspace.check_lock manifest);
-        (Protoss.Web.build root).Protoss.Web.build
+        let web = Protoss.Web.build root in
+        compiled_artifact := Some web.Protoss.Web.compiled_artifact;
+        web.Protoss.Web.build
     | Some other -> Protoss.Workspace.fail ("unknown build target: " ^ other)
     | None ->
         if locked then Protoss.Workspace.build_locked manifest
@@ -607,6 +610,10 @@ let command_project_build args =
   in
   Printf.printf "Build %s\nUniverseRoot %s\nStore %s\n" result.Protoss.Workspace.build_id
     result.universe_root result.store;
+  (match !compiled_artifact with
+  | None -> ()
+  | Some artifact ->
+      Printf.printf "CompiledArtifact %s\n" artifact.Protoss.Workspace.compiled_artifact_ref);
   if stats then print_string (Protoss.Workspace.stats_to_string result.stats)
 
 let command_project_lock args =
@@ -707,7 +714,9 @@ let command_web = function
   | "build" :: project :: args ->
       let out = find_flag_value "--out" args in
       let result = Protoss.Web.build ?out project in
-      Printf.printf "Web build %s\nOut %s\n" result.Protoss.Web.build.build_id result.out_dir
+      Printf.printf "Web build %s\nOut %s\nCompiledArtifact %s\n"
+        result.Protoss.Web.build.build_id result.out_dir
+        result.compiled_artifact.Protoss.Workspace.compiled_artifact_ref
   | "inspect" :: project :: [] -> print_string (Protoss.Web.inspect project)
   | "serve" :: project :: args ->
       let port =

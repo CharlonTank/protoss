@@ -30,6 +30,8 @@ writes `.protoss/provenance/git-blame/*.ledger`. Keep both deterministic and der
 `Workspace.write_git_mapping`.
 `project export-layout [project] [--out <dir>]` writes the portable layout contract
 (`protoss.lock`, `views/**/*.pt`, `cache/program.ptb`, `harness/_empty.pth`).
+Web builds write `protoss-compiled-artifact.txt`; the ref must stay derived only from
+`UniverseRoot`, target, and optimization policy.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

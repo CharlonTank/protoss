@@ -5961,6 +5961,7 @@ let () =
       "protoss-graph.json";
       "protoss-canon-graph.json";
       "protoss-host-contract.json";
+      "protoss-compiled-artifact.txt";
       "protoss-capabilities.json";
       "protoss-world.json";
     ];
@@ -5969,6 +5970,20 @@ let () =
   in
   let web_app_json = Json.parse (Store.read_file (Filename.concat web_dist_a "protoss-app.json")) in
   let embedded_program = json_field "program" web_app_json in
+  let web_compiled_artifact = Store.read_file (Filename.concat web_dist_a "protoss-compiled-artifact.txt") in
+  assert_equal "web compiled artifact ref is derived"
+    web_a.Web.compiled_artifact.Workspace.compiled_artifact_ref
+    (Workspace.compiled_artifact_ref ~universe_root:web_a.Web.build.Workspace.universe_root
+       ~target:"web" ~optimization_policy:"web-default-v1");
+  assert_equal "web app embeds compiled artifact"
+    web_a.Web.compiled_artifact.Workspace.compiled_artifact_ref
+    (json_string_field "compiledArtifact" web_app_json);
+  assert_true "web compiled artifact records derivation"
+    (contains_substring web_compiled_artifact
+       ("universe-root=" ^ web_a.Web.build.Workspace.universe_root)
+    && contains_substring web_compiled_artifact "target=web"
+    && contains_substring web_compiled_artifact "optimization-policy=web-default-v1"
+    && Sys.file_exists web_a.Web.compiled_artifact.Workspace.compiled_artifact_path);
   assert_equal "web canonical graph version" Kernel.canonical_graph_version
     (json_string_field "version" web_canon_graph);
   assert_equal "web canonical graph hash" (Kernel.hash_program web_a.Web.build.Workspace.checked)
@@ -6065,6 +6080,7 @@ let () =
       "protoss-graph.json";
       "protoss-canon-graph.json";
       "protoss-host-contract.json";
+      "protoss-compiled-artifact.txt";
       "protoss-capabilities.json";
       "protoss-world.json";
     ];

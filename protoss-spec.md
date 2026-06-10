@@ -458,8 +458,16 @@ bundle deterministe dans `test/test_protoss.ml`.
 - [ ] Ajouter backend JavaScript hors runtime web actuel.
 - [ ] Ajouter backend SQL/dataflow.
 - [ ] Ajouter backend GPU kernels.
-- [ ] Definir `CompiledArtifact = derive(UniverseRoot, Target, OptimizationPolicy)`.
-- [ ] Verifier determinisme ou equivalence prouvable des artefacts compiles.
+- [x] Definir `CompiledArtifact = derive(UniverseRoot, Target, OptimizationPolicy)`.
+  Preuves: `Workspace.compiled_artifact_ref`,
+  `Workspace.write_compiled_artifact`, fichier
+  `protoss-compiled-artifact.txt`, champ `compiledArtifact` dans
+  `protoss-app.json`, assertion "web compiled artifact ref is derived" dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Verifier determinisme ou equivalence prouvable des artefacts compiles.
+  Preuves: comparaison deterministe de `protoss-compiled-artifact.txt` entre
+  deux builds web et assertion "web compiled artifact records derivation" dans
+  `test/test_protoss.ml`, `README.md`.
 
 ## 16. UI et architecture applicative
 

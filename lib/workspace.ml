@@ -802,6 +802,14 @@ type layout_export = {
   layout_universe_root : string;
 }
 
+type compiled_artifact = {
+  compiled_artifact_ref : string;
+  compiled_artifact_path : string;
+  compiled_universe_root : string;
+  compiled_target : string;
+  compiled_optimization_policy : string;
+}
+
 type prepared_build = {
   units : unit_load list;
   checked : Kernel.checked;
@@ -1152,6 +1160,36 @@ let build_prepared ?(write = true) ?lock_hash manifest prepared =
 
 let build ?(write = true) ?lock_hash manifest =
   build_prepared ~write ?lock_hash manifest (prepare_build manifest)
+
+let compiled_artifacts_dir store = Filename.concat store "compiled"
+
+let compiled_artifact_content ~universe_root ~target ~optimization_policy =
+  String.concat "\n"
+    [
+      "protoss-compiled-artifact-v1";
+      "universe-root=" ^ universe_root;
+      "target=" ^ target;
+      "optimization-policy=" ^ optimization_policy;
+      "";
+    ]
+
+let compiled_artifact_ref ~universe_root ~target ~optimization_policy =
+  Kernel.hash_string (compiled_artifact_content ~universe_root ~target ~optimization_policy)
+
+let write_compiled_artifact store ~universe_root ~target ~optimization_policy =
+  let content = compiled_artifact_content ~universe_root ~target ~optimization_policy in
+  let artifact_ref = Kernel.hash_string content in
+  let dir = compiled_artifacts_dir store in
+  ensure_dir dir;
+  let path = Filename.concat dir (sanitize_id artifact_ref ^ ".artifact") in
+  write_file path content;
+  {
+    compiled_artifact_ref = artifact_ref;
+    compiled_artifact_path = path;
+    compiled_universe_root = universe_root;
+    compiled_target = target;
+    compiled_optimization_policy = optimization_policy;
+  }
 
 let git_map_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "git.map"
 

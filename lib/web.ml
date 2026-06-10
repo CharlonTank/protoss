@@ -913,6 +913,7 @@ type build_output = {
   build : Workspace.build_result;
   contract : app_contract;
   out_dir : string;
+  compiled_artifact : Workspace.compiled_artifact;
 }
 
 let build ?out project =
@@ -929,12 +930,22 @@ let build ?out project =
   let model, view = initial_model_and_view contract in
   let canonical_graph_json = Kernel.checked_to_graph_json build.checked in
   let host_contract_json = Canonical_ir.graph_host_contract canonical_graph_json in
+  let compiled_artifact =
+    Workspace.write_compiled_artifact build.store ~universe_root:build.universe_root
+      ~target:"web" ~optimization_policy:"web-default-v1"
+  in
+  let compiled_artifact_text =
+    Workspace.compiled_artifact_content ~universe_root:compiled_artifact.compiled_universe_root
+      ~target:compiled_artifact.compiled_target
+      ~optimization_policy:compiled_artifact.compiled_optimization_policy
+  in
   let app_json =
     json_obj
       [
         json_field "package" (json_string manifest.name);
         json_field "version" (json_string manifest.version);
         json_field "build" (json_string build.build_id);
+        json_field "compiledArtifact" (json_string compiled_artifact.compiled_artifact_ref);
         json_field "modelType" (type_to_json contract.model_ty);
         json_field "msgType" (type_to_json contract.msg_ty);
         json_field "init" (json_string contract.init_def.def_id);
@@ -954,6 +965,7 @@ let build ?out project =
   write_file (Filename.concat out_dir "protoss-graph.json") (stored_graph_json build.store);
   write_file (Filename.concat out_dir "protoss-canon-graph.json") canonical_graph_json;
   write_file (Filename.concat out_dir "protoss-host-contract.json") host_contract_json;
+  write_file (Filename.concat out_dir "protoss-compiled-artifact.txt") compiled_artifact_text;
   write_file (Filename.concat out_dir "protoss-capabilities.json")
     (json_obj
        [
@@ -963,7 +975,7 @@ let build ?out project =
        ]
     ^ "\n");
   write_file (Filename.concat out_dir "protoss-world.json") (current_world_json ());
-  { build; contract; out_dir }
+  { build; contract; out_dir; compiled_artifact }
 
 let inspect project =
   let manifest = manifest project in
