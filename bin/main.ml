@@ -35,7 +35,7 @@ let usage () =
      \       protoss project init|check|build|lock|package|interface|export-layout [project] [--stats|--locked|--check [interface.json]|--json|--out <dir>]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref] | protoss patch review <patch.json>\n\
-     \       protoss patch from-diff <store-a> <store-b>\n\
+     \       protoss patch from-diff <store-a> <store-b> | protoss patch from-text-diff <store> <diff.patch>\n\
      \       protoss diff [--json] <store-a> <store-b>\n\
      \       protoss audit [project]\n\
      \       protoss git map [project] | protoss git blame [project] <file>\n\
@@ -485,6 +485,8 @@ let command_patch = function
         (Protoss.Workspace.patch_from_diff
            (Protoss.Workspace.store_of_arg store_a)
            (Protoss.Workspace.store_of_arg store_b))
+  | "from-text-diff" :: store :: diff :: [] ->
+      print_string (Protoss.Patch.from_text_diff (Protoss.Workspace.store_of_arg store) diff)
   | "check" :: store :: patch :: [] ->
       let checked = Protoss.Patch.check store patch in
       Printf.printf "Patch valid %s\n" (Protoss.Patch.describe_checked checked)

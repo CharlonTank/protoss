@@ -323,6 +323,110 @@ let review_text path =
 let def_by_name (defs : def list) name =
   List.find_opt (fun (d : def) -> String.equal d.name name) defs
 
+let text_diff_payload prefix header content =
+  content |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+         if is_prefix header line then None
+         else if is_prefix prefix line then
+           Some (String.sub line 1 (String.length line - 1))
+         else None)
+  |> String.concat "\n"
+  |> String.trim
+
+let parse_text_diff_defs label source =
+  if String.equal (String.trim source) "" then []
+  else
+    let program =
+      try Parser.parse_string source with
+      | Parser.Error msg -> fail ("invalid " ^ label ^ " side of text diff: " ^ msg)
+    in
+    if program.imports <> [] || program.module_name <> None || program.exports <> None
+       || program.capabilities <> [] || program.type_aliases <> []
+    then fail ("ambiguous textual modification: " ^ label ^ " side must contain only definitions");
+    program.defs
+
+let single_text_diff_def label defs =
+  match defs with
+  | [] -> None
+  | [ d ] -> Some d
+  | _ ->
+      fail
+        ("ambiguous textual modification: " ^ label
+       ^ " side changes multiple definitions")
+
+let source_json s =
+  Kernel.json_obj [ Kernel.json_field "source" (Kernel.json_string s) ]
+
+let patch_def_fields d =
+  [
+    Kernel.json_field "type" (source_json (string_of_typ d.typ));
+    Kernel.json_field "expr" (source_json (string_of_expr d.body));
+  ]
+  @
+  match d.declared_capabilities with
+  | None -> []
+  | Some caps -> [ Kernel.json_field "capabilities" (Kernel.json_array Kernel.json_string caps) ]
+
+let structural_patch_json op name deps fields =
+  Kernel.json_obj
+    ([
+       Kernel.json_field "op" (Kernel.json_string op);
+       Kernel.json_field "name" (Kernel.json_string name);
+       Kernel.json_field "deps" (Kernel.json_array Kernel.json_string deps);
+     ]
+    @ fields)
+  ^ "\n"
+
+let replace_def (defs : def list) (new_def : def) =
+  List.map (fun (d : def) -> if String.equal d.name new_def.name then new_def else d) defs
+
+let from_text_diff store_root diff_path =
+  let diff = read_file diff_path in
+  let removed =
+    text_diff_payload "-" "---" diff |> parse_text_diff_defs "removed" |> single_text_diff_def "removed"
+  in
+  let added =
+    text_diff_payload "+" "+++" diff |> parse_text_diff_defs "added" |> single_text_diff_def "added"
+  in
+  let current =
+    try Store.load_program store_root with
+    | Store.Error msg -> fail msg
+    | Parser.Error msg -> fail ("store contains invalid definition: " ^ msg)
+  in
+  match (removed, added) with
+  | None, None -> fail "ambiguous textual modification: no changed definition"
+  | None, Some def ->
+      if def_by_name current.defs def.name <> None then
+        fail
+          ("ambiguous textual modification: added definition already exists without a removed side: "
+         ^ def.name);
+      let defs = current.defs @ [ def ] in
+      let deps = Kernel.dependencies_of_defs defs def.name |> List.sort_uniq String.compare in
+      structural_patch_json "AddDef" def.name deps (patch_def_fields def)
+  | Some def, None ->
+      if def_by_name current.defs def.name = None then
+        fail
+          ("ambiguous textual modification: removed definition is not in the target store: "
+         ^ def.name);
+      let deps =
+        Kernel.dependencies_of_defs current.defs def.name |> List.sort_uniq String.compare
+      in
+      structural_patch_json "DeleteDef" def.name deps []
+  | Some old_def, Some new_def ->
+      if not (String.equal old_def.name new_def.name) then
+        fail
+          ("ambiguous textual modification: removed " ^ old_def.name ^ " but added "
+         ^ new_def.name ^ "; use an explicit structural patch");
+      if def_by_name current.defs old_def.name = None then
+        fail
+          ("ambiguous textual modification: replaced definition is not in the target store: "
+         ^ old_def.name);
+      let defs = replace_def current.defs new_def in
+      let deps =
+        Kernel.dependencies_of_defs defs new_def.name |> List.sort_uniq String.compare
+      in
+      structural_patch_json "ReplaceDef" new_def.name deps (patch_def_fields new_def)
+
 let parse_type_source s =
   try Parser.parse_type (Kernel.single_sexp s) with
   | Parser.Error msg | Kernel.Error msg -> fail ("invalid stored type: " ^ msg)

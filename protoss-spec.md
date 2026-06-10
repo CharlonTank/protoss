@@ -392,8 +392,12 @@ serveur MCP stdio `Mcp_server.serve_stdio`, outils `protoss.*` dans
 - [x] Exposer `protoss.rollback` via MCP.
 - [ ] Ajouter Patch ADT pour `AddField`, `RemoveField`, `Inline`, `Extract`,
   `AddHarness`, `AddCapability`, `MigrateType`.
-- [ ] Convertir diff texte humain en candidat patch structurel.
-- [ ] Refuser les modifications textuelles ambigues avec erreur d'intention.
+- [x] Convertir diff texte humain en candidat patch structurel.
+  Preuves: `Patch.from_text_diff`, commande `protoss patch from-text-diff`,
+  assertions "patch text diff" dans `test/test_protoss.ml`, `README.md`.
+- [x] Refuser les modifications textuelles ambigues avec erreur d'intention.
+  Preuves: `Patch.from_text_diff`, assertion "patch text diff ambiguity names
+  intent" dans `test/test_protoss.ml`, `README.md`.
 - [ ] Exiger validation de harness avant commit de patch.
 
 ## 12. Harness integre

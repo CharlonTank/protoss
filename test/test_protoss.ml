@@ -4378,6 +4378,48 @@ let () =
   assert_true "agent candidate comparison check is read-only"
     (snapshot compare_store = compare_before);
 
+  let text_diff_store = temp_dir "text-diff" in
+  let add_text_diff =
+    patch_file "protoss-add-text.diff" "--- a/app.protoss\n+++ b/app.protoss\n@@\n+(def one Nat 1)\n"
+  in
+  let add_text_patch = Patch.from_text_diff text_diff_store add_text_diff in
+  let add_text_patch_json = Json.parse add_text_patch in
+  assert_equal "patch text diff AddDef op" "AddDef"
+    (json_string_field "op" add_text_patch_json);
+  assert_equal "patch text diff AddDef name" "one"
+    (json_string_field "name" add_text_patch_json);
+  let add_text_patch_file = patch_file "protoss-add-text.json" add_text_patch in
+  ignore (Patch.check text_diff_store add_text_patch_file);
+  ignore (Patch.apply text_diff_store add_text_patch_file);
+  let text_diff_added = Store.load_program text_diff_store |> Kernel.check_program in
+  let text_diff_one, _ = Runtime.normalize_def text_diff_added "one" in
+  assert_equal "patch text diff AddDef applies" "1"
+    (Runtime.value_to_string text_diff_one);
+  let replace_text_diff =
+    patch_file "protoss-replace-text.diff"
+      "--- a/app.protoss\n+++ b/app.protoss\n@@\n-(def one Nat 1)\n+(def one Nat 2)\n"
+  in
+  let replace_text_patch = Patch.from_text_diff text_diff_store replace_text_diff in
+  let replace_text_patch_json = Json.parse replace_text_patch in
+  assert_equal "patch text diff ReplaceDef op" "ReplaceDef"
+    (json_string_field "op" replace_text_patch_json);
+  let replace_text_patch_file = patch_file "protoss-replace-text.json" replace_text_patch in
+  ignore (Patch.apply text_diff_store replace_text_patch_file);
+  let text_diff_replaced = Store.load_program text_diff_store |> Kernel.check_program in
+  let text_diff_replaced_one, _ = Runtime.normalize_def text_diff_replaced "one" in
+  assert_equal "patch text diff ReplaceDef applies" "2"
+    (Runtime.value_to_string text_diff_replaced_one);
+  let ambiguous_text_diff =
+    patch_file "protoss-ambiguous-text.diff"
+      "--- a/app.protoss\n+++ b/app.protoss\n@@\n+(def a Nat 1)\n+(def b Nat 2)\n"
+  in
+  (try
+     ignore (Patch.from_text_diff text_diff_store ambiguous_text_diff);
+     fail "ambiguous text diff should be rejected"
+   with Patch.Error msg ->
+     assert_true "patch text diff ambiguity names intent"
+       (contains_substring msg "ambiguous textual modification"));
+
   let patch_audit_path store ref =
     Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
   in
