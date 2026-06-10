@@ -2729,7 +2729,7 @@ module Phys_typ_tbl = Hashtbl.Make (struct
   let hash t = Hashtbl.hash_param 64 256 t
 end)
 
-let canonical_node_graph_json program_hash def_id_of defs =
+let canonical_node_graph_json_uncached program_hash def_id_of defs =
   let nodes = Hashtbl.create 128 in
   let term_canon_memo = Phys_cterm_tbl.create 1024 in
   let term_canon term =
@@ -2888,6 +2888,26 @@ let canonical_node_graph_json program_hash def_id_of defs =
       json_field "defs" ("[" ^ String.concat ", " def_refs ^ "]");
       json_field "nodes" ("[" ^ String.concat ", " node_json ^ "]");
     ]
+
+(* Audit, patch and locked-build flows re-check the same program text under
+   fresh physical identities, so the physical-identity memos above miss and
+   the multi-megabyte node graph used to be rebuilt from scratch each time.
+   The canonical program hash determines the node graph byte-for-byte (the
+   whole content-addressed design rests on that), so it is a sound content
+   key; every caller already pays for [hash_program]. Two slots cover a
+   program and its patched variant without retaining more large strings. *)
+let node_graph_by_hash_memo : (string * string) list ref = ref []
+
+let canonical_node_graph_json program_hash def_id_of defs =
+  match
+    List.find_opt (fun (h, _) -> String.equal h program_hash) !node_graph_by_hash_memo
+  with
+  | Some (_, json) -> json
+  | None ->
+      let json = canonical_node_graph_json_uncached program_hash def_id_of defs in
+      node_graph_by_hash_memo :=
+        (program_hash, json) :: List.filteri (fun i _ -> i < 1) !node_graph_by_hash_memo;
+      json
 
 let single_sexp input =
   match Sexp.parse input with
@@ -3297,7 +3317,7 @@ let checked_of_canonical caps defs =
     defs = checked_defs;
   }
 
-let check_program (program : program) =
+let check_program_uncached (program : program) =
   let program = resolve_program_types program in
   validate_capabilities program.capabilities;
   List.iter
@@ -3408,6 +3428,28 @@ let check_program (program : program) =
       program.defs
   in
   { program; defs }
+
+(* Checking is pure and total over the surface program, and audit/patch/
+   locked-build flows re-load byte-identical programs from the store under
+   fresh physical identities — re-running the whole elaborator each time
+   dominated those flows. The key is the digest of the marshaled AST (plain
+   data, sharing preserved): structurally equal programs built differently
+   may miss (never incorrect), and only successful checks are cached, so
+   failing programs keep their exact error behavior. Sharing one [checked]
+   per content also feeds every physical-identity memo downstream. *)
+let check_program_by_content_memo : (string * checked) list ref = ref []
+
+let check_program (program : program) =
+  let key = Hashcons.digest (Marshal.to_string program []) in
+  match
+    List.find_opt (fun (k, _) -> String.equal k key) !check_program_by_content_memo
+  with
+  | Some (_, checked) -> checked
+  | None ->
+      let checked = check_program_uncached program in
+      check_program_by_content_memo :=
+        (key, checked) :: List.filteri (fun i _ -> i < 3) !check_program_by_content_memo;
+      checked
 
 let canonical_defs_of_checked checked =
   let defs =
@@ -3535,6 +3577,13 @@ let checked_to_graph_json_fields_uncached ~version ~include_capability_scope_ref
    cover diff/package flows that juggle two or three programs at once. *)
 let graph_json_fields_memo : (checked * string * bool * string list) list ref = ref []
 
+(* Second-level cache by canonical program hash: audit/patch/locked flows
+   re-check identical program text under fresh physical identities, and the
+   def entries alone re-serialize every canonical body. [hash_program] is
+   already computed by every caller (it is a field of the graph itself), so
+   the content key costs nothing new. *)
+let graph_json_fields_by_content_memo : (string * string * bool * string list) list ref = ref []
+
 let checked_to_graph_json_fields ?(version = canonical_graph_version)
     ?(include_capability_scope_ref = true) checked =
   match
@@ -3545,8 +3594,24 @@ let checked_to_graph_json_fields ?(version = canonical_graph_version)
   with
   | Some (_, _, _, fields) -> fields
   | None ->
+      let program_hash = hash_program checked in
       let fields =
-        checked_to_graph_json_fields_uncached ~version ~include_capability_scope_ref checked
+        match
+          List.find_opt
+            (fun (h, v, i, _) ->
+              String.equal h program_hash && String.equal v version
+              && Bool.equal i include_capability_scope_ref)
+            !graph_json_fields_by_content_memo
+        with
+        | Some (_, _, _, fields) -> fields
+        | None ->
+            let fields =
+              checked_to_graph_json_fields_uncached ~version ~include_capability_scope_ref checked
+            in
+            graph_json_fields_by_content_memo :=
+              (program_hash, version, include_capability_scope_ref, fields)
+              :: List.filteri (fun i _ -> i < 1) !graph_json_fields_by_content_memo;
+            fields
       in
       graph_json_fields_memo :=
         (checked, version, include_capability_scope_ref, fields)
@@ -3584,6 +3649,12 @@ let checked_to_graph_payload_json checked =
 
 let graph_content_hash_memo : (checked * string * bool * string) list ref = ref []
 
+(* Content-keyed second level (same scheme as the fields cache): the graph
+   content hash is a pure function of the canonical program, and re-checked
+   identical programs would otherwise re-concatenate and re-hash megabytes.
+   Keys and values are short strings, so a few slots cost nothing. *)
+let graph_content_hash_by_content_memo : (string * string * bool * string) list ref = ref []
+
 let checked_to_graph_content_hash_for ~version ~include_capability_scope_ref checked =
   match
     List.find_opt
@@ -3593,8 +3664,25 @@ let checked_to_graph_content_hash_for ~version ~include_capability_scope_ref che
   with
   | Some (_, _, _, hash) -> hash
   | None ->
+      let program_hash = hash_program checked in
       let hash =
-        hash_string (checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked)
+        match
+          List.find_opt
+            (fun (h, v, i, _) ->
+              String.equal h program_hash && String.equal v version
+              && Bool.equal i include_capability_scope_ref)
+            !graph_content_hash_by_content_memo
+        with
+        | Some (_, _, _, hash) -> hash
+        | None ->
+            let hash =
+              hash_string
+                (checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked)
+            in
+            graph_content_hash_by_content_memo :=
+              (program_hash, version, include_capability_scope_ref, hash)
+              :: List.filteri (fun i _ -> i < 5) !graph_content_hash_by_content_memo;
+            hash
       in
       graph_content_hash_memo :=
         (checked, version, include_capability_scope_ref, hash)
