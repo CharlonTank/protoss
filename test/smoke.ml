@@ -84,6 +84,11 @@ let () =
   let ptc_checked = Loader.check_file ptc_file in
   assert_equal ".ptc canonical text round-trip hash" (Kernel.hash_program norm)
     (Kernel.hash_program ptc_checked);
+  let ptb_file = Filename.concat ptc_dir "main.ptb" in
+  write_file ptb_file (Canonical_binary.checked_to_binary norm);
+  let ptb_checked = Loader.check_file ptb_file in
+  assert_equal ".ptb canonical binary round-trip hash" (Kernel.hash_program norm)
+    (Kernel.hash_program ptb_checked);
 
   let memo =
     check

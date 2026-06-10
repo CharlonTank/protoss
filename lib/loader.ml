@@ -561,6 +561,8 @@ let has_suffix suffix s =
 
 let is_canonical_text_path path = has_suffix ".ptc" path
 
+let is_canonical_binary_path path = has_suffix ".ptb" path
+
 type loaded = {
   program : program;
   locations : source_location list;
@@ -732,14 +734,22 @@ let check_canonical_text_file path =
     Kernel.checked_of_canonical caps defs
   with Kernel.Error msg -> fail (locate path msg)
 
+let check_canonical_binary_file path =
+  let path = normalize_path (Sys.getcwd ()) path in
+  try Canonical_binary.checked_of_binary (read_file path) with
+  | Kernel.Error msg -> fail (locate path msg)
+
 let load_file ?stack path =
   if is_canonical_text_path path then (check_canonical_text_file path).Kernel.program
+  else if is_canonical_binary_path path then
+    (check_canonical_binary_file path).Kernel.program
   else (load_file_with_locations ?stack path).program
 
 let parse_file path = load_file path
 
 let check_file path =
   if is_canonical_text_path path then check_canonical_text_file path
+  else if is_canonical_binary_path path then check_canonical_binary_file path
   else
     let loaded = load_file_with_locations path in
     try Kernel.check_program loaded.program with

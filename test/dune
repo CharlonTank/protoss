@@ -25,6 +25,7 @@
   (glob_files %{workspace_root}/examples/*.protoss)
   (glob_files %{workspace_root}/examples/*.pt)
   (glob_files %{workspace_root}/examples/*.ptc)
+  (glob_files %{workspace_root}/examples/*.ptb)
   (glob_files %{workspace_root}/examples/self_host/*.protoss)
   (source_tree %{workspace_root}/examples/web/todo_app/src)
   %{workspace_root}/examples/web/todo_app/protoss.toml

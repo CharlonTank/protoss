@@ -9,7 +9,7 @@ let usage () =
   prerr_endline
     "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
      \       protoss check|nf|hash --store-graph <project-or-store> <graphHash>\n\
-     \       protoss canon <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
+     \       protoss canon <file> | protoss canon --ptb <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -179,6 +179,10 @@ let canonical_program checked =
 let command_canon file =
   let checked = parse_and_check file in
   print_endline (canonical_program checked)
+
+let command_canon_ptb file =
+  let checked = parse_and_check file in
+  print_string (Protoss.Canonical_binary.checked_to_binary checked)
 
 let command_canon_graph file =
   let checked = parse_and_check file in
@@ -1137,6 +1141,7 @@ let () =
           command_hash_store_graph project_or_store graph_hash
       | [ "hash"; file ] -> command_hash file
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
+      | [ "canon"; "--ptb"; file ] -> command_canon_ptb file
       | [ "canon"; "--graph"; file ] -> command_canon_graph file
       | [ "canon"; "--from-graph"; file ] -> command_canon_from_graph file
       | [ "canon"; "--migrate-graph"; file ] -> command_canon_migrate_graph file

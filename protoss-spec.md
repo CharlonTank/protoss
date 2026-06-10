@@ -57,14 +57,14 @@ listees dans la section "Gates de validation".
 - [x] Produire `program.graph.json` et des objets `graphs/<hash>.graph.json`.
 - [x] Supporter `.pt` comme syntaxe humaine officielle Protoss/H.
 - [x] Supporter `.ptc` comme texte canonique officiel Protoss/C.
-- [ ] Supporter `.ptb` comme binaire canonique officiel Protoss/B.
+- [x] Supporter `.ptb` comme binaire canonique officiel Protoss/B.
 - [ ] Fournir `protoss convert --to pt|ptc|ptb`.
-- [ ] Garantir `hash(parse(.pt)) == hash(parse(.ptc)) == hash(.ptb)`.
+- [x] Garantir `hash(parse(.pt)) == hash(parse(.ptc)) == hash(.ptb)`.
 - [x] Ajouter une fixture equivalente `.pt`.
 - [x] Ajouter une fixture equivalente `.ptc`.
-- [ ] Ajouter une fixture equivalente `.ptb`.
+- [x] Ajouter une fixture equivalente `.ptb`.
 - [ ] Rejeter toute vue dont le hash diverge du canon.
-- [ ] Documenter la version du format canonique binaire.
+- [x] Documenter la version du format canonique binaire.
 
 ## 3. Syntaxe humaine Protoss/H
 
