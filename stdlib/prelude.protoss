@@ -365,6 +365,13 @@
   (stack (List JsonFrame))
   (value (Maybe Json))
   (error (Maybe String)))
+(record PackageRegistryEntry
+  (selector String)
+  (path String))
+(record PackageResolution
+  (selector String)
+  (path String)
+  (source String))
 
 (def Stdlib.version String "v0.44")
 
@@ -947,6 +954,39 @@
       (lambda (entries (Assoc K V))
         ((inst Maybe.isSome V)
           ((((inst Assoc.get K V) eq) key) entries))))))
+
+(def PackageRegistry.entry (-> String (-> String PackageRegistryEntry))
+  (lambda (selector String)
+    (lambda (path String)
+      (record (selector selector) (path path)))))
+
+(def PackageRegistry.resolution (-> String (-> String (-> String PackageResolution)))
+  (lambda (selector String)
+    (lambda (path String)
+      (lambda (source String)
+        (record (selector selector) (path path) (source source))))))
+
+(def PackageRegistry.resolveIn (-> String (-> (List PackageRegistryEntry) (Maybe String)))
+  (lambda (wanted String)
+    (lambda (entries (List PackageRegistryEntry))
+      (foldList entries (variant (Maybe String) None unit)
+        (lambda (entry PackageRegistryEntry)
+          (lambda (acc (Maybe String))
+            (case ((String.eqString (get entry selector)) wanted)
+              (true (variant Some (get entry path)))
+              (false acc))))))))
+
+(def PackageRegistry.resolveLocalGlobal
+  (-> String (-> (List PackageRegistryEntry) (-> (List PackageRegistryEntry) (Result String PackageResolution))))
+  (lambda (wanted String)
+    (lambda (local (List PackageRegistryEntry))
+      (lambda (global (List PackageRegistryEntry))
+        (case ((PackageRegistry.resolveIn wanted) local)
+          (Some path (variant Ok (((PackageRegistry.resolution wanted) path) "local")))
+          (None
+            (case ((PackageRegistry.resolveIn wanted) global)
+              (Some path (variant Ok (((PackageRegistry.resolution wanted) path) "global")))
+              (None (variant Err ((String.concat "missing package selector: ") wanted))))))))))
 
 (defpoly Assoc.keys (params K V)
   (-> (Assoc K V) (List K))

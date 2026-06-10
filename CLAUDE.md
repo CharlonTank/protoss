@@ -19,6 +19,10 @@ Policy names are executable, not just descriptor text: for example
 Package aliases are local manifest entries (`package_aliases = ["name@semver=path"]` or
 `package_policy_aliases = ["name@policy=path"]`) and must validate the imported package
 name/version or advertised policy before resolving to the locked package hash.
+Package registries are manifest-declared files (`package_registry_local` /
+`package_registry_global`) containing deterministic `package@selector=path` entries; local
+entries override global entries, and registry refs must stay in UniverseRoot, lock, and
+package descriptors.
 `lib/harness.ml` owns `.pth` harness parsing, canonical bytes, `HarnessId` derivation, and
 the JSON runner used by `protoss harness run`; package/universe harness refs must use those
 canonical IDs rather than raw file hashes.

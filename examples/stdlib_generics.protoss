@@ -295,6 +295,28 @@
 (def assocValues (List Nat)
   ((inst Assoc.values String Nat) assoc))
 
+(def packageRegistryLocal (List PackageRegistryEntry)
+  (Cons PackageRegistryEntry
+    ((PackageRegistry.entry "workspace-a@0.4.0") "../workspace")
+    (Nil PackageRegistryEntry)))
+
+(def packageRegistryGlobal (List PackageRegistryEntry)
+  (Cons PackageRegistryEntry
+    ((PackageRegistry.entry "workspace-a@NoNetworkExceptDeclared") "/registry/workspace-a")
+    (Nil PackageRegistryEntry)))
+
+(def packageResolvedLocal (Result String PackageResolution)
+  (((PackageRegistry.resolveLocalGlobal "workspace-a@0.4.0") packageRegistryLocal)
+    packageRegistryGlobal))
+
+(def packageResolvedGlobal (Result String PackageResolution)
+  (((PackageRegistry.resolveLocalGlobal "workspace-a@NoNetworkExceptDeclared") packageRegistryLocal)
+    packageRegistryGlobal))
+
+(def packageResolvedMissing (Result String PackageResolution)
+  (((PackageRegistry.resolveLocalGlobal "missing@1.0.0") packageRegistryLocal)
+    packageRegistryGlobal))
+
 (def map (Map String Nat)
   ((((inst Map.insert String Nat) "age") 41)
     ((((inst Map.insert String Nat) "count") 2)

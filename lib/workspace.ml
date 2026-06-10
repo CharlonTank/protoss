@@ -104,6 +104,8 @@ type manifest = {
   policies : string list;
   package_aliases : (string * string) list;
   package_policy_aliases : (string * string) list;
+  package_registry_local : string option;
+  package_registry_global : string option;
   package_imports : (string * string) list;
   package_interfaces : (string * string) list;
   package_contracts : (string * string) list;
@@ -218,6 +220,18 @@ let parse_manifest root =
     package_aliases = array_field "package_aliases" [] |> List.map parse_package_alias;
     package_policy_aliases =
       array_field "package_policy_aliases" [] |> List.map parse_package_policy_alias;
+    package_registry_local =
+      (match field "package_registry_local" with
+      | None -> None
+      | Some v ->
+          let v = unquote v in
+          if v = "" || v = "none" then None else Some v);
+    package_registry_global =
+      (match field "package_registry_global" with
+      | None -> None
+      | Some v ->
+          let v = unquote v in
+          if v = "" || v = "none" then None else Some v);
     package_imports = array_field "package_imports" [] |> List.map parse_package_import;
     package_interfaces =
       array_field "package_interfaces" [] |> List.map parse_package_interface;
@@ -259,6 +273,8 @@ let init ?(force = false) root =
      policies = []\n\
      package_aliases = []\n\
      package_policy_aliases = []\n\
+     package_registry_local = \"none\"\n\
+     package_registry_global = \"none\"\n\
      package_imports = []\n\
      package_interfaces = []\n\
      package_contracts = []\n";
@@ -893,6 +909,8 @@ let prepare_build_cache_key (manifest : manifest) (units : unit_load list) =
     @ cache_list "manifest.policies" manifest.policies
     @ cache_pairs "manifest.package_aliases" manifest.package_aliases
     @ cache_pairs "manifest.package_policy_aliases" manifest.package_policy_aliases
+    @ option_field "manifest.package_registry_local" manifest.package_registry_local
+    @ option_field "manifest.package_registry_global" manifest.package_registry_global
     @ [ cache_field "units.count" (string_of_int (List.length units)) ]
     @ List.concat (List.mapi unit_fields units))
   |> Kernel.hash_string
@@ -1039,6 +1057,89 @@ let harness_graph_ref_item manifest =
 
 let harness_graph_content manifest = Harness.graph_json (harness_sources manifest)
 
+type package_registry_entry = {
+  registry_scope : string;
+  registry_file : string;
+  registry_alias : string;
+  registry_path : string;
+}
+
+let package_registry_specs manifest =
+  let opt label = function
+    | None -> []
+    | Some path -> [ (label, path_in_project manifest path) ]
+  in
+  opt "local" manifest.package_registry_local
+  @ opt "global" manifest.package_registry_global
+
+let parse_package_registry_line scope file line =
+  let line =
+    match String.index_opt line '#' with
+    | Some i -> String.sub line 0 i
+    | None -> line
+    |> trim
+  in
+  if line = "" then None
+  else
+    match split_once '=' line with
+    | Some (alias, path) when trim alias <> "" && trim path <> "" ->
+        let base = Filename.dirname file in
+        Some
+          {
+            registry_scope = scope;
+            registry_file = file;
+            registry_alias = trim alias;
+            registry_path = normalize_path base (trim path);
+          }
+    | _ -> fail ("invalid package registry entry in " ^ file ^ ": " ^ line)
+
+let check_package_registry_duplicates scope file entries =
+  let aliases = List.map (fun entry -> entry.registry_alias) entries in
+  let duplicates =
+    aliases
+    |> List.filter (fun alias ->
+           aliases |> List.filter (String.equal alias) |> List.length > 1)
+    |> sort_uniq
+  in
+  if duplicates <> [] then
+    fail
+      ("duplicate package registry " ^ scope ^ " entries in " ^ file ^ ": "
+     ^ String.concat ", " duplicates)
+
+let read_package_registry_entries scope file =
+  if not (Sys.file_exists file) then fail ("missing package registry " ^ scope ^ ": " ^ file);
+  let entries =
+    read_file file |> String.split_on_char '\n'
+    |> List.filter_map (parse_package_registry_line scope file)
+  in
+  check_package_registry_duplicates scope file entries;
+  entries
+
+let package_registry_entries manifest =
+  package_registry_specs manifest
+  |> List.concat_map (fun (scope, file) -> read_package_registry_entries scope file)
+
+let package_registry_alias manifest target =
+  let matches =
+    package_registry_entries manifest
+    |> List.filter (fun entry -> String.equal entry.registry_alias target)
+  in
+  let local =
+    matches |> List.filter (fun entry -> String.equal entry.registry_scope "local")
+  in
+  match (local, matches) with
+  | entry :: _, _ -> Some entry
+  | [], entry :: _ -> Some entry
+  | [], [] -> None
+
+let package_registry_refs manifest =
+  package_registry_specs manifest
+  |> List.map (fun (scope, file) ->
+         if not (Sys.file_exists file) then
+           fail ("missing package registry " ^ scope ^ ": " ^ file);
+         let content = read_file file in
+         (scope, relative_to_root manifest file ^ "#" ^ Kernel.hash_string content))
+
 let universe_type_item (alias : type_alias) =
   lock_item "type"
     [
@@ -1063,6 +1164,7 @@ let universe_root_content manifest prepared world_refs =
       lock_pair_list "package-imports" manifest.package_imports;
       lock_pair_list "package-aliases" manifest.package_aliases;
       lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
+      lock_pair_list "package-registry" (package_registry_refs manifest);
       lock_pair_list "package-interfaces" manifest.package_interfaces;
       lock_pair_list "package-contracts" manifest.package_contracts;
     ]
@@ -1742,14 +1844,25 @@ let package_alias_name_policy alias =
       Some (trim name, trim policy)
   | _ -> None
 
+let package_alias_selector_is_semver alias =
+  match package_alias_name_version alias with
+  | Some (_, selector) when String.length selector > 0 -> is_digit selector.[0]
+  | _ -> false
+
 let package_import_manifest manifest (name, path) =
   let alias = package_alias manifest path in
   let policy_alias = package_policy_alias manifest path in
-  let path =
+  let registry_alias =
     match (alias, policy_alias) with
-    | Some (_, alias_path), _ -> alias_path
-    | None, Some (_, alias_path) -> alias_path
-    | None, None -> path
+    | None, None -> package_registry_alias manifest path
+    | _ -> None
+  in
+  let path =
+    match (alias, policy_alias, registry_alias) with
+    | Some (_, alias_path), _, _ -> alias_path
+    | None, Some (_, alias_path), _ -> alias_path
+    | None, None, Some entry -> entry.registry_path
+    | None, None, None -> path
   in
   let root = project_root (normalize_path manifest.root path) in
   let imported = parse_manifest root in
@@ -1785,6 +1898,26 @@ let package_import_manifest manifest (name, path) =
             fail
               ("package policy alias mismatch for " ^ imported.name ^ ": missing policy "
              ^ expected_policy)));
+  (match registry_alias with
+  | None -> ()
+  | Some entry ->
+      match package_alias_name_version entry.registry_alias with
+      | None -> fail ("package registry alias must be package@selector: " ^ entry.registry_alias)
+      | Some (expected_name, selector) ->
+          if not (String.equal expected_name imported.name) then
+            fail
+              ("package registry alias name mismatch: expected " ^ expected_name ^ ", got "
+             ^ imported.name)
+          else if String.equal selector imported.version then ()
+          else if List.exists (String.equal selector) imported.policies then ()
+          else if package_alias_selector_is_semver entry.registry_alias then
+            fail
+              ("package registry alias version mismatch for " ^ imported.name ^ ": expected "
+             ^ selector ^ ", got " ^ imported.version)
+          else
+            fail
+              ("package registry alias policy mismatch for " ^ imported.name
+             ^ ": missing policy " ^ selector));
   imported
 
 let read_package_import manifest import =
@@ -1904,6 +2037,7 @@ let lock_content manifest prepared =
       "  " ^ harnesses_item manifest;
       "  " ^ lock_pair_list "package-aliases" manifest.package_aliases;
       "  " ^ lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
+      "  " ^ lock_pair_list "package-registry" (package_registry_refs manifest);
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
       "  "
       ^ lock_pair_list "package-import-locks"
@@ -2097,6 +2231,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ harnesses_item manifest;
       "  " ^ lock_pair_list "package-aliases" manifest.package_aliases;
       "  " ^ lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
+      "  " ^ lock_pair_list "package-registry" (package_registry_refs manifest);
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
       "  "
       ^ lock_pair_list "package-import-locks"
@@ -2235,6 +2370,7 @@ let package_check_cache_key manifest source_key import_keys package_ref content 
        @ cache_list "imports" import_keys
        @ cache_pairs "manifest.package_aliases" manifest.package_aliases
        @ cache_pairs "manifest.package_policy_aliases" manifest.package_policy_aliases
+       @ cache_pairs "manifest.package_registry" (package_registry_refs manifest)
        @ cache_pairs "manifest.package_imports" manifest.package_imports
        @ cache_pairs "manifest.package_interfaces" manifest.package_interfaces
        @ cache_pairs "manifest.package_contracts" manifest.package_contracts))

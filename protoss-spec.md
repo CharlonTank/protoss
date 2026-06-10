@@ -376,8 +376,21 @@ Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
   Preuves: champ manifest `policies`, entrees `(policies ...)` dans lock et
   package, assertions "project package records policies" dans
   `test/test_protoss.ml` et `README.md`.
-- [ ] Ajouter resolver package ecrit en Protoss.
-- [ ] Ajouter registre local/global de packages.
+- [x] Ajouter resolver package ecrit en Protoss.
+  Preuves: `PackageRegistryEntry`, `PackageResolution`,
+  `PackageRegistry.resolveIn` et `PackageRegistry.resolveLocalGlobal` dans
+  `stdlib/prelude.protoss`, fixtures `packageResolvedLocal`,
+  `packageResolvedGlobal`, `packageResolvedMissing` dans
+  `examples/stdlib_generics.protoss`, assertions "stdlib PackageRegistry ..."
+  dans `test/test_protoss.ml`.
+- [x] Ajouter registre local/global de packages.
+  Preuves: champs manifest `package_registry_local` et
+  `package_registry_global`, resolution `Workspace.package_registry_alias`,
+  refs `(package-registry ...)` dans `UniverseRoot`, lock et package,
+  assertions "package registry records local registry", "package registry
+  resolves imported package ref", "package registry drift leaves package store
+  untouched" et "package registry records global registry" dans
+  `test/test_protoss.ml`, `README.md`, `CLAUDE.md`.
 
 ## 11. Patches, diff et edition MCP-first
 

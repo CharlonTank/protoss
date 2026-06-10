@@ -2614,6 +2614,24 @@ let () =
   let assoc_values, _ = Runtime.normalize_def stdlib_generics "assocValues" in
   assert_equal "stdlib generic Assoc.values" "[41, 2]"
     (Runtime.value_to_string assoc_values);
+  let package_resolved_local, _ =
+    Runtime.normalize_def stdlib_generics "packageResolvedLocal"
+  in
+  assert_equal "stdlib PackageRegistry local resolver"
+    "Ok {path = \"../workspace\", selector = \"workspace-a@0.4.0\", source = \"local\"}"
+    (Runtime.value_to_string package_resolved_local);
+  let package_resolved_global, _ =
+    Runtime.normalize_def stdlib_generics "packageResolvedGlobal"
+  in
+  assert_equal "stdlib PackageRegistry global resolver"
+    "Ok {path = \"/registry/workspace-a\", selector = \"workspace-a@NoNetworkExceptDeclared\", source = \"global\"}"
+    (Runtime.value_to_string package_resolved_global);
+  let package_resolved_missing, _ =
+    Runtime.normalize_def stdlib_generics "packageResolvedMissing"
+  in
+  assert_equal "stdlib PackageRegistry missing resolver"
+    "Err \"missing package selector: missing@1.0.0\""
+    (Runtime.value_to_string package_resolved_missing);
   let map_age, _ = Runtime.normalize_def stdlib_generics "mapAge" in
   assert_equal "stdlib generic Map.get" "Some 41" (Runtime.value_to_string map_age);
   let map_has_count, _ = Runtime.normalize_def stdlib_generics "mapHasCount" in
@@ -6147,6 +6165,53 @@ let () =
      assert_true "package policy alias mismatch reports policy"
        (contains_substring msg
           "package policy alias mismatch for workspace-a: missing policy RequiresGpu"));
+  let registry_consumer_ws = make_workspace "workspace-consumer-registry" 7 "e" in
+  let registry_file = Filename.concat registry_consumer_ws "packages.registry" in
+  write_file registry_file ("workspace-a@0.4.0=" ^ ws_a ^ "\n");
+  let registry_manifest_path = Filename.concat registry_consumer_ws "protoss.toml" in
+  let registry_manifest_base = Store.read_file registry_manifest_path in
+  write_file registry_manifest_path
+    (registry_manifest_base ^ "package_registry_local = \"packages.registry\"\npackage_imports = [\"workspace-a=workspace-a@0.4.0\"]\npackage_interfaces = [\"workspace-a="
+   ^ interface_hash ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash
+   ^ "\"]\n");
+  let registry_manifest = Workspace.parse_manifest registry_consumer_ws in
+  let registry_package = Workspace.write_package registry_manifest in
+  let registry_package_content = Store.read_file registry_package.package_path in
+  assert_true "package registry records local registry"
+    (contains_substring registry_package_content "package-registry"
+    && contains_substring registry_package_content "local=packages.registry#p2:");
+  assert_true "package registry resolves imported package ref"
+    (contains_substring registry_package_content ("workspace-a=" ^ package_a.package_ref));
+  assert_equal "package registry check ref" registry_package.package_ref
+    (Workspace.check_package registry_manifest).Workspace.package_ref;
+  let registry_dot_before_drift = snapshot (Filename.concat registry_consumer_ws ".protoss") in
+  write_file registry_file ("workspace-a@0.4.0=/missing/workspace-a\n");
+  (try
+     ignore (Workspace.check_package registry_manifest);
+     fail "package registry drift should reject"
+   with Workspace.Error _ -> ());
+  assert_true "package registry drift leaves package store untouched"
+    (registry_dot_before_drift = snapshot (Filename.concat registry_consumer_ws ".protoss"));
+  let global_registry_dir = temp_dir "workspace-global-package-registry" in
+  ensure_dir global_registry_dir;
+  let global_registry_file = Filename.concat global_registry_dir "packages.registry" in
+  write_file global_registry_file ("workspace-a@NoNetworkExceptDeclared=" ^ ws_a ^ "\n");
+  let global_registry_ws = make_workspace "workspace-consumer-global-registry" 7 "f" in
+  let global_registry_manifest_path = Filename.concat global_registry_ws "protoss.toml" in
+  let global_registry_manifest_base = Store.read_file global_registry_manifest_path in
+  write_file global_registry_manifest_path
+    (global_registry_manifest_base ^ "package_registry_global = \"" ^ global_registry_file
+   ^ "\"\npackage_imports = [\"workspace-a=workspace-a@NoNetworkExceptDeclared\"]\npackage_interfaces = [\"workspace-a="
+   ^ interface_hash ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash
+   ^ "\"]\n");
+  let global_registry_manifest = Workspace.parse_manifest global_registry_ws in
+  let global_registry_package = Workspace.write_package global_registry_manifest in
+  let global_registry_content = Store.read_file global_registry_package.package_path in
+  assert_true "package registry records global registry"
+    (contains_substring global_registry_content "package-registry"
+    && contains_substring global_registry_content "global=/");
+  assert_true "package registry resolves global imported package ref"
+    (contains_substring global_registry_content ("workspace-a=" ^ package_a.package_ref));
   trace_test "integration:consumer-package:alias";
   let consumer_package_invariants = Invariants.check_package consumer_ws in
   trace_test "integration:consumer-package:invariants";
