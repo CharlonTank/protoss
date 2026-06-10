@@ -40,7 +40,7 @@ What works now:
 - `invariants` runs executable checks over canonicalization, graph round-trip, graph-first loading, canonical graph migration, normalization, alpha-stability, typed `Process` resume, and typed ledger request/resume events.
 - `invariants package <project>` checks package lock consistency, package descriptor freshness, package interface refs, package interface JSON artifacts, exported capability descriptors, `contractHash`, exported canonical type hashes, imported package freshness, package refs, and audit.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
-- `dune runtest` runs a fast smoke suite for parser/checker/hash/normalization/cache/process/patch rollback. Longer suites are explicit: `dune build @coretest`, `dune build @integrationtest`, `dune build @stdlibtest`, `dune build @selftest`, or `dune build @fulltest`.
+- `dune runtest` runs a fast smoke suite for parser/checker/hash/normalization/cache/process/patch rollback. Longer suites are explicit: `dune build @coretest`, `dune build @integrationtest`, `dune build @stdlibtest`, `dune build @selftest`, or `dune build @fulltest` (aggregates the section aliases and runs them as parallel processes).
 
 Main commands:
 
