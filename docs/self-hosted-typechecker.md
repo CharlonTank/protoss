@@ -21,13 +21,20 @@ checking the prelude, canonicalization, normalization, hashing, graph loading,
 and final program acceptance. The self-hosted typechecker is a reporting pass,
 not a replacement for the kernel.
 
+CLI string reports are cached under `target/self-cache` by default. The cache key
+includes the running `protoss` binary digest, the prelude content hash, the
+self-hosted function name, and the target source hash, so repeated identical
+reports are fast without reusing stale results after code, prelude, or source
+changes. Set `PROTOSS_SELF_CACHE=0` to force a cold interpreted run, or
+`PROTOSS_SELF_CACHE_DIR=<dir>` to choose another cache directory.
+
 Supported in the current kernel-checked subset:
 
 - `Unit`, `Bool`, `Nat`, `String`
 - `List A` for annotated `Nil` and expected-context `Nil`/`Cons`
 - function types
-- top-level `def`, `defcap`, `defpoly`, `defpolycap`, and Nat/List
-  `defrec`/`defrecpoly`
+- top-level `def`, `defcap`, `defpoly`, `defpolycap`, Nat/List
+  `defrec`/`defrecpoly`, and direct-payload Variant `defrec`
 - annotated lambdas, with structural checking of direct body subterms
 - `let` bindings, with structural checking of direct value/body subterms
 - `foldNat`, `foldList`, `foldVariant`, `caseList`, records, fields, explicit
@@ -55,8 +62,9 @@ Supported in the current kernel-checked subset:
 Unsupported constructs are reported with `SELF_TC004` instead of being silently
 accepted. A `Process` value bound by `let` is rejected when the surrounding
 expected type is pure, matching the trusted OCaml kernel rule. Remaining gaps
-include `defrec`/`defrecpoly` over variants and deeper already-applied prefix
-list tails whose tail also needs expected-context-only checking without an
-annotation. The next step toward a fuller self-hosted checker is to cover those
-constructs while continuing to route all recursive expression traversal through
-kernel-accepted structural paths before attempting a self-hosted canonicalizer.
+include Variant `defrec` over structural list payloads, broader `defrecpoly`
+Variant coverage, and deeper already-applied prefix list tails whose tail also
+needs expected-context-only checking without an annotation. The next step toward
+a fuller self-hosted checker is to cover those constructs while continuing to
+route all recursive expression traversal through kernel-accepted structural
+paths before attempting a self-hosted canonicalizer.

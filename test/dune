@@ -1,7 +1,39 @@
 (executable
  (name test_protoss)
+ (modules test_protoss)
+ (libraries protoss unix))
+
+(executable
+ (name smoke)
+ (modules smoke)
  (libraries protoss unix))
 
 (rule
  (alias runtest)
+ (action (run ./smoke.exe)))
+
+(rule
+ (alias coretest)
  (action (run ./test_protoss.exe)))
+
+(rule
+ (alias selftest)
+ (action (setenv PROTOSS_RUN_SELF_HOST_TESTS 1
+          (run ./test_protoss.exe))))
+
+(rule
+ (alias stdlibtest)
+ (action (setenv PROTOSS_RUN_STDLIB_TESTS 1
+          (run ./test_protoss.exe))))
+
+(rule
+ (alias integrationtest)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (run ./test_protoss.exe))))
+
+(rule
+ (alias fulltest)
+ (action (setenv PROTOSS_RUN_STDLIB_TESTS 1
+          (setenv PROTOSS_RUN_SELF_HOST_TESTS 1
+           (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+            (run ./test_protoss.exe))))))

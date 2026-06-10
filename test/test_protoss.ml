@@ -1864,6 +1864,7 @@ let () =
   assert_equal "import path raw text ignored by hash" (Kernel.hash_program imported_a)
     (Kernel.hash_program imported_b);
   let stdlib_generics_path = find_up (Sys.getcwd ()) "examples/stdlib_generics.protoss" in
+  if Sys.getenv_opt "PROTOSS_RUN_STDLIB_TESTS" = Some "1" then (
   let stdlib_generics = Loader.check_file stdlib_generics_path in
   let bumped, _ = Runtime.normalize_def stdlib_generics "bumped" in
   assert_equal "stdlib generic List.map" "[2, 3]" (Runtime.value_to_string bumped);
@@ -2879,7 +2880,9 @@ let () =
   in
   assert_equal "stdlib Json.parseText render round-trip"
     "\"{\\\"name\\\":\\\"Ada\\\",\\\"age\\\":41}\""
-    (Runtime.value_to_string json_parsed_rendered_object);
+    (Runtime.value_to_string json_parsed_rendered_object)
+  ) else
+    print_endline "stdlib interpreter tests skipped (set PROTOSS_RUN_STDLIB_TESTS=1)";
   let module_root = temp_dir "modules" in
   ensure_dir module_root;
   let module_math = Filename.concat module_root "math.protoss" in
@@ -4064,6 +4067,7 @@ let () =
   assert_equal "store dedupe hash" h1 h2;
   assert_true "store dedupe object count" (List.length (Store.list_objects dedupe_store) = 1);
 
+  if Sys.getenv_opt "PROTOSS_RUN_INTEGRATION_TESTS" = Some "1" then (
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
   let init_manifest = Workspace.parse_manifest project_init_root in
@@ -5498,11 +5502,16 @@ let () =
   assert_true "runtime reset recreates a clean runtime"
     (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
   assert_true "runtime reset keeps a single world"
-    (Array.length (Sys.readdir rt_worlds) = 1);
+    (Array.length (Sys.readdir rt_worlds) = 1)
+  ) else
+    print_endline "integration tests skipped (set PROTOSS_RUN_INTEGRATION_TESTS=1)";
 
   print_endline "protoss tests ok"
 
 let () =
+  if Sys.getenv_opt "PROTOSS_RUN_SELF_HOST_TESTS" <> Some "1" then
+    print_endline "self-host frontend tests skipped (set PROTOSS_RUN_SELF_HOST_TESTS=1)"
+  else
   (* ===== Self-hosted frontend: parity with OCaml + conformance goldens =====
      One program = prelude + every driver def, checked once, then each entry is
      normalized through the evaluator. This exercises the Protoss-implemented
@@ -5944,6 +5953,10 @@ let () =
         (contains_substring got "\"name\":\"bump\"");
       assert_true "self typecheck defrec reports polymorphic List recursion"
         (contains_substring got "\"name\":\"copy\"");
+      assert_true "self typecheck defrec reports Variant recursion"
+        (contains_substring got "\"name\":\"sizeTree\"");
+      assert_true "self typecheck defrec reports Variant result"
+        (contains_substring got "\"name\":\"treeSize\"");
       assert_true "self typecheck defrec has no unsupported constructs"
         (contains_substring got "\"unsupported\":[]"));
   register_self_tc_file "__tc_file_defrec_invalid"
@@ -5968,6 +5981,17 @@ let () =
         (contains_substring got "\"definition\":\"badList\"");
       assert_true "self typecheck defrec list input explains List"
         (contains_substring got "defrec list input must be List"));
+  register_self_tc_file "__tc_file_defrec_variant_nonstructural_invalid"
+    "examples/self_host/typecheck_defrec_variant_nonstructural_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck defrec variant nonstructural reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck defrec variant nonstructural reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck defrec variant nonstructural reports definition"
+        (contains_substring got "\"definition\":\"badSize\"");
+      assert_true "self typecheck defrec variant nonstructural explains structural"
+        (contains_substring got "recur argument is not a direct structural subterm"));
   register_self_tc_file "__tc_file_inferred_variants"
     "examples/self_host/typecheck_inferred_variants.protoss"
     (fun got ->

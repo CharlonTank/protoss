@@ -5406,6 +5406,69 @@
                 (typ typ)))
               (get env polyTerms)))))))))
 
+(def Protoss.tcRecurKeyPrefix String "__protoss.recur:")
+(def Protoss.tcRecurResultKey String "__protoss.recur:result")
+
+(def Protoss.tcRecurVarKey (-> String String)
+  (lambda (name String)
+    ((String.concat Protoss.tcRecurKeyPrefix) name)))
+
+(def Protoss.tcRecurFieldKey (-> String (-> String String))
+  (lambda (name String)
+    (lambda (field String)
+      ((String.concat Protoss.tcRecurKeyPrefix)
+        ((String.concat name) ((String.concat ".") field))))))
+
+(def Protoss.tcRecurKey (-> Expr (Maybe String))
+  (lambda (expr Expr)
+    (case expr
+      (PEVar name
+        (variant Some (Protoss.tcRecurVarKey name)))
+      (PEField fieldExpr
+        (case (get fieldExpr target)
+          (PEVar name
+            (variant Some ((Protoss.tcRecurFieldKey name) (get fieldExpr field))))
+          (_ (variant None unit))))
+      (_ (variant None unit)))))
+
+(def TermEnv.insertRecurAllowed
+  (-> String (-> TypeExpr (-> TermEnv TermEnv)))
+  (lambda (key String)
+    (lambda (typ TypeExpr)
+      (lambda (env TermEnv)
+        (((TermEnv.insert key) typ) env)))))
+
+(def TermEnv.insertRecurResult
+  (-> TypeExpr (-> TermEnv TermEnv))
+  (lambda (result TypeExpr)
+    (lambda (env TermEnv)
+      (((TermEnv.insert Protoss.tcRecurResultKey) result) env))))
+
+(def TermEnv.insertDirectRecurPayload
+  (-> TypeEnv (-> TypeExpr (-> String (-> TypeExpr (-> TermEnv TermEnv)))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (target TypeExpr)
+      (lambda (name String)
+        (lambda (payloadType TypeExpr)
+          (lambda (env TermEnv)
+            (let (withPayload TermEnv
+              (case (((Protoss.tcTypeEq typeEnv) target) payloadType)
+                (true (((TermEnv.insertRecurAllowed (Protoss.tcRecurVarKey name)) target) env))
+                (false env)))
+              (case ((Protoss.tcRecordFieldsOfType typeEnv) payloadType)
+                (None _ withPayload)
+                (Some fields
+                  (foldList fields withPayload
+                    (lambda (field ProtossField)
+                      (lambda (acc TermEnv)
+                        (case (((Protoss.tcTypeEq typeEnv) target) (get field typ))
+                          (true
+                            (((TermEnv.insertRecurAllowed
+                              ((Protoss.tcRecurFieldKey name) (get field name)))
+                              target)
+                              acc))
+                          (false acc))))))))))))))
+
 (def TypeEnv.insertAlias (-> String (-> TypeExpr (-> TypeEnv TypeEnv)))
   (lambda (name String)
     (lambda (typ TypeExpr)
@@ -7524,9 +7587,34 @@
             (((Protoss.tcInstantiateType (get instExpr name)) scheme)
               (get instExpr typeArgs)))))))
   (PERecur value
-    (lambda (typeEnv TypeEnv)
-      (lambda (termEnv TermEnv)
-        ((Protoss.tcUnsupported Protoss.tcNoDef) "recur")))))
+    (let (valueCheck (recur value))
+      (lambda (typeEnv TypeEnv)
+        (lambda (termEnv TermEnv)
+          (case (Protoss.tcRecurKey value)
+            (None _ ((Protoss.tcUnsupported Protoss.tcNoDef) "recur"))
+            (Some key
+              (case ((TermEnv.lookup Protoss.tcRecurResultKey) termEnv)
+                (None _ ((Protoss.tcUnsupported Protoss.tcNoDef) "recur"))
+                (Some resultType
+                  (case ((TermEnv.lookup key) termEnv)
+                    (None _
+                      (Protoss.tcErr
+                        ((((((Protoss.tcError "SELF_TC002") Protoss.tcNoDef)
+                          Protoss.tcNoType)
+                          Protoss.tcNoType)
+                          (Protoss.renderExpr value))
+                          "recur argument is not a direct structural subterm")))
+                    (Some targetType
+                      (case ((valueCheck typeEnv) termEnv)
+                        (Err err (variant Err err))
+                        (Ok actualType
+                          (case (((Protoss.tcTypeEq typeEnv) targetType) actualType)
+                            (true (Protoss.tcOk resultType))
+                            (false
+                              ((((Protoss.tcMismatch Protoss.tcNoDef)
+                                targetType)
+                                actualType)
+                                (Protoss.renderExpr value)))))))))))))))))
 
 (def Protoss.tcExpr
   (-> TypeEnv (-> TermEnv (-> Expr (Result TypeError TypeExpr))))
@@ -7925,8 +8013,7 @@
                             (((TermEnv.insert (get letExpr name)) annotation) termEnv)
                             expected)))))))))))))
 	  (PEApply call
-	    (let (fnCheck (recur (get call fn)))
-	      (let (argChecks
+	    (let (argChecks
 	        (foldList (get call args)
 	          (Nil TypecheckExpectedExprChecker)
 	          (lambda (arg Expr)
@@ -7953,25 +8040,12 @@
 	                            scheme)
 	                            (get call args))
 	                            argChecks))))))
-	                (_
-	                  (case ((((Protoss.tcExpectedFnTypeForArgs (get call args)) typeEnv)
-	                          termEnv)
-	                          expected)
-	                    (Ok expectedFn
-	                      (case (((fnCheck typeEnv) termEnv) expectedFn)
-	                        (Ok checkedFn (Protoss.tcOk expected))
-	                        (Err layerErr
-	                          ((((((Protoss.tcCheckPolySpineApplyAs typeEnv) termEnv)
-	                            expected)
-	                            (get call fn))
-	                            (get call args))
-	                            argChecks))))
-	                    (Err argErr
-	                      ((((((Protoss.tcCheckPolySpineApplyAs typeEnv) termEnv)
-	                        expected)
-	                        (get call fn))
-	                        (get call args))
-	                        argChecks)))))))))))
+                (_
+	                  ((((((Protoss.tcCheckPolySpineApplyAs typeEnv) termEnv)
+	                    expected)
+	                    (get call fn))
+	                    (get call args))
+	                    argChecks))))))))
   (PERecord fields
     (let (fieldsCheck
       (foldList fields
@@ -8327,11 +8401,33 @@
           ((((Protoss.tcCheckExprAsFallback typeEnv) termEnv) expected)
             (variant PEInst instExpr))))))
   (PERecur value
-    (lambda (typeEnv TypeEnv)
-      (lambda (termEnv TermEnv)
-        (lambda (expected TypeExpr)
-          ((((Protoss.tcCheckExprAsFallback typeEnv) termEnv) expected)
-            (variant PERecur value)))))))
+    (let (valueCheck (recur value))
+      (lambda (typeEnv TypeEnv)
+        (lambda (termEnv TermEnv)
+          (lambda (expected TypeExpr)
+            (case (Protoss.tcRecurKey value)
+              (None _ ((Protoss.tcUnsupported Protoss.tcNoDef) "recur"))
+              (Some key
+                (case ((TermEnv.lookup Protoss.tcRecurResultKey) termEnv)
+                  (None _ ((Protoss.tcUnsupported Protoss.tcNoDef) "recur"))
+                  (Some resultType
+                    (case (((Protoss.tcTypeEq typeEnv) expected) resultType)
+                      (false
+                        ((((Protoss.tcMismatch Protoss.tcNoDef)
+                          expected)
+                          resultType)
+                          (Protoss.renderExpr (variant PERecur value))))
+                      (true
+                        (case ((TermEnv.lookup key) termEnv)
+                          (None _
+                            (Protoss.tcErr
+                              ((((((Protoss.tcError "SELF_TC002") Protoss.tcNoDef)
+                                Protoss.tcNoType)
+                                Protoss.tcNoType)
+                                (Protoss.renderExpr value))
+                                "recur argument is not a direct structural subterm")))
+                          (Some targetType
+                            (((valueCheck typeEnv) termEnv) targetType)))))))))))))))
 
 (def Protoss.tcCheckExprAs
   (-> TypeEnv (-> TermEnv (-> TypeExpr (-> Expr (Result TypeError TypeExpr)))))
@@ -8504,6 +8600,135 @@
                           (Ok checkedStep
                             (Protoss.tcOk ((Protoss.tcFun input) result))))))))))))))))
 
+(def Protoss.tcRunDefRecVariantBranchCheck
+  (-> TypeEnv (-> TermEnv (-> TypeExpr (-> TypeExpr (-> TypeExpr
+    (-> TypecheckExpectedCaseBranchCheck (Result TypeError TypeExpr)))))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (termEnv TermEnv)
+      (lambda (target TypeExpr)
+        (lambda (result TypeExpr)
+          (lambda (payloadType TypeExpr)
+            (lambda (branch TypecheckExpectedCaseBranchCheck)
+              (case (get branch binder)
+                (None _
+                  (case (((Protoss.tcTypeEq typeEnv) Protoss.tcUnit) payloadType)
+                    (true
+                      ((((get branch bodyCheck) typeEnv)
+                        ((TermEnv.insertRecurResult result) termEnv))
+                        result))
+                    (false
+                      (Protoss.tcErr
+                        ((((((Protoss.tcError "SELF_TC009") Protoss.tcNoDef)
+                          (Protoss.tcSomeType payloadType))
+                          Protoss.tcNoType)
+                          (get branch constructor))
+                          "variant branch requires payload binder")))))
+                (Some name
+                  (let (payloadEnv TermEnv
+                    (((TermEnv.insert name) payloadType) termEnv))
+                    (let (recurEnv TermEnv
+                      (((((TermEnv.insertDirectRecurPayload typeEnv) target)
+                        name)
+                        payloadType)
+                        ((TermEnv.insertRecurResult result) payloadEnv)))
+                      ((((get branch bodyCheck) typeEnv) recurEnv) result))))))))))))
+
+(def Protoss.tcCheckDefRecVariantBranches
+  (-> TypeEnv (-> TermEnv (-> TypeExpr (-> TypeExpr
+    (-> (List TypecheckExpectedCaseBranchCheck)
+      (-> (List ProtossVariantCase) (-> Expr (Result TypeError TypeExpr))))))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (termEnv TermEnv)
+      (lambda (target TypeExpr)
+        (lambda (result TypeExpr)
+          (lambda (branches (List TypecheckExpectedCaseBranchCheck))
+            (lambda (cases (List ProtossVariantCase))
+              (lambda (summaryExpr Expr)
+                (case ((Protoss.tcUnknownExpectedVariantCheckBranch cases) branches)
+                  (Some unknown
+                    (Protoss.tcErr
+                      ((((((Protoss.tcError "SELF_TC009") Protoss.tcNoDef)
+                        Protoss.tcNoType)
+                        Protoss.tcNoType)
+                        unknown)
+                        ((String.concat "variant case unknown branch: ") unknown))))
+                  (None _
+                    (case ((Protoss.tcMissingExpectedVariantCheckBranch cases) branches)
+                      (Some missing
+                        (Protoss.tcErr
+                          ((((((Protoss.tcError "SELF_TC009") Protoss.tcNoDef)
+                            Protoss.tcNoType)
+                            Protoss.tcNoType)
+                            missing)
+                            ((String.concat "variant case missing branch: ") missing))))
+                      (None _
+                        (foldList cases
+                          (Protoss.tcOk result)
+                          (lambda (caseDecl ProtossVariantCase)
+                            (lambda (acc (Result TypeError TypeExpr))
+                              (case acc
+                                (Err err (variant Err err))
+                                (Ok ignored
+                                  (case ((Protoss.tcFindExpectedCaseBranchCheck
+                                          (get caseDecl name))
+                                          branches)
+                                    (None _
+                                      (Protoss.tcErr
+                                        ((((((Protoss.tcError "SELF_TC009") Protoss.tcNoDef)
+                                          Protoss.tcNoType)
+                                          Protoss.tcNoType)
+                                          (get caseDecl name))
+                                          ((String.concat "variant case missing branch: ")
+                                            (get caseDecl name)))))
+                                    (Some branch
+                                      ((((((Protoss.tcRunDefRecVariantBranchCheck typeEnv)
+                                        termEnv)
+                                        target)
+                                        result)
+                                        (get caseDecl payload))
+                                        branch))))))))))))))))))))
+
+(def Protoss.tcCheckDefRecVariant
+  (-> TypeEnv (-> TermEnv (-> TypeExpr (-> TypeExpr (-> ProtossDefRecVariant
+    (Result TypeError TypeExpr))))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (termEnv TermEnv)
+      (lambda (input TypeExpr)
+        (lambda (result TypeExpr)
+          (lambda (body ProtossDefRecVariant)
+            (case ((Protoss.tcVariantCasesOfType typeEnv) input)
+              (None _
+                (Protoss.tcErr
+                  ((((((Protoss.tcError "SELF_TC002") Protoss.tcNoDef)
+                    Protoss.tcNoType)
+                    (Protoss.tcSomeType input))
+                    (Protoss.renderType input))
+                    "defrec variant input must be Variant")))
+              (Some variantCases
+                (let (branchChecks (List TypecheckExpectedCaseBranchCheck)
+                  (foldList (get body branches)
+                    (Nil TypecheckExpectedCaseBranchCheck)
+                    (lambda (branch ProtossCaseBranch)
+                      (lambda (acc (List TypecheckExpectedCaseBranchCheck))
+                        (let (bodyCheck (Protoss.tcCheckExprAsGo (get branch body)))
+                          (Cons TypecheckExpectedCaseBranchCheck
+                            (record
+                              (constructor (get branch constructor))
+                              (binder (get branch binder))
+                              (bodyCheck bodyCheck))
+                            acc))))))
+                  (let (paramEnv TermEnv
+                    (((TermEnv.insert (get body param)) input) termEnv))
+                    (case (((((((Protoss.tcCheckDefRecVariantBranches typeEnv) paramEnv)
+                            input)
+                            result)
+                            branchChecks)
+                            variantCases)
+                            (variant PEVar (get body param)))
+                      (Err err (variant Err err))
+                      (Ok checkedBranches
+                        (Protoss.tcOk ((Protoss.tcFun input) result))))))))))))))
+
 (def Protoss.tcCheckDefRec
   (-> TypeEnv (-> TermEnv (-> ProtossDefRec (Result TypeError TypeExpr))))
   (lambda (typeEnv TypeEnv)
@@ -8524,7 +8749,10 @@
                     (get pair second))
                     body))
                 (PDRVariant body
-                  ((Protoss.tcUnsupported Protoss.tcNoDef) "defrec variant"))))
+                  (((((Protoss.tcCheckDefRecVariant typeEnv) termEnv)
+                    (get pair first))
+                    (get pair second))
+                    body))))
             (_ ((Protoss.tcUnsupported Protoss.tcNoDef) "defrec requires function type"))))
           (case checked
             (Err err (variant Err ((Protoss.tcErrorWithDefinition (get def name)) err)))
@@ -8557,12 +8785,9 @@
                     (Err err ((TypecheckState.withError err) state))
                     (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))
                 (PDDefRec def
-                  (case (get def body)
-                    (PDRVariant body ((TypecheckState.addUnsupported (get def name)) state))
-                    (_
-                      (case (((Protoss.tcCheckDefRec typeEnv) termEnv) def)
-                        (Err err ((TypecheckState.withError err) state))
-                        (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))))
+                  (case (((Protoss.tcCheckDefRec typeEnv) termEnv) def)
+                    (Err err ((TypecheckState.withError err) state))
+                    (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))
                 (_ state)))))))))
 
 (def Protoss.tcDecls (-> (List Decl) (Result TypeError TypecheckReport))

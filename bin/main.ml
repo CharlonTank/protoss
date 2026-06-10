@@ -824,10 +824,45 @@ let read_source path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
-let self_driver_checked ~typ driver_expr =
-  let prelude = read_source (prelude_path ()) in
+let self_cache_enabled () =
+  match Sys.getenv_opt "PROTOSS_SELF_CACHE" with
+  | Some v ->
+      let v = String.lowercase_ascii (String.trim v) in
+      not (v = "0" || v = "false" || v = "off" || v = "no")
+  | None -> true
+
+let self_cache_root () =
+  match Sys.getenv_opt "PROTOSS_SELF_CACHE_DIR" with
+  | Some dir when String.trim dir <> "" -> dir
+  | _ -> Filename.concat "target" "self-cache"
+
+let self_binary_digest () =
+  try
+    if Sys.file_exists Sys.executable_name && not (Sys.is_directory Sys.executable_name)
+    then Digest.to_hex (Digest.file Sys.executable_name)
+    else Sys.executable_name
+  with _ -> Sys.executable_name
+
+let self_string_cache_key ~prelude ~fn ~source =
+  Protoss.Kernel.hash_string
+    ("self-string-cache-v1\nbinary=" ^ self_binary_digest () ^ "\nprelude="
+   ^ Protoss.Kernel.hash_string prelude ^ "\nfn=" ^ fn ^ "\nsource="
+   ^ Protoss.Kernel.hash_string source ^ "\n")
+
+let self_cache_path key = Filename.concat (self_cache_root ()) (key ^ ".txt")
+
+let self_driver_checked_from_prelude ~prelude ~typ driver_expr =
   let driver = prelude ^ "\n(def __self_result " ^ typ ^ " (" ^ driver_expr ^ "))\n" in
   Protoss.Parser.parse_string driver |> Protoss.Kernel.check_program
+
+let self_driver_checked ~typ driver_expr =
+  self_driver_checked_from_prelude ~prelude:(read_source (prelude_path ())) ~typ
+    driver_expr
+
+let self_eval_with_prelude ~prelude ~typ driver_expr =
+  let checked = self_driver_checked_from_prelude ~prelude ~typ driver_expr in
+  let value, _ = Protoss.Runtime.eval_entry checked "__self_result" in
+  (checked, value)
 
 let self_eval ~typ driver_expr =
   let checked = self_driver_checked ~typ driver_expr in
@@ -836,12 +871,22 @@ let self_eval ~typ driver_expr =
 
 (* String report produced by a Protoss [String -> String] frontend function. *)
 let self_string fn file =
-  let _, value =
-    self_eval ~typ:"String" (fn ^ " " ^ Protoss.Ast.quote (read_source file))
-  in
-  match value with
-  | Protoss.Runtime.VString s -> s
-  | other -> Protoss.Runtime.value_to_string other
+  let source = read_source file in
+  let prelude = read_source (prelude_path ()) in
+  let cache_key = self_string_cache_key ~prelude ~fn ~source in
+  let cache_path = self_cache_path cache_key in
+  if self_cache_enabled () && Sys.file_exists cache_path then Protoss.Store.read_file cache_path
+  else
+    let _, value =
+      self_eval_with_prelude ~prelude ~typ:"String" (fn ^ " " ^ Protoss.Ast.quote source)
+    in
+    let text =
+      match value with
+      | Protoss.Runtime.VString s -> s
+      | other -> Protoss.Runtime.value_to_string other
+    in
+    if self_cache_enabled () then Protoss.Store.write_file_atomic cache_path text;
+    text
 
 (* Content-addressed DefId, computed by the trusted kernel, of a stdlib def. *)
 let self_def_id name =

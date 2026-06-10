@@ -161,8 +161,6 @@ and suspended_to_cache_key suspended =
   ^ continuation_to_cache_key suspended.cont ^ ") (cap-scope "
   ^ String.concat " " (List.sort_uniq String.compare suspended.cap_scope) ^ ")"
 
-let trace st line = if st.trace_cache then st.trace <- line :: st.trace
-
 let recur_stack_to_cache_key frames =
   match frames with
   | [] -> "recur:none"
@@ -170,6 +168,109 @@ let recur_stack_to_cache_key frames =
       "recur:"
       ^ String.concat ">"
           (List.map (fun frame -> Kernel.hash_string frame.recur_key) frames)
+
+let app_cache_key_budget = 400
+
+let consume_list consume budget xs =
+  List.fold_left
+    (fun acc x -> match acc with None -> None | Some budget -> consume budget x)
+    (Some budget) xs
+
+let rec consume_cterm budget term =
+  if budget <= 0 then None
+  else
+    let budget = budget - 1 in
+    match term with
+    | Kernel.CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CInst _
+    | CRequest _ | CNil _ ->
+        Some budget
+    | CLambda (_, body) | CField (body, _) | CVariant (_, _, body) | CRecur body
+    | CText body | CColumn body | CRow body | CDone body ->
+        consume_cterm budget body
+    | CApp (a, b) | CLet (a, b) | CImage (a, b) | CButton (a, b) | CInput (a, b)
+    | CListView (a, b) | CWhenView (a, b) | CAttr (a, b) | COn (a, b)
+    | CBind (a, _, b) ->
+        Option.bind (consume_cterm budget a) (fun budget -> consume_cterm budget b)
+    | CRecord fields -> consume_list consume_cterm budget (List.map snd fields)
+    | CCase (scrutinee, branches) ->
+        Option.bind (consume_cterm budget scrutinee) (fun budget ->
+            consume_list consume_cbranch budget branches)
+    | CFoldNat (a, b, c) | CFoldList (a, b, c) | CCaseList (a, b, c)
+    | CNode (a, b, c) ->
+        Option.bind
+          (Option.bind (consume_cterm budget a) (fun budget -> consume_cterm budget b))
+          (fun budget -> consume_cterm budget c)
+    | CFoldVariant (_, _, scrutinee, branches) ->
+        Option.bind (consume_cterm budget scrutinee) (fun budget ->
+            consume_list consume_cbranch budget branches)
+    | CCons (_, head, tail) ->
+        Option.bind (consume_cterm budget head) (fun budget -> consume_cterm budget tail)
+
+and consume_cbranch budget = function
+  | Kernel.CBBool (_, body) | CBVariant (_, body) -> consume_cterm budget body
+
+let rec consume_cache_value budget value =
+  if budget <= 0 then None
+  else
+    let budget = budget - 1 in
+    match value with
+    | VUnit | VBool _ | VNat _ | VBuiltinSucc -> Some budget
+    | VString s -> if String.length s > 1024 then None else Some budget
+    | VList (_, xs) -> consume_list consume_cache_value budget xs
+    | VRecord fields -> consume_list consume_cache_value budget (List.map snd fields)
+    | VVariant (_, _, value) | VProcessDone value -> consume_cache_value budget value
+    | VView view -> consume_cache_view budget view
+    | VAttribute attr -> consume_cache_attr budget attr
+    | VClosure (_, body, env, _) ->
+        Option.bind (consume_cterm budget body) (fun budget ->
+            consume_list consume_cache_value budget env)
+    | VProcessRequest suspended -> consume_cache_suspended budget suspended
+
+and consume_cache_view budget = function
+  | _ when budget <= 0 -> None
+  | VText s -> if String.length s > 1024 then None else Some (budget - 1)
+  | VImage (src, alt) ->
+      if String.length src + String.length alt > 2048 then None else Some (budget - 1)
+  | VButton (_, msg) | VInput (_, msg) -> consume_cache_value (budget - 1) msg
+  | VColumn children | VRow children -> consume_list consume_cache_view (budget - 1) children
+  | VNode (tag, attrs, children) ->
+      if String.length tag > 256 then None
+      else
+        Option.bind (consume_list consume_cache_attr (budget - 1) attrs) (fun budget ->
+            consume_list consume_cache_view budget children)
+
+and consume_cache_attr budget = function
+  | _ when budget <= 0 -> None
+  | VAttr (name, value) ->
+      if String.length name + String.length value > 2048 then None else Some (budget - 1)
+  | VOn (_, msg) -> consume_cache_value (budget - 1) msg
+
+and consume_cache_continuation budget = function
+  | _ when budget <= 0 -> None
+  | KDone -> Some (budget - 1)
+  | KBind (inner, body, env, _) ->
+      Option.bind
+        (Option.bind (consume_cache_continuation (budget - 1) inner) (fun budget ->
+             consume_cterm budget body))
+        (fun budget -> consume_list consume_cache_value budget env)
+
+and consume_cache_suspended budget suspended =
+  if budget <= 0 then None else
+  consume_cache_continuation (budget - 1) suspended.cont
+
+let app_cache_key st fv av =
+  match consume_cache_value app_cache_key_budget fv with
+  | None -> None
+  | Some budget -> (
+      match consume_cache_value budget av with
+      | None -> None
+      | Some _ ->
+          Some
+            (Kernel.hash_string
+               ("app-v4:" ^ st.cache_scope ^ ":" ^ recur_stack_to_cache_key st.recur_stack
+              ^ ":" ^ value_to_cache_key fv ^ ":" ^ value_to_cache_key av)))
+
+let trace st line = if st.trace_cache then st.trace <- line :: st.trace
 
 let has_prefix prefix s =
   let lp = String.length prefix in
@@ -510,68 +611,67 @@ and expect_attr = function
   | v -> fail ("expected Attr runtime value, got " ^ value_to_string v)
 
 and eval_app st fv av =
-  let key =
-    Kernel.hash_string
-      ("app-v3:" ^ st.cache_scope ^ ":" ^ recur_stack_to_cache_key st.recur_stack ^ ":"
-     ^ value_to_cache_key fv ^ ":" ^ value_to_cache_key av)
+  let compute () =
+    match fv with
+    | VBuiltinSucc -> (
+        match av with
+        | VNat n -> VNat (n + 1)
+        | v -> fail ("builtin on " ^ value_to_string v))
+    | VClosure (_, Kernel.CGlobal "prim.Nat.eq", closure_env, _) -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.eq", [ av ], [])
+        | [ VNat a ], VNat b -> VBool (a = b)
+        | _ -> fail "prim.Nat.eq expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.toString", closure_env, _) -> (
+        match (closure_env, av) with
+        | [], VNat n -> VString (string_of_int n)
+        | _ -> fail "prim.Nat.toString expects Nat")
+    | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env, _) -> (
+        match (closure_env, av) with
+        | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.concat", [ av ], [])
+        | [ VString a ], VString b -> VString (a ^ b)
+        | _ -> fail "prim.String.concat expects String String")
+    | VClosure (_, Kernel.CGlobal "prim.String.eq", closure_env, _) -> (
+        match (closure_env, av) with
+        | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.eq", [ av ], [])
+        | [ VString a ], VString b -> VBool (String.equal a b)
+        | _ -> fail "prim.String.eq expects String String")
+    | VClosure (_, Kernel.CGlobal "prim.String.length", closure_env, _) -> (
+        match (closure_env, av) with
+        | [], VString s -> VNat (String_prim.length s)
+        | _ -> fail "prim.String.length expects String")
+    | VClosure (_, Kernel.CGlobal "prim.String.slice", closure_env, _) -> (
+        match (closure_env, av) with
+        | [], VString _ -> VClosure (TNat, Kernel.CGlobal "prim.String.slice", [ av ], [])
+        | [ VString _ ], VNat _ ->
+            VClosure (TNat, Kernel.CGlobal "prim.String.slice", closure_env @ [ av ], [])
+        | [ VString s; VNat start ], VNat count -> VString (String_prim.slice s start count)
+        | _ -> fail "prim.String.slice expects String Nat Nat")
+    | VClosure (_, body, closure_env, cap_scope) ->
+        eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
+    | v -> fail ("application of non-function runtime value: " ^ value_to_string v)
   in
-  match Hashtbl.find_opt st.app_cache key with
-  | Some v ->
-      trace st ("cache hit " ^ key);
-      v
-  | None -> (
-      match persistent_cache_get st key with
+  match app_cache_key st fv av with
+  | None ->
+      trace st "cache skip";
+      compute ()
+  | Some key -> (
+      match Hashtbl.find_opt st.app_cache key with
       | Some v ->
-          trace st ("cache hit persistent " ^ key);
-          Hashtbl.add st.app_cache key v;
+          trace st ("cache hit " ^ key);
           v
-      | None ->
-          trace st ("cache miss " ^ key);
-          let result =
-            match fv with
-            | VBuiltinSucc -> (
-                match av with
-                | VNat n -> VNat (n + 1)
-                | v -> fail ("builtin on " ^ value_to_string v))
-            | VClosure (_, Kernel.CGlobal "prim.Nat.eq", closure_env, _) -> (
-                match (closure_env, av) with
-                | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.eq", [ av ], [])
-                | [ VNat a ], VNat b -> VBool (a = b)
-                | _ -> fail "prim.Nat.eq expects Nat Nat")
-            | VClosure (_, Kernel.CGlobal "prim.Nat.toString", closure_env, _) -> (
-                match (closure_env, av) with
-                | [], VNat n -> VString (string_of_int n)
-                | _ -> fail "prim.Nat.toString expects Nat")
-            | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env, _) -> (
-                match (closure_env, av) with
-                | [], VString _ ->
-                    VClosure (TString, Kernel.CGlobal "prim.String.concat", [ av ], [])
-                | [ VString a ], VString b -> VString (a ^ b)
-                | _ -> fail "prim.String.concat expects String String")
-            | VClosure (_, Kernel.CGlobal "prim.String.eq", closure_env, _) -> (
-                match (closure_env, av) with
-                | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.eq", [ av ], [])
-                | [ VString a ], VString b -> VBool (String.equal a b)
-                | _ -> fail "prim.String.eq expects String String")
-            | VClosure (_, Kernel.CGlobal "prim.String.length", closure_env, _) -> (
-                match (closure_env, av) with
-                | [], VString s -> VNat (String_prim.length s)
-                | _ -> fail "prim.String.length expects String")
-            | VClosure (_, Kernel.CGlobal "prim.String.slice", closure_env, _) -> (
-                match (closure_env, av) with
-                | [], VString _ -> VClosure (TNat, Kernel.CGlobal "prim.String.slice", [ av ], [])
-                | [ VString _ ], VNat _ ->
-                    VClosure (TNat, Kernel.CGlobal "prim.String.slice", closure_env @ [ av ], [])
-                | [ VString s; VNat start ], VNat count ->
-                    VString (String_prim.slice s start count)
-                | _ -> fail "prim.String.slice expects String Nat Nat")
-            | VClosure (_, body, closure_env, cap_scope) ->
-                eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
-            | v -> fail ("application of non-function runtime value: " ^ value_to_string v)
-          in
-          Hashtbl.add st.app_cache key result;
-          persistent_cache_put st key result;
-          result)
+      | None -> (
+          match persistent_cache_get st key with
+          | Some v ->
+              trace st ("cache hit persistent " ^ key);
+              Hashtbl.add st.app_cache key v;
+              v
+          | None ->
+              trace st ("cache miss " ^ key);
+              let result = compute () in
+              Hashtbl.add st.app_cache key result;
+              persistent_cache_put st key result;
+              result))
 
 and eval_def st n =
   match Hashtbl.find_opt st.def_cache n with
@@ -601,15 +701,12 @@ let program_cache_scope checked =
       cache_scope_memo := Some (checked, h);
       h
 
-(* Normal forms and sub-evaluations are pure functions of the program, yet the
-   default [eval_entry]/[normalize_def] path rebuilt empty caches on every call —
-   so evaluating N definitions of one program re-parsed and re-evaluated all of
-   their shared dependencies N times. Reuse the def/app caches across calls on
-   the *same* program (matched by physical identity), so shared dependencies are
-   normalized once. Only the all-defaults path shares; any explicit [cache_dir],
-   [trace_cache], or [cache_scope] keeps the previous fresh-cache behavior, so the
-   persistent-cache machinery and its tests are unaffected. Values are identical,
-   so determinism is preserved. *)
+(* Normal forms are pure functions of the program, yet the default
+   [eval_entry]/[normalize_def] path rebuilt empty caches on every call. Reuse
+   caches across calls on the same checked program. [eval_app] skips caching
+   structurally large function/argument pairs before building a textual key, so
+   this shared app cache keeps cheap repeated calls without retaining the huge
+   closure keys that dominate interpreted self-hosted tests. *)
 let shared_caches_memo :
     (Kernel.checked * (string, value) Hashtbl.t * (string, value) Hashtbl.t) option ref =
   ref None

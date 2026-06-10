@@ -24,3 +24,21 @@
 
 (def copied (List String)
   (copy (Cons String "a" (Nil String))))
+
+(variant Tree (params A)
+  (Leaf A)
+  (Node (Tree A)))
+
+(def leaf (Tree Nat)
+  (variant Leaf 1))
+
+(def tree (Tree Nat)
+  (variant Node leaf))
+
+(defrec sizeTree (-> (Tree Nat) Nat)
+  (variant value)
+  (Leaf item 1)
+  (Node child (succ (recur child))))
+
+(def treeSize Nat
+  (sizeTree tree))

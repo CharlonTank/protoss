@@ -1,0 +1,14 @@
+(variant Tree
+  (Leaf Nat)
+  (Node Tree))
+
+(def leaf Tree
+  (variant Leaf 1))
+
+(def tree Tree
+  (variant Node leaf))
+
+(defrec badSize (-> Tree Nat)
+  (variant value)
+  (Leaf item 1)
+  (Node pair (recur tree)))
