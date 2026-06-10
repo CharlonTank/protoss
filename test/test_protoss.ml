@@ -5476,16 +5476,31 @@ let () =
     ("name = \"workspace-modules\"\nversion = \"0.5.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
    ^ mini_stdlib_path
     ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = []\n");
-  write_file (Filename.concat module_ws "src/math.protoss")
+  let module_math_source =
     "(module Demo.Math)\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
-     (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n";
+     (def double (-> Number Number) (lambda (x Number) ((Nat.mul x) hidden)))\n"
+  in
+  let module_math_hash = Kernel.hash_string ("source:" ^ module_math_source) in
+  write_file (Filename.concat module_ws "src/math.protoss") module_math_source;
   write_file (Filename.concat module_ws "src/app.protoss")
-    "(import \"math.protoss\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n";
+    ("(import \"math.protoss#" ^ module_math_hash
+   ^ "\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n");
   let module_manifest = Workspace.parse_manifest module_ws in
   let module_build = Workspace.build module_manifest in
   let module_checked = module_build.Workspace.checked in
   let module_value, _ = Runtime.normalize_def module_checked "result" in
   assert_equal "workspace module export" "8" (Runtime.value_to_string module_value);
+  write_file (Filename.concat module_ws "src/app.protoss")
+    "(import \"math.protoss#p2:bad\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n";
+  (try
+     ignore (Workspace.build module_manifest);
+     fail "workspace import hash mismatch should reject"
+   with Workspace.Error msg ->
+     assert_true "workspace import hash mismatch error"
+       (contains_substring msg "import hash mismatch"));
+  write_file (Filename.concat module_ws "src/app.protoss")
+    ("(import \"math.protoss#" ^ module_math_hash
+   ^ "\")\n(def result Demo.Math.Number (Demo.Math.double 4))\n");
   write_file (Filename.concat module_ws "src/bad.protoss")
     "(def leak Demo.Math.Number Demo.Math.hidden)\n";
   (try

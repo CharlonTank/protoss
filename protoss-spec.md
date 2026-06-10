@@ -238,7 +238,10 @@ listees dans la section "Gates de validation".
 - [x] Ecrire des interfaces publiques content-addressed.
 - [x] Verifier les imports locaux par package ref, interface hash et contract hash.
 - [x] Rejeter le drift source des packages importes.
-- [ ] Supporter imports par hash directement dans la syntaxe source.
+- [x] Supporter imports par hash directement dans la syntaxe source.
+  Preuves: imports `path#p2:...` valides par `Workspace.load_units`,
+  assertion "workspace import hash mismatch error" dans `test/test_protoss.ml`
+  et `README.md`.
 - [ ] Supporter alias humain vers hash `package@semver`.
 - [ ] Supporter resolution par politique `package@policy`.
 - [ ] Inclure harnesses dans les packages.
@@ -454,7 +457,9 @@ listees dans la section "Gates de validation".
 - [x] `NodeId`/node refs dans graph JSON.
 - [x] Package roots prototype.
 - [x] Imports locaux verrouilles par hash.
-- [ ] Imports par hash en syntaxe source.
+- [x] Imports par hash en syntaxe source.
+  Preuves: syntaxe `import "math.protoss#p2:..."`, validation du source hash
+  dans `Workspace.load_units` et test de mismatch dans `test/test_protoss.ml`.
 - [x] Cache d'evaluation.
 - [x] Diff structurel prototype.
 - [ ] Store global cross-project.

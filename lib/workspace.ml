@@ -380,6 +380,16 @@ let empty_stats () = { parsed = 0; reused = 0; typechecked = 0; normalized = 0; 
 
 let source_hash source = Kernel.hash_string ("source:" ^ source)
 
+let import_path_and_hash import =
+  match split_once '#' import with
+  | Some (path, hash) when has_prefix Kernel.hash_prefix hash -> (path, Some hash)
+  | Some _ -> fail ("import hash must use " ^ Kernel.hash_prefix ^ " prefix: " ^ import)
+  | None -> (import, None)
+
+let import_target base import =
+  let path, _ = import_path_and_hash import in
+  normalize_path base path
+
 let local_symbols_of_program (program : program) =
   List.map (fun (d : def) -> d.name) program.defs
   @ List.map (fun (a : type_alias) -> a.type_name) program.type_aliases
@@ -575,9 +585,17 @@ let load_units manifest store stats =
       let base = Filename.dirname path in
       List.iter
         (fun import_path ->
-          let target = normalize_path base import_path in
+          let target = import_target base import_path in
           if Sys.file_exists target then load (path :: stack) target
-          else fail (path ^ ":1:1: missing import: " ^ import_path))
+          else fail (path ^ ":1:1: missing import: " ^ import_path);
+          match snd (import_path_and_hash import_path) with
+          | None -> ()
+          | Some expected ->
+              let actual = source_hash (read_file target) in
+              if not (String.equal actual expected) then
+                fail
+                  (path ^ ":1:1: import hash mismatch for " ^ import_path ^ ": expected "
+                 ^ expected ^ ", got " ^ actual))
         unit.imports)
   in
 	  List.iter (load []) (manifest_roots manifest);
@@ -590,7 +608,7 @@ let unit_by_path (units : unit_load list) path =
 let direct_import_units (units : unit_load list) (unit : unit_load) =
   unit.imports
   |> List.filter_map (fun import_path ->
-         let target = normalize_path (Filename.dirname unit.path) import_path in
+         let target = import_target (Filename.dirname unit.path) import_path in
          unit_by_path units target)
 
 let rec reachable_symbols (units : unit_load list) seen (unit : unit_load) =
@@ -1025,6 +1043,11 @@ let relative_to_root manifest path =
     String.sub path (String.length root_prefix) (String.length path - String.length root_prefix)
   else path
 
+let import_with_relative_path manifest base import =
+  let path, hash = import_path_and_hash import in
+  let rel = normalize_path base path |> relative_to_root manifest in
+  match hash with None -> rel | Some hash -> rel ^ "#" ^ hash
+
 let lock_item name values =
   "(" ^ name
   ^ (match values with [] -> "" | _ -> " " ^ String.concat " " values)
@@ -1436,7 +1459,7 @@ let package_imports manifest =
 
 let unit_lock manifest (unit : unit_load) =
   let rel_import import =
-    normalize_path (Filename.dirname unit.path) import |> relative_to_root manifest
+    import_with_relative_path manifest (Filename.dirname unit.path) import
   in
   lock_item "unit"
     [
