@@ -173,13 +173,53 @@ let validate_event_hash event content =
     failwith
       ("maltyped event " ^ event ^ ": content hash mismatch: expected " ^ expected)
 
+let event_signature_algorithm = "sha256-shared-key"
+
+let event_signature key unsigned_content =
+  Kernel.hash_string
+    ("protoss-ledger-event-signature-v1\nalgorithm=" ^ event_signature_algorithm
+   ^ "\nkey=" ^ key ^ "\n" ^ unsigned_content)
+
+let event_sign_key () =
+  match Sys.getenv_opt "PROTOSS_LEDGER_SIGN_KEY" with
+  | Some key when String.trim key <> "" -> Some key
+  | _ -> None
+
+let event_verify_key () =
+  match Sys.getenv_opt "PROTOSS_LEDGER_VERIFY_KEY" with
+  | Some key when String.trim key <> "" -> Some key
+  | _ -> event_sign_key ()
+
+let event_signature_key_id () =
+  match Sys.getenv_opt "PROTOSS_LEDGER_SIGN_KEY_ID" with
+  | Some key_id when String.trim key_id <> "" -> key_id
+  | _ -> "local"
+
+let is_event_signature_line line =
+  has_prefix "signature-algorithm=" line || has_prefix "signature-key-id=" line
+  || has_prefix "signature=" line
+
+let unsigned_event_content content =
+  content |> String.split_on_char '\n'
+  |> List.filter (fun line -> line <> "" && not (is_event_signature_line line))
+  |> String.concat "\n"
+  |> fun s -> if s = "" then "" else s ^ "\n"
+
+let sign_event_content content =
+  match event_sign_key () with
+  | None -> content
+  | Some key ->
+      let signature = event_signature key content in
+      content ^ "signature-algorithm=" ^ event_signature_algorithm ^ "\nsignature-key-id="
+      ^ event_signature_key_id () ^ "\nsignature=" ^ signature ^ "\n"
+
 let add_event root world payload =
   ensure_dir root;
   let events = Filename.concat root "events" in
   let worlds = Filename.concat root "worlds" in
   ensure_dir events;
   ensure_dir worlds;
-  let content = "world=" ^ world ^ "\n" ^ payload ^ "\n" in
+  let content = sign_event_content ("world=" ^ world ^ "\n" ^ payload ^ "\n") in
   let event_hash = hash ("event:" ^ content) in
   let next_world = hash ("world:" ^ world ^ ":" ^ event_hash) in
   let path = Filename.concat events event_hash in
@@ -271,8 +311,35 @@ let parse_lines content =
 let field name fields =
   List.find_opt (fun (k, _) -> String.equal k name) fields |> Option.map snd
 
+let validate_event_signature event content fields =
+  match
+    (field "signature-algorithm" fields, field "signature-key-id" fields, field "signature" fields)
+  with
+  | None, None, None -> ()
+  | Some algorithm, Some _key_id, Some signature ->
+      if not (String.equal algorithm event_signature_algorithm) then
+        failwith
+          ("maltyped event " ^ event ^ ": unsupported signature algorithm " ^ algorithm);
+      let key =
+        match event_verify_key () with
+        | Some key -> key
+        | None ->
+            failwith
+              ("maltyped event " ^ event
+             ^ ": signed event requires PROTOSS_LEDGER_VERIFY_KEY")
+      in
+      let expected = event_signature key (unsigned_event_content content) in
+      if not (String.equal signature expected) then
+        failwith
+          ("maltyped event " ^ event ^ ": signature mismatch: expected " ^ expected
+         ^ ", got " ^ signature)
+  | _ -> failwith ("maltyped event " ^ event ^ ": incomplete signature fields")
+
 let validate_response_target root event target =
-  let target_fields = parse_lines (read_event root target) in
+  let target_content = read_event root target in
+  validate_event_hash target target_content;
+  let target_fields = parse_lines target_content in
+  validate_event_signature target target_content target_fields;
   let target_need name =
     match field name target_fields with
     | Some value -> value
@@ -348,6 +415,7 @@ let record_external_error root world event code message =
 let validate_event root event content =
   validate_event_hash event content;
   let fields = parse_lines content in
+  validate_event_signature event content fields;
   let need name =
     match field name fields with
     | Some _ -> ()
@@ -671,7 +739,9 @@ let merge root world_a world_b =
   ensure_dir events;
   ensure_dir worlds;
   let event_content =
-    "world=" ^ left ^ "\nkind=merge\nmerge-left=" ^ left ^ "\nmerge-right=" ^ right ^ "\n"
+    sign_event_content
+      ("world=" ^ left ^ "\nkind=merge\nmerge-left=" ^ left ^ "\nmerge-right="
+     ^ right ^ "\n")
   in
   let event_hash = hash ("event:" ^ event_content) in
   let event_path = Filename.concat events event_hash in

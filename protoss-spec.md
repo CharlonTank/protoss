@@ -289,7 +289,11 @@ assertions ledger inspect/replay/diff/fork/merge/metadata dans
   Preuves: `Ledger.add_event`, `Ledger.merge`, `Ledger.replay_events`,
   `Ledger.branches`, assertions "ledger merged" dans `test/test_protoss.ml` et
   `README.md`.
-- [ ] Ajouter verification cryptographique optionnelle des evenements signes.
+- [x] Ajouter verification cryptographique optionnelle des evenements signes.
+  Preuves: `Ledger.sign_event_content`, `Ledger.validate_event_signature`,
+  variables `PROTOSS_LEDGER_SIGN_KEY` / `PROTOSS_LEDGER_VERIFY_KEY`, assertion
+  "ledger signed event rejects signature mismatch" dans `test/test_protoss.ml`,
+  `README.md`.
 - [ ] Lier le ledger de provenance des patches au ledger monde.
 - [x] Ajouter politiques de retention et garbage collection content-addressed.
   Preuves: `Store.gc`, commande `protoss store gc [--sweep --yes]`,

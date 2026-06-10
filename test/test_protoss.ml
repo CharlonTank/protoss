@@ -4205,6 +4205,49 @@ let () =
     ledger_invariants.Invariants.request_codec_ref;
   assert_equal "invariants ledger response codec ref" invariant_response_codec_ref
     ledger_invariants.Invariants.response_codec_ref;
+  let old_sign_key = Sys.getenv_opt "PROTOSS_LEDGER_SIGN_KEY" in
+  let old_verify_key = Sys.getenv_opt "PROTOSS_LEDGER_VERIFY_KEY" in
+  let old_key_id = Sys.getenv_opt "PROTOSS_LEDGER_SIGN_KEY_ID" in
+  let restore_env name = function
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "PROTOSS_LEDGER_SIGN_KEY" old_sign_key;
+      restore_env "PROTOSS_LEDGER_VERIFY_KEY" old_verify_key;
+      restore_env "PROTOSS_LEDGER_SIGN_KEY_ID" old_key_id)
+    (fun () ->
+      Unix.putenv "PROTOSS_LEDGER_SIGN_KEY" "test-ledger-key";
+      Unix.putenv "PROTOSS_LEDGER_VERIFY_KEY" "test-ledger-key";
+      Unix.putenv "PROTOSS_LEDGER_SIGN_KEY_ID" "test-key";
+      let signed_ledger = temp_dir "signed-ledger" in
+      let signed_world = Ledger.init signed_ledger in
+      let signed_req = Ast.AskHuman "signed" in
+      let _signed_value, signed_suspended, signed_request_id, signed_continuation_id =
+        ledger_suspension signed_req [ "Human.ask" ]
+      in
+      let signed_event, _ =
+        Ledger.record_request signed_ledger signed_world signed_req signed_suspended
+          signed_request_id signed_continuation_id [ "Human.ask" ]
+      in
+      let signed_content = Ledger.inspect_event signed_ledger signed_event in
+      assert_true "ledger signed event records algorithm"
+        (contains_substring signed_content "signature-algorithm=sha256-shared-key");
+      assert_true "ledger signed event records key id"
+        (contains_substring signed_content "signature-key-id=test-key");
+      let bad_signed_content =
+        replace_once signed_content "signature=p2:" "signature=p2:bad"
+      in
+      let bad_signed_event = Hashcons.hash ("event:" ^ bad_signed_content) in
+      Store.write_file_atomic (Ledger.event_path signed_ledger bad_signed_event)
+        bad_signed_content;
+      (try
+         ignore (Ledger.inspect_event signed_ledger bad_signed_event);
+         fail "ledger signed event with bad signature should be rejected"
+       with Failure msg ->
+         assert_true "ledger signed event rejects signature mismatch"
+           (contains_substring msg "signature mismatch")));
   let process_graph_dir = temp_dir "invariants-process-graph" in
   ensure_dir process_graph_dir;
   let process_graph_path = Filename.concat process_graph_dir "ask_human.graph.json" in
