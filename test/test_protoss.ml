@@ -5416,6 +5416,9 @@ let () =
   let package_harness_content = "harness smoke = example appMain\n" in
   write_file package_harness_path package_harness_content;
   let package_harness_ref = Harness.file_ref package_harness_content in
+  let package_harness_node_ref =
+    Harness.harness_id (List.hd (Harness.parse package_harness_content))
+  in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";
   Workspace.check_project manifest_a;
@@ -5440,6 +5443,24 @@ let () =
     (contains_substring universe_root_content "(harnesses (harness "
     && contains_substring universe_root_content "harness/smoke.pth"
     && contains_substring universe_root_content package_harness_ref);
+  let package_harness_graph_ref = Harness.graph_ref (Workspace.harness_sources manifest_a) in
+  assert_true "project universe root records harness graph"
+    (contains_substring universe_root_content ("(harness-graph " ^ package_harness_graph_ref));
+  let package_harness_graph_content =
+    Store.read_file (Workspace.harness_graph_path build_a.store)
+  in
+  let package_harness_graph = Json.parse package_harness_graph_content in
+  assert_equal "project harness graph format" Harness.graph_format
+    (json_string_field "format" package_harness_graph);
+  assert_equal "project harness graph hash" package_harness_graph_ref
+    (json_string_field "harnessGraphHash" package_harness_graph);
+  assert_equal "project harness graph count" "1"
+    (string_of_int (json_nat_field "harnessCount" package_harness_graph));
+  let package_harness_graph_item = List.hd (json_array_field "harnesses" package_harness_graph) in
+  assert_equal "project harness graph source" "harness/smoke.pth"
+    (json_string_field "source" package_harness_graph_item);
+  assert_equal "project harness graph id" package_harness_node_ref
+    (json_string_field "harnessId" package_harness_graph_item);
   assert_true "project universe root records policies"
     (contains_substring universe_root_content "(policies \"NoNetworkExceptDeclared\")");
   assert_true "project store list" (String.contains (Workspace.list_store build_a.store) 'a');
@@ -5449,6 +5470,18 @@ let () =
   assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
   assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
   trace_test "integration:workspace-a:audit";
+  let harness_graph_corrupt_root = temp_dir "workspace-harness-graph-corrupt" in
+  copy_tree ws_a harness_graph_corrupt_root;
+  let harness_graph_corrupt_manifest = Workspace.parse_manifest harness_graph_corrupt_root in
+  write_file
+    (Workspace.harness_graph_path (Workspace.store_root harness_graph_corrupt_manifest))
+    "{\"format\":\"bad\"}\n";
+  (try
+     ignore (Workspace.audit harness_graph_corrupt_manifest);
+     fail "audit should reject corrupt harness graph"
+   with Workspace.Error msg ->
+     assert_true "project audit rejects corrupt harness graph"
+       (contains_substring msg "harness graph"));
   let universe_root_corrupt_root = temp_dir "workspace-universe-root-corrupt" in
   copy_tree ws_a universe_root_corrupt_root;
   let universe_root_corrupt_manifest = Workspace.parse_manifest universe_root_corrupt_root in

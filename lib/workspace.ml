@@ -307,6 +307,8 @@ let universe_root_content_path store = Filename.concat store "universe.root.cont
 
 let host_contract_path store = Filename.concat store "host.contract.json"
 
+let harness_graph_path store = Filename.concat store "harness.graph.json"
+
 let host_contract_current_path store = Filename.concat store "host_contract"
 
 let host_contract_object_path store contract_hash =
@@ -1028,6 +1030,15 @@ let harness_items manifest =
 
 let harnesses_item manifest = lock_item "harnesses" (harness_items manifest)
 
+let harness_sources manifest =
+  collect_harness_files (Filename.concat manifest.root "harness")
+  |> List.map (fun path -> (relative_to_root manifest path, read_file path))
+
+let harness_graph_ref_item manifest =
+  lock_item "harness-graph" [ Harness.graph_ref (harness_sources manifest) ]
+
+let harness_graph_content manifest = Harness.graph_json (harness_sources manifest)
+
 let universe_type_item (alias : type_alias) =
   lock_item "type"
     [
@@ -1075,6 +1086,7 @@ let universe_root_content manifest prepared world_refs =
       lock_item "defs" def_items;
       lock_item "types" type_items;
       harnesses_item manifest;
+      harness_graph_ref_item manifest;
       lock_string_list "policies" manifest.policies;
       lock_string_list "world-refs" world_refs;
     ]
@@ -1175,6 +1187,7 @@ let build_prepared ?(write = true) ?lock_hash manifest prepared =
       List.iter
         (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
         prepared.checked.defs);
+    write_file (harness_graph_path store) (harness_graph_content manifest);
     write_file (Filename.concat (builds_dir store) (sanitize_id prepared.build_id ^ ".build"))
       (build_record_content manifest prepared lock_hash universe_root);
     write_file (Filename.concat store "current") (prepared.build_id ^ "\n");
@@ -2997,6 +3010,24 @@ let audit_host_contract store checked =
     fail ("content-addressed host contract mismatch: " ^ object_path);
   ignore (Canonical_ir.check_graph_host_contract graph_json stored)
 
+let audit_harness_graph manifest store =
+  let expected = harness_graph_content manifest in
+  let path = harness_graph_path store in
+  if not (Sys.file_exists path) then fail "missing harness graph: harness.graph.json";
+  let stored = read_file path in
+  if not (String.equal stored expected) then fail "harness graph mismatch: harness.graph.json";
+  let graph =
+    try Json.parse stored with Json.Error msg -> fail ("invalid harness graph JSON: " ^ msg)
+  in
+  match Json.field "harnessGraphHash" graph with
+  | Some (Json.String hash) when String.equal hash (Harness.graph_ref (harness_sources manifest)) -> ()
+  | Some (Json.String hash) ->
+      fail
+        ("harness graph hash mismatch: expected "
+        ^ Harness.graph_ref (harness_sources manifest)
+        ^ ", got " ^ hash)
+  | _ -> fail "harness graph missing hash: harnessGraphHash"
+
 let audit_universe_root manifest store =
   let prepared = prepare_build manifest in
   let expected_content = universe_root_content manifest prepared (read_world_refs store) in
@@ -3057,6 +3088,7 @@ let audit manifest =
   audit_program_canonical store checked;
   let current_graph_hash = audit_program_graph store checked in
   audit_host_contract store checked;
+  audit_harness_graph manifest store;
   ignore (audit_universe_root manifest store);
   audit_all_store_graphs store current_graph_hash;
   List.iter

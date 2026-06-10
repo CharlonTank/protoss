@@ -196,6 +196,45 @@ let kind_name = function
   | Diagnostic _ -> "diagnostic"
   | AiEval _ -> "ai-eval"
 
+let graph_format = "protoss-harness-graph-v1"
+
+let source_harnesses sources =
+  sources
+  |> List.concat_map (fun (source, content) ->
+         parse content |> List.map (fun harness -> (source, harness)))
+
+let graph_canonical sources =
+  graph_format ^ "\n"
+  ^ String.concat "\n"
+      (source_harnesses sources
+      |> List.map (fun (source, harness) ->
+             "(source " ^ Ast.quote source ^ ") " ^ canonical harness))
+
+let graph_ref sources = Kernel.hash_string (graph_canonical sources)
+
+let graph_harness_json (source, harness) =
+  Kernel.json_obj
+    [
+      Kernel.json_field "source" (Kernel.json_string source);
+      Kernel.json_field "name" (Kernel.json_string harness.name);
+      Kernel.json_field "harnessId" (Kernel.json_string (harness_id harness));
+      Kernel.json_field "kind" (Kernel.json_string (kind_name harness.kind));
+      Kernel.json_field "canonical" (Kernel.json_string (canonical harness));
+    ]
+
+let graph_json sources =
+  let harnesses = source_harnesses sources in
+  Kernel.json_obj
+    [
+      Kernel.json_field "format" (Kernel.json_string graph_format);
+      Kernel.json_field "hashAlgorithm" (Kernel.json_string Kernel.hash_algorithm);
+      Kernel.json_field "hashPrefix" (Kernel.json_string Kernel.hash_prefix);
+      Kernel.json_field "harnessGraphHash" (Kernel.json_string (graph_ref sources));
+      Kernel.json_field "harnessCount" (string_of_int (List.length harnesses));
+      Kernel.json_field "harnesses" (Kernel.json_array graph_harness_json harnesses);
+    ]
+  ^ "\n"
+
 let normalize_text checked entry =
   let value, _ = Runtime.normalize_def checked entry in
   (value, Runtime.value_to_string value)

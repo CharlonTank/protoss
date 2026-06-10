@@ -434,7 +434,12 @@ parser", "harness report" et "harness failing" dans `test/test_protoss.ml`,
   Preuves: `Harness.parse`, grammaire `harness name = example def` et
   `harness name = unit def == expected`, assertion "harness parser
   declarations" dans `test/test_protoss.ml`, `README.md`.
-- [ ] Stocker les harnesses dans le graphe canonique.
+- [x] Stocker les harnesses dans le graphe canonique.
+  Preuves: `Harness.graph_json`, format `protoss-harness-graph-v1`, fichier
+  `.protoss/store/harness.graph.json`, champ `harness-graph` du
+  `UniverseRoot`, assertions "project harness graph format", "project harness
+  graph hash", "project harness graph id" et "project audit rejects corrupt
+  harness graph" dans `test/test_protoss.ml`, `README.md`.
 - [x] Hasher les harnesses avec `HarnessId = H(canonicalBytes(harness))`.
   Preuves: `Harness.canonical_bytes`, `Harness.harness_id`,
   `Harness.file_ref`, champ `(harness-id ...)` des locks/packages/universe,
