@@ -79,6 +79,7 @@ dune exec protoss -- capabilities examples/ask_human.protoss
 dune exec protoss -- capabilities --project examples/web/todo_app
 dune exec protoss -- duplicates examples/basic.protoss
 dune exec protoss -- duplicates --project examples/web/todo_app
+dune exec protoss -- termination examples/basic.protoss main
 
 dune exec protoss -- ledger inspect <WorldRefOrEventRef>
 dune exec protoss -- ledger replay <WorldRef>

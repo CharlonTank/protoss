@@ -1105,6 +1105,13 @@ let () =
   in
   assert_equal "defrec Nat desugars to foldNat" (Kernel.hash_program defrec_nat_explicit)
     (Kernel.hash_program defrec_nat);
+  let defrec_nat_termination = Kernel.termination_explanation_text defrec_nat "count" in
+  assert_true "termination explanation names definition"
+    (contains_substring defrec_nat_termination "definition=count");
+  assert_true "termination explanation reports foldNat"
+    (contains_substring defrec_nat_termination "foldNat=1");
+  assert_true "termination explanation reports structural status"
+    (contains_substring defrec_nat_termination "status=structural-fold");
   let four, _ = Runtime.normalize_def defrec_nat "four" in
   assert_equal "defrec Nat normalization" "4" (Runtime.value_to_string four);
 

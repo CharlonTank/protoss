@@ -14,6 +14,7 @@ let usage () =
      \       protoss compare <file-a> <file-b> | protoss compare --graph <graph-a.json> <graph-b.json> | protoss compare --project <project-a> <project-b>\n\
      \       protoss capabilities <file> | protoss capabilities --project <project>\n\
      \       protoss duplicates <file> | protoss duplicates --project <project>\n\
+     \       protoss termination <file> <definition>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -263,6 +264,12 @@ let command_duplicates = function
       in
       let build = Protoss.Workspace.build ~write:false manifest in
       print_string (duplicate_audit_text build.Protoss.Workspace.checked)
+  | _ -> usage ()
+
+let command_termination = function
+  | [ file; name ] ->
+      print_string
+        (Protoss.Kernel.termination_explanation_text (parse_and_check file) name)
   | _ -> usage ()
 
 let canonical_program checked =
@@ -1263,6 +1270,7 @@ let () =
       | "compare" :: args -> command_compare args
       | "capabilities" :: args -> command_capabilities args
       | "duplicates" :: args -> command_duplicates args
+      | "termination" :: args -> command_termination args
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--ptb"; file ] -> command_canon_ptb file
       | [ "canon"; "--graph"; file ] -> command_canon_graph file

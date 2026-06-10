@@ -328,6 +328,15 @@ val checked_to_graph_json : checked -> string
 val checked_to_graph_json_legacy_v1 : checked -> string
 val checked_to_graph_content_hash_legacy_v1 : checked -> string
 val checked_def_by_name : checked -> string -> checked_def option
+type termination_counts = {
+  fold_nat : int;
+  fold_list : int;
+  fold_variant : int;
+  recur : int;
+}
+val termination_counts_term : cterm -> termination_counts
+val termination_status : termination_counts -> string
+val termination_explanation_text : checked -> string -> string
 val shift : int -> int -> cterm -> cterm
 val shift_branch : int -> int -> cbranch -> cbranch
 val subst : int -> cterm -> cterm -> cterm

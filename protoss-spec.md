@@ -141,7 +141,9 @@ listees dans la section "Gates de validation".
 - [ ] Supporter coinduction productive.
 - [ ] Supporter automates explicitement productifs.
 - [ ] Ajouter des tests de preservation/progression approximatifs par fixtures.
-- [ ] Ajouter une commande d'explication de terminaison par definition.
+- [x] Ajouter une commande d'explication de terminaison par definition.
+  Preuves: `protoss termination <file> <definition>`, `test/test_protoss.ml`
+  assertion "termination explanation" et `README.md`.
 
 ## 6. Evaluation, cache et memoisation
 

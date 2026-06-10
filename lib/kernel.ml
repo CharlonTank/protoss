@@ -3813,6 +3813,103 @@ let checked_to_graph_content_hash_legacy_v1 checked =
 let checked_def_by_name checked name =
   checked.defs |> List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name)
 
+type termination_counts = {
+  fold_nat : int;
+  fold_list : int;
+  fold_variant : int;
+  recur : int;
+}
+
+let termination_zero = { fold_nat = 0; fold_list = 0; fold_variant = 0; recur = 0 }
+
+let termination_add a b =
+  {
+    fold_nat = a.fold_nat + b.fold_nat;
+    fold_list = a.fold_list + b.fold_list;
+    fold_variant = a.fold_variant + b.fold_variant;
+    recur = a.recur + b.recur;
+  }
+
+let termination_inc_fold_nat c = { c with fold_nat = c.fold_nat + 1 }
+
+let termination_inc_fold_list c = { c with fold_list = c.fold_list + 1 }
+
+let termination_inc_fold_variant c = { c with fold_variant = c.fold_variant + 1 }
+
+let termination_inc_recur c = { c with recur = c.recur + 1 }
+
+let rec termination_counts_term = function
+  | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CNil _ | CRequest _ ->
+      termination_zero
+  | CLambda (_, body) | CField (body, _) | CVariant (_, _, body) | CText body
+  | CColumn body | CRow body | CDone body ->
+      termination_counts_term body
+  | CRecur body -> termination_inc_recur (termination_counts_term body)
+  | CApp (a, b) | CLet (a, b) | CCons (_, a, b) | CImage (a, b) | CButton (a, b)
+  | CInput (a, b) | CListView (a, b) | CWhenView (a, b) | CAttr (a, b) | COn (a, b)
+  | CBind (a, _, b) ->
+      termination_add (termination_counts_term a) (termination_counts_term b)
+  | CRecord fields ->
+      List.fold_left
+        (fun acc (_, value) -> termination_add acc (termination_counts_term value))
+        termination_zero fields
+  | CInst _ -> termination_zero
+  | CCase (scrutinee, branches) ->
+      termination_add (termination_counts_term scrutinee)
+        (termination_counts_branches branches)
+  | CFoldNat (index, zero, step) ->
+      termination_inc_fold_nat
+        (List.fold_left
+           (fun acc term -> termination_add acc (termination_counts_term term))
+           termination_zero [ index; zero; step ])
+  | CFoldVariant (_, _, scrutinee, branches) ->
+      termination_inc_fold_variant
+        (termination_add (termination_counts_term scrutinee)
+           (termination_counts_branches branches))
+  | CFoldList (items, zero, step) ->
+      termination_inc_fold_list
+        (List.fold_left
+           (fun acc term -> termination_add acc (termination_counts_term term))
+           termination_zero [ items; zero; step ])
+  | CCaseList (items, nil_body, cons_body) ->
+      List.fold_left
+        (fun acc term -> termination_add acc (termination_counts_term term))
+        termination_zero [ items; nil_body; cons_body ]
+  | CNode (tag, attrs, children) ->
+      List.fold_left
+        (fun acc term -> termination_add acc (termination_counts_term term))
+        termination_zero [ tag; attrs; children ]
+
+and termination_counts_branches branches =
+  List.fold_left
+    (fun acc -> function
+      | CBBool (_, body) | CBVariant (_, body) ->
+          termination_add acc (termination_counts_term body))
+    termination_zero branches
+
+let termination_status counts =
+  if counts.recur > 0 then "structural-recursive"
+  else if counts.fold_nat + counts.fold_list + counts.fold_variant > 0 then "structural-fold"
+  else "trivial"
+
+let termination_explanation_text checked name =
+  match checked_def_by_name checked name with
+  | None -> fail ("unknown definition for termination explanation: " ^ name)
+  | Some def ->
+      let counts = termination_counts_term def.cterm in
+      let explanation =
+        match termination_status counts with
+        | "trivial" -> "no recursion or structural fold in canonical body"
+        | "structural-recursive" ->
+            "recursive calls are guarded by structural foldVariant recur"
+        | _ -> "definition uses structural fold(s); general recursion is rejected before canonicalization"
+      in
+      "definition=" ^ def.def.name ^ "\ndef-id=" ^ def.def_id ^ "\ntype="
+      ^ string_of_typ def.def.typ ^ "\nstatus=" ^ termination_status counts ^ "\nfoldNat="
+      ^ string_of_int counts.fold_nat ^ "\nfoldList=" ^ string_of_int counts.fold_list
+      ^ "\nfoldVariant=" ^ string_of_int counts.fold_variant ^ "\nrecur="
+      ^ string_of_int counts.recur ^ "\nexplanation=" ^ explanation ^ "\n"
+
 let rec shift amount cutoff = function
   | CUnit -> CUnit
   | CBool b -> CBool b
