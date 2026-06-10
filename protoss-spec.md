@@ -63,7 +63,7 @@ listees dans la section "Gates de validation".
 - [x] Ajouter une fixture equivalente `.pt`.
 - [x] Ajouter une fixture equivalente `.ptc`.
 - [x] Ajouter une fixture equivalente `.ptb`.
-- [ ] Rejeter toute vue dont le hash diverge du canon.
+- [x] Rejeter toute vue dont le hash diverge du canon.
 - [x] Documenter la version du format canonique binaire.
 
 ## 3. Syntaxe humaine Protoss/H
@@ -105,10 +105,10 @@ listees dans la section "Gates de validation".
 - [x] Valider le graphe JSON charge depuis disque.
 - [x] Rejeter les champs inconnus dans le JSON canonique.
 - [x] Migrer explicitement les graphes vers le format courant.
-- [ ] Specifier le format Protoss/C officiel avec variables De Bruijn visibles.
+- [x] Specifier le format Protoss/C officiel avec variables De Bruijn visibles.
 - [x] Emettre et parser Protoss/C comme format public `.ptc`.
-- [ ] Interdire tout nom local semantique dans `.ptc`.
-- [ ] Trier canoniquement tous les champs dans `.ptc`.
+- [x] Interdire tout nom local semantique dans `.ptc`.
+- [x] Trier canoniquement tous les champs dans `.ptc`.
 - [x] Ajouter des tests golden `.ptc`.
 
 ## 5. Noyau semantique total
