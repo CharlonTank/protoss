@@ -530,13 +530,19 @@ let resolve_program_types program =
   { program with type_aliases = expanded_aliases; defs }
 
 let collect_deps defs =
-  let def_names = List.map (fun d -> d.name) defs in
-  let is_global n = List.exists (String.equal n) def_names in
+  let global_names = Hashtbl.create 1024 in
+  List.iter (fun d -> Hashtbl.replace global_names d.name ()) defs;
+  let is_global n = Hashtbl.mem global_names n in
+  (* Per-definition membership set mirroring [acc], so dedup is O(1) instead of
+     a linear scan of the accumulated dependencies. *)
+  let seen = Hashtbl.create 64 in
   let rec expr bound acc = function
     | EUnit | EBool _ | ENat _ | EString _ | ERequest _ | ENil _ | ENilInfer -> acc
     | EName n ->
         if List.exists (String.equal n) bound || is_builtin n then acc
-        else if is_global n && not (List.exists (String.equal n) acc) then n :: acc
+        else if is_global n && not (Hashtbl.mem seen n) then (
+          Hashtbl.add seen n ();
+          n :: acc)
         else acc
     | ELambda (x, _, body) | ELambdaInfer (x, body) -> expr (x :: bound) acc body
     | EApp (f, x) -> expr bound (expr bound acc f) x
@@ -549,7 +555,10 @@ let collect_deps defs =
     | EField (e, _) -> expr bound acc e
     | EVariant (_, _, e) | EVariantInferred (_, e) -> expr bound acc e
     | EInst (n, _) ->
-        if is_global n && not (List.exists (String.equal n) acc) then n :: acc else acc
+        if is_global n && not (Hashtbl.mem seen n) then (
+          Hashtbl.add seen n ();
+          n :: acc)
+        else acc
     | ECase (e, branches) ->
         List.fold_left
           (fun a -> function
@@ -583,10 +592,31 @@ let collect_deps defs =
     | EBind (p, x, _, body) | EBindInfer (p, x, body) ->
         expr (x :: bound) (expr bound acc p) body
   in
-  List.map (fun d -> (d.name, expr [] [] d.body)) defs
+  List.map
+    (fun d ->
+      Hashtbl.reset seen;
+      (d.name, expr [] [] d.body))
+    defs
+
+(* [dependencies_of_defs] is called once per definition by loaders, builds,
+   diffs and audits; recomputing the whole dependency table on each call is
+   quadratic in program size. Tables are memoized by physical identity of the
+   definition list, keeping a few recent programs (diff compares two). *)
+let deps_table_memo : (def list * (string, string list) Hashtbl.t) list ref = ref []
+
+let deps_table defs =
+  match List.find_opt (fun (d, _) -> d == defs) !deps_table_memo with
+  | Some (_, table) -> table
+  | None ->
+      let table = Hashtbl.create 256 in
+      List.iter
+        (fun (name, deps) -> if not (Hashtbl.mem table name) then Hashtbl.add table name deps)
+        (collect_deps defs);
+      deps_table_memo := (defs, table) :: List.filteri (fun i _ -> i < 3) !deps_table_memo;
+      table
 
 let dependencies_of_defs defs name =
-  Option.value (assoc_opt name (collect_deps defs)) ~default:[]
+  Option.value (Hashtbl.find_opt (deps_table defs) name) ~default:[]
 
 let reject_cycles defs =
   let deps = collect_deps defs in
@@ -2342,7 +2372,7 @@ let declared_capability_descriptors caps =
 let capabilities_to_graph_json caps =
   json_array capability_descriptor_to_graph_json (declared_capability_descriptors caps)
 
-let rec cterm_to_graph_json def_id_of = function
+let rec cterm_to_graph_json_via recurse def_id_of = function
   | CUnit -> json_obj [ json_field "tag" (json_string "Unit") ]
   | CBool b -> json_obj [ json_field "tag" (json_string "Bool"); json_field "value" (json_bool b) ]
   | CNat n ->
@@ -2360,21 +2390,21 @@ let rec cterm_to_graph_json def_id_of = function
         [
           json_field "tag" (json_string "Lambda");
           json_field "paramType" (type_to_graph_json typ);
-          json_field "body" (cterm_to_graph_json def_id_of body);
+          json_field "body" (recurse body);
         ]
   | CApp (f, arg) ->
       json_obj
         [
           json_field "tag" (json_string "App");
-          json_field "fn" (cterm_to_graph_json def_id_of f);
-          json_field "arg" (cterm_to_graph_json def_id_of arg);
+          json_field "fn" (recurse f);
+          json_field "arg" (recurse arg);
         ]
   | CLet (e, body) ->
       json_obj
         [
           json_field "tag" (json_string "Let");
-          json_field "value" (cterm_to_graph_json def_id_of e);
-          json_field "body" (cterm_to_graph_json def_id_of body);
+          json_field "value" (recurse e);
+          json_field "body" (recurse body);
         ]
   | CRecord fields ->
       json_obj
@@ -2386,7 +2416,7 @@ let rec cterm_to_graph_json def_id_of = function
                  json_obj
                    [
                      json_field "name" (json_string name);
-                     json_field "value" (cterm_to_graph_json def_id_of value);
+                     json_field "value" (recurse value);
                    ])
                fields);
         ]
@@ -2394,7 +2424,7 @@ let rec cterm_to_graph_json def_id_of = function
       json_obj
         [
           json_field "tag" (json_string "Field");
-          json_field "record" (cterm_to_graph_json def_id_of e);
+          json_field "record" (recurse e);
           json_field "field" (json_string field);
         ]
   | CVariant (typ, con, payload) ->
@@ -2403,7 +2433,7 @@ let rec cterm_to_graph_json def_id_of = function
           json_field "tag" (json_string "Variant");
           json_field "type" (type_to_graph_json typ);
           json_field "constructor" (json_string con);
-          json_field "payload" (cterm_to_graph_json def_id_of payload);
+          json_field "payload" (recurse payload);
         ]
   | CInst (name, args) ->
       json_obj
@@ -2416,16 +2446,16 @@ let rec cterm_to_graph_json def_id_of = function
       json_obj
         [
           json_field "tag" (json_string "Case");
-          json_field "scrutinee" (cterm_to_graph_json def_id_of scrutinee);
-          json_field "branches" (json_array (cbranch_to_graph_json def_id_of) branches);
+          json_field "scrutinee" (recurse scrutinee);
+          json_field "branches" (json_array (cbranch_to_graph_json_via recurse def_id_of) branches);
         ]
   | CFoldNat (n, zero, step) ->
       json_obj
         [
           json_field "tag" (json_string "FoldNat");
-          json_field "index" (cterm_to_graph_json def_id_of n);
-          json_field "zero" (cterm_to_graph_json def_id_of zero);
-          json_field "step" (cterm_to_graph_json def_id_of step);
+          json_field "index" (recurse n);
+          json_field "zero" (recurse zero);
+          json_field "step" (recurse step);
         ]
   | CFoldVariant (target, result, scrutinee, branches) ->
       json_obj
@@ -2433,14 +2463,14 @@ let rec cterm_to_graph_json def_id_of = function
           json_field "tag" (json_string "FoldVariant");
           json_field "targetType" (type_to_graph_json target);
           json_field "resultType" (type_to_graph_json result);
-          json_field "scrutinee" (cterm_to_graph_json def_id_of scrutinee);
-          json_field "branches" (json_array (cbranch_to_graph_json def_id_of) branches);
+          json_field "scrutinee" (recurse scrutinee);
+          json_field "branches" (json_array (cbranch_to_graph_json_via recurse def_id_of) branches);
         ]
   | CRecur e ->
       json_obj
         [
           json_field "tag" (json_string "Recur");
-          json_field "value" (cterm_to_graph_json def_id_of e);
+          json_field "value" (recurse e);
         ]
   | CNil typ ->
       json_obj [ json_field "tag" (json_string "Nil"); json_field "type" (type_to_graph_json typ) ]
@@ -2449,118 +2479,121 @@ let rec cterm_to_graph_json def_id_of = function
         [
           json_field "tag" (json_string "Cons");
           json_field "type" (type_to_graph_json typ);
-          json_field "head" (cterm_to_graph_json def_id_of head);
-          json_field "tail" (cterm_to_graph_json def_id_of tail);
+          json_field "head" (recurse head);
+          json_field "tail" (recurse tail);
         ]
   | CFoldList (xs, zero, step) ->
       json_obj
         [
           json_field "tag" (json_string "FoldList");
-          json_field "list" (cterm_to_graph_json def_id_of xs);
-          json_field "zero" (cterm_to_graph_json def_id_of zero);
-          json_field "step" (cterm_to_graph_json def_id_of step);
+          json_field "list" (recurse xs);
+          json_field "zero" (recurse zero);
+          json_field "step" (recurse step);
         ]
   | CCaseList (xs, nil_body, cons_body) ->
       json_obj
         [
           json_field "tag" (json_string "CaseList");
-          json_field "list" (cterm_to_graph_json def_id_of xs);
-          json_field "nil" (cterm_to_graph_json def_id_of nil_body);
-          json_field "cons" (cterm_to_graph_json def_id_of cons_body);
+          json_field "list" (recurse xs);
+          json_field "nil" (recurse nil_body);
+          json_field "cons" (recurse cons_body);
         ]
   | CText e ->
-      json_obj [ json_field "tag" (json_string "Text"); json_field "value" (cterm_to_graph_json def_id_of e) ]
+      json_obj [ json_field "tag" (json_string "Text"); json_field "value" (recurse e) ]
   | CImage (src, alt) ->
       json_obj
         [
           json_field "tag" (json_string "Image");
-          json_field "src" (cterm_to_graph_json def_id_of src);
-          json_field "alt" (cterm_to_graph_json def_id_of alt);
+          json_field "src" (recurse src);
+          json_field "alt" (recurse alt);
         ]
   | CButton (label, msg) ->
       json_obj
         [
           json_field "tag" (json_string "Button");
-          json_field "label" (cterm_to_graph_json def_id_of label);
-          json_field "message" (cterm_to_graph_json def_id_of msg);
+          json_field "label" (recurse label);
+          json_field "message" (recurse msg);
         ]
   | CInput (value, handler) ->
       json_obj
         [
           json_field "tag" (json_string "Input");
-          json_field "value" (cterm_to_graph_json def_id_of value);
-          json_field "handler" (cterm_to_graph_json def_id_of handler);
+          json_field "value" (recurse value);
+          json_field "handler" (recurse handler);
         ]
   | CColumn children ->
       json_obj
-        [ json_field "tag" (json_string "Column"); json_field "children" (cterm_to_graph_json def_id_of children) ]
+        [ json_field "tag" (json_string "Column"); json_field "children" (recurse children) ]
   | CRow children ->
       json_obj
-        [ json_field "tag" (json_string "Row"); json_field "children" (cterm_to_graph_json def_id_of children) ]
+        [ json_field "tag" (json_string "Row"); json_field "children" (recurse children) ]
   | CListView (items, render) ->
       json_obj
         [
           json_field "tag" (json_string "ListView");
-          json_field "items" (cterm_to_graph_json def_id_of items);
-          json_field "render" (cterm_to_graph_json def_id_of render);
+          json_field "items" (recurse items);
+          json_field "render" (recurse render);
         ]
   | CWhenView (cond, view) ->
       json_obj
         [
           json_field "tag" (json_string "WhenView");
-          json_field "condition" (cterm_to_graph_json def_id_of cond);
-          json_field "view" (cterm_to_graph_json def_id_of view);
+          json_field "condition" (recurse cond);
+          json_field "view" (recurse view);
         ]
   | CNode (tag, attrs, children) ->
       json_obj
         [
           json_field "tag" (json_string "Node");
-          json_field "tagName" (cterm_to_graph_json def_id_of tag);
-          json_field "attributes" (cterm_to_graph_json def_id_of attrs);
-          json_field "children" (cterm_to_graph_json def_id_of children);
+          json_field "tagName" (recurse tag);
+          json_field "attributes" (recurse attrs);
+          json_field "children" (recurse children);
         ]
   | CAttr (name, value) ->
       json_obj
         [
           json_field "tag" (json_string "Attr");
-          json_field "name" (cterm_to_graph_json def_id_of name);
-          json_field "value" (cterm_to_graph_json def_id_of value);
+          json_field "name" (recurse name);
+          json_field "value" (recurse value);
         ]
   | COn (event, msg) ->
       json_obj
         [
           json_field "tag" (json_string "On");
-          json_field "event" (cterm_to_graph_json def_id_of event);
-          json_field "message" (cterm_to_graph_json def_id_of msg);
+          json_field "event" (recurse event);
+          json_field "message" (recurse msg);
         ]
   | CDone e ->
-      json_obj [ json_field "tag" (json_string "Done"); json_field "value" (cterm_to_graph_json def_id_of e) ]
+      json_obj [ json_field "tag" (json_string "Done"); json_field "value" (recurse e) ]
   | CRequest req ->
       json_obj [ json_field "tag" (json_string "Request"); json_field "request" (req_to_graph_json req) ]
   | CBind (p, typ, body) ->
       json_obj
         [
           json_field "tag" (json_string "Bind");
-          json_field "process" (cterm_to_graph_json def_id_of p);
+          json_field "process" (recurse p);
           json_field "valueType" (type_to_graph_json typ);
-          json_field "body" (cterm_to_graph_json def_id_of body);
+          json_field "body" (recurse body);
         ]
 
-and cbranch_to_graph_json def_id_of = function
+and cbranch_to_graph_json_via recurse _def_id_of = function
   | CBBool (b, body) ->
       json_obj
         [
           json_field "tag" (json_string "BoolBranch");
           json_field "value" (json_bool b);
-          json_field "body" (cterm_to_graph_json def_id_of body);
+          json_field "body" (recurse body);
         ]
   | CBVariant (con, body) ->
       json_obj
         [
           json_field "tag" (json_string "VariantBranch");
           json_field "constructor" (json_string con);
-          json_field "body" (cterm_to_graph_json def_id_of body);
+          json_field "body" (recurse body);
         ]
+
+let rec cterm_to_graph_json def_id_of term =
+  cterm_to_graph_json_via (cterm_to_graph_json def_id_of) def_id_of term
 
 let type_node_tag = function
   | TUnit -> "Unit"
@@ -2616,50 +2649,54 @@ let cterm_node_tag = function
   | CRequest _ -> "Request"
   | CBind _ -> "Bind"
 
-let type_node_edges = function
+(* Edge builders are parameterized over the node-id functions so graph
+   construction can plug memoized variants; the unparameterized forms below
+   keep the existing behavior for every other caller. *)
+let type_node_edges_via type_id = function
   | TUnit | TBool | TNat | TString | TVar _ -> []
-  | TFun (a, b) -> [ type_node_id a; type_node_id b ]
-  | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_node_id t)
-  | TList t | TView t | TAttr t | TProcess t -> [ type_node_id t ]
-  | TForall (_, body) -> [ type_node_id body ]
-  | TNamed (_, args) -> List.map type_node_id args
+  | TFun (a, b) -> [ type_id a; type_id b ]
+  | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_id t)
+  | TList t | TView t | TAttr t | TProcess t -> [ type_id t ]
+  | TForall (_, body) -> [ type_id body ]
+  | TNamed (_, args) -> List.map type_id args
 
-let cbranch_body_edges def_id_of = function
-  | CBBool (_, body) | CBVariant (_, body) -> [ term_node_id def_id_of body ]
+let type_node_edges = type_node_edges_via type_node_id
 
-let cterm_node_edges def_id_of = function
+let cbranch_body_edges_via term_id = function
+  | CBBool (_, body) | CBVariant (_, body) -> [ term_id body ]
+
+let cterm_node_edges_via ~term_id ~type_id = function
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ -> []
-  | CLambda (typ, body) -> [ type_node_id typ; term_node_id def_id_of body ]
-  | CApp (f, arg) -> [ term_node_id def_id_of f; term_node_id def_id_of arg ]
-  | CLet (value, body) -> [ term_node_id def_id_of value; term_node_id def_id_of body ]
-  | CRecord fields -> List.map (fun (_, value) -> term_node_id def_id_of value) fields
-  | CField (record, _) -> [ term_node_id def_id_of record ]
-  | CVariant (typ, _, payload) -> [ type_node_id typ; term_node_id def_id_of payload ]
-  | CInst (_, args) -> List.map type_node_id args
+  | CLambda (typ, body) -> [ type_id typ; term_id body ]
+  | CApp (f, arg) -> [ term_id f; term_id arg ]
+  | CLet (value, body) -> [ term_id value; term_id body ]
+  | CRecord fields -> List.map (fun (_, value) -> term_id value) fields
+  | CField (record, _) -> [ term_id record ]
+  | CVariant (typ, _, payload) -> [ type_id typ; term_id payload ]
+  | CInst (_, args) -> List.map type_id args
   | CCase (scrutinee, branches) ->
-      term_node_id def_id_of scrutinee :: List.concat_map (cbranch_body_edges def_id_of) branches
-  | CFoldNat (index, zero, step) ->
-      [ term_node_id def_id_of index; term_node_id def_id_of zero; term_node_id def_id_of step ]
+      term_id scrutinee :: List.concat_map (cbranch_body_edges_via term_id) branches
+  | CFoldNat (index, zero, step) -> [ term_id index; term_id zero; term_id step ]
   | CFoldVariant (target, result, scrutinee, branches) ->
-      type_node_id target :: type_node_id result :: term_node_id def_id_of scrutinee
-      :: List.concat_map (cbranch_body_edges def_id_of) branches
-  | CRecur value -> [ term_node_id def_id_of value ]
-  | CNil typ -> [ type_node_id typ ]
-  | CCons (typ, head, tail) ->
-      [ type_node_id typ; term_node_id def_id_of head; term_node_id def_id_of tail ]
-  | CFoldList (list, zero, step) ->
-      [ term_node_id def_id_of list; term_node_id def_id_of zero; term_node_id def_id_of step ]
+      type_id target :: type_id result :: term_id scrutinee
+      :: List.concat_map (cbranch_body_edges_via term_id) branches
+  | CRecur value -> [ term_id value ]
+  | CNil typ -> [ type_id typ ]
+  | CCons (typ, head, tail) -> [ type_id typ; term_id head; term_id tail ]
+  | CFoldList (list, zero, step) -> [ term_id list; term_id zero; term_id step ]
   | CCaseList (list, nil_body, cons_body) ->
-      [ term_node_id def_id_of list; term_node_id def_id_of nil_body; term_node_id def_id_of cons_body ]
-  | CText value | CColumn value | CRow value | CDone value ->
-      [ term_node_id def_id_of value ]
+      [ term_id list; term_id nil_body; term_id cons_body ]
+  | CText value | CColumn value | CRow value | CDone value -> [ term_id value ]
   | CImage (src, alt) | CButton (src, alt) | CInput (src, alt)
   | CListView (src, alt) | CWhenView (src, alt) | CAttr (src, alt) | COn (src, alt) ->
-      [ term_node_id def_id_of src; term_node_id def_id_of alt ]
-  | CNode (tag, attrs, children) ->
-      [ term_node_id def_id_of tag; term_node_id def_id_of attrs; term_node_id def_id_of children ]
-  | CBind (process, typ, body) ->
-      [ term_node_id def_id_of process; type_node_id typ; term_node_id def_id_of body ]
+      [ term_id src; term_id alt ]
+  | CNode (tag, attrs, children) -> [ term_id tag; term_id attrs; term_id children ]
+  | CBind (process, typ, body) -> [ term_id process; type_id typ; term_id body ]
+
+let cbranch_body_edges def_id_of = cbranch_body_edges_via (term_node_id def_id_of)
+
+let cterm_node_edges def_id_of =
+  cterm_node_edges_via ~term_id:(term_node_id def_id_of) ~type_id:type_node_id
 
 let canonical_node_json id kind tag canonical payload edges =
   json_obj
@@ -2672,16 +2709,81 @@ let canonical_node_json id kind tag canonical payload edges =
       json_field "edgeRefs" (json_array json_string (uniq_strings edges));
     ]
 
+(* Node ids hash the full canonical serialization of each subterm, and edge
+   construction needs the ids of every child again. Memoizing serializations
+   and ids by physical node identity inside one graph construction removes the
+   repeated full-subtree serializations (the output stays byte-identical). *)
+module Phys_cterm_tbl = Hashtbl.Make (struct
+  type t = cterm
+
+  let equal = ( == )
+
+  let hash t = Hashtbl.hash_param 64 256 t
+end)
+
+module Phys_typ_tbl = Hashtbl.Make (struct
+  type t = typ
+
+  let equal = ( == )
+
+  let hash t = Hashtbl.hash_param 64 256 t
+end)
+
 let canonical_node_graph_json program_hash def_id_of defs =
   let nodes = Hashtbl.create 128 in
+  let term_canon_memo = Phys_cterm_tbl.create 1024 in
+  let term_canon term =
+    match Phys_cterm_tbl.find_opt term_canon_memo term with
+    | Some canonical -> canonical
+    | None ->
+        let canonical = cterm_to_canonical_v2 def_id_of term in
+        Phys_cterm_tbl.add term_canon_memo term canonical;
+        canonical
+  in
+  let term_id_memo = Phys_cterm_tbl.create 1024 in
+  let term_id term =
+    match Phys_cterm_tbl.find_opt term_id_memo term with
+    | Some id -> id
+    | None ->
+        let id = canonical_node_id "Term" (term_canon term) in
+        Phys_cterm_tbl.add term_id_memo term id;
+        id
+  in
+  let type_canon_memo = Phys_typ_tbl.create 256 in
+  let type_canon typ =
+    match Phys_typ_tbl.find_opt type_canon_memo typ with
+    | Some canonical -> canonical
+    | None ->
+        let canonical = type_to_canonical typ in
+        Phys_typ_tbl.add type_canon_memo typ canonical;
+        canonical
+  in
+  let type_id_memo = Phys_typ_tbl.create 256 in
+  let type_id typ =
+    match Phys_typ_tbl.find_opt type_id_memo typ with
+    | Some id -> id
+    | None ->
+        let id = canonical_node_id "Type" (type_canon typ) in
+        Phys_typ_tbl.add type_id_memo typ id;
+        id
+  in
+  let term_json_memo = Phys_cterm_tbl.create 1024 in
+  let rec term_json term =
+    match Phys_cterm_tbl.find_opt term_json_memo term with
+    | Some json -> json
+    | None ->
+        let json = cterm_to_graph_json_via term_json def_id_of term in
+        Phys_cterm_tbl.add term_json_memo term json;
+        json
+  in
   let rec add_type typ =
-    let canonical = type_to_canonical typ in
-    let id = type_node_id typ in
+    let canonical = type_canon typ in
+    let id = type_id typ in
     if not (Hashtbl.mem nodes id) then (
       add_type_children typ;
       Hashtbl.add nodes id
         (canonical_node_json id "Type" (type_node_tag typ) canonical (type_to_graph_json typ)
-           (type_node_edges typ)))
+           (type_node_edges_via type_id typ)))
   and add_type_children = function
     | TUnit | TBool | TNat | TString | TVar _ -> ()
     | TFun (a, b) ->
@@ -2692,13 +2794,14 @@ let canonical_node_graph_json program_hash def_id_of defs =
     | TNamed (_, args) -> List.iter add_type args
   in
   let rec add_term term =
-    let canonical = cterm_to_canonical_v2 def_id_of term in
-    let id = term_node_id def_id_of term in
+    let canonical = term_canon term in
+    let id = term_id term in
     if not (Hashtbl.mem nodes id) then (
       add_term_children term;
       Hashtbl.add nodes id
         (canonical_node_json id "Term" (cterm_node_tag term) canonical
-           (cterm_to_graph_json def_id_of term) (cterm_node_edges def_id_of term)))
+           (term_json term)
+           (cterm_node_edges_via ~term_id ~type_id term)))
   and add_branch = function
     | CBBool (_, body) | CBVariant (_, body) -> add_term body
   and add_term_children = function
@@ -2772,8 +2875,8 @@ let canonical_node_graph_json program_hash def_id_of defs =
              [
                json_field "name" (json_string d.cname);
                json_field "defId" (json_string d.cdef_id);
-               json_field "typeRef" (json_string (type_node_id d.ctyp));
-               json_field "termRef" (json_string (term_node_id def_id_of d.cbody));
+               json_field "typeRef" (json_string (type_id d.ctyp));
+               json_field "termRef" (json_string (term_id d.cbody));
              ])
   in
   json_obj
@@ -3313,14 +3416,34 @@ let canonical_defs_of_checked checked =
   in
   defs
 
+(* The whole-program canonical serialization and its hash are requested by
+   build ids, cache scopes, graph fields, locks and audits — re-serializing
+   and re-hashing megabytes per call dominated those flows. Same few-slot,
+   physical-identity memoization as the graph artifacts below. *)
+let serialize_checked_memo : (checked * string) list ref = ref []
+
 let serialize_checked_program checked =
-  serialize_program checked.program.capabilities (canonical_defs_of_checked checked)
+  match List.find_opt (fun (c, _) -> c == checked) !serialize_checked_memo with
+  | Some (_, serialized) -> serialized
+  | None ->
+      let serialized =
+        serialize_program checked.program.capabilities (canonical_defs_of_checked checked)
+      in
+      serialize_checked_memo :=
+        (checked, serialized) :: List.filteri (fun i _ -> i < 5) !serialize_checked_memo;
+      serialized
+
+let hash_program_memo : (checked * string) list ref = ref []
 
 let hash_program checked =
-  hash_string (serialize_checked_program checked)
+  match List.find_opt (fun (c, _) -> c == checked) !hash_program_memo with
+  | Some (_, hash) -> hash
+  | None ->
+      let hash = hash_string (serialize_checked_program checked) in
+      hash_program_memo := (checked, hash) :: List.filteri (fun i _ -> i < 5) !hash_program_memo;
+      hash
 
-let checked_to_graph_json_fields ?(version = canonical_graph_version)
-    ?(include_capability_scope_ref = true) checked =
+let checked_to_graph_json_fields_uncached ~version ~include_capability_scope_ref checked =
   let defs = checked.defs |> List.sort (fun a b -> String.compare a.def.name b.def.name) in
   let name_to_def_id = Hashtbl.create (List.length defs) in
   let preferred_name_by_def_id = Hashtbl.create (List.length defs) in
@@ -3333,8 +3456,10 @@ let checked_to_graph_json_fields ?(version = canonical_graph_version)
   let def_id_of name =
     if is_builtin name then "builtin:" ^ name
     else
-      match List.find_opt (fun d -> String.equal d.def.name name || String.equal d.def_id name) defs with
-      | Some d -> d.def_id
+      (* A known name maps to its def_id; a def_id (or unknown name) passes
+         through unchanged — same result as the previous linear scan. *)
+      match Hashtbl.find_opt name_to_def_id name with
+      | Some id -> id
       | None -> name
   in
   let canonical_dependency_names term =
@@ -3403,34 +3528,113 @@ let checked_to_graph_json_fields ?(version = canonical_graph_version)
       (canonical_node_graph_json (hash_program checked) def_id_of (canonical_defs_of_checked checked));
   ]
 
+(* One build computes the graph content hash, serializes the graph for the
+   store, and re-validates it — each call used to rebuild every field
+   (including the quadratic node graph) from scratch. Fields are pure in
+   [checked], so they are memoized by physical program identity; a few slots
+   cover diff/package flows that juggle two or three programs at once. *)
+let graph_json_fields_memo : (checked * string * bool * string list) list ref = ref []
+
+let checked_to_graph_json_fields ?(version = canonical_graph_version)
+    ?(include_capability_scope_ref = true) checked =
+  match
+    List.find_opt
+      (fun (c, v, i, _) ->
+        c == checked && String.equal v version && Bool.equal i include_capability_scope_ref)
+      !graph_json_fields_memo
+  with
+  | Some (_, _, _, fields) -> fields
+  | None ->
+      let fields =
+        checked_to_graph_json_fields_uncached ~version ~include_capability_scope_ref checked
+      in
+      graph_json_fields_memo :=
+        (checked, version, include_capability_scope_ref, fields)
+        :: List.filteri (fun i _ -> i < 5) !graph_json_fields_memo;
+      fields
+
+(* Lock, package and validation flows each need the multi-megabyte payload,
+   its content hash and the final graph JSON for the same program; rebuilding
+   and re-hashing the strings on every call dominated those flows, so all
+   three are memoized alongside the fields (same few-slot, physical-identity
+   scheme). *)
+let graph_payload_memo : (checked * string * bool * string) list ref = ref []
+
 let checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked =
-  json_obj (checked_to_graph_json_fields ~version ~include_capability_scope_ref checked) ^ "\n"
+  match
+    List.find_opt
+      (fun (c, v, i, _) ->
+        c == checked && String.equal v version && Bool.equal i include_capability_scope_ref)
+      !graph_payload_memo
+  with
+  | Some (_, _, _, payload) -> payload
+  | None ->
+      let payload =
+        json_obj (checked_to_graph_json_fields ~version ~include_capability_scope_ref checked)
+        ^ "\n"
+      in
+      graph_payload_memo :=
+        (checked, version, include_capability_scope_ref, payload)
+        :: List.filteri (fun i _ -> i < 5) !graph_payload_memo;
+      payload
 
 let checked_to_graph_payload_json checked =
   checked_to_graph_payload_json_for ~version:canonical_graph_version
     ~include_capability_scope_ref:true checked
 
+let graph_content_hash_memo : (checked * string * bool * string) list ref = ref []
+
 let checked_to_graph_content_hash_for ~version ~include_capability_scope_ref checked =
-  hash_string (checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked)
+  match
+    List.find_opt
+      (fun (c, v, i, _) ->
+        c == checked && String.equal v version && Bool.equal i include_capability_scope_ref)
+      !graph_content_hash_memo
+  with
+  | Some (_, _, _, hash) -> hash
+  | None ->
+      let hash =
+        hash_string (checked_to_graph_payload_json_for ~version ~include_capability_scope_ref checked)
+      in
+      graph_content_hash_memo :=
+        (checked, version, include_capability_scope_ref, hash)
+        :: List.filteri (fun i _ -> i < 5) !graph_content_hash_memo;
+      hash
 
 let checked_to_graph_content_hash checked =
   checked_to_graph_content_hash_for ~version:canonical_graph_version
     ~include_capability_scope_ref:true checked
 
+let graph_json_memo : (checked * string * bool * string) list ref = ref []
+
 let checked_to_graph_json_for ~version ~include_capability_scope_ref checked =
-  let fields = checked_to_graph_json_fields ~version ~include_capability_scope_ref checked in
-  let graph_hash = hash_string (json_obj fields ^ "\n") in
-  let program_hash_prefix = "\"programHash\"" in
-  let program_hash_prefix_len = String.length program_hash_prefix in
-  let rec insert_graph_hash = function
-    | [] -> [ json_field "graphHash" (json_string graph_hash) ]
-    | field :: rest
-      when String.length field >= program_hash_prefix_len
-           && String.sub field 0 program_hash_prefix_len = program_hash_prefix ->
-        field :: json_field "graphHash" (json_string graph_hash) :: rest
-    | field :: rest -> field :: insert_graph_hash rest
-  in
-  json_obj (insert_graph_hash fields) ^ "\n"
+  match
+    List.find_opt
+      (fun (c, v, i, _) ->
+        c == checked && String.equal v version && Bool.equal i include_capability_scope_ref)
+      !graph_json_memo
+  with
+  | Some (_, _, _, json) -> json
+  | None ->
+      let fields = checked_to_graph_json_fields ~version ~include_capability_scope_ref checked in
+      let graph_hash =
+        checked_to_graph_content_hash_for ~version ~include_capability_scope_ref checked
+      in
+      let program_hash_prefix = "\"programHash\"" in
+      let program_hash_prefix_len = String.length program_hash_prefix in
+      let rec insert_graph_hash = function
+        | [] -> [ json_field "graphHash" (json_string graph_hash) ]
+        | field :: rest
+          when String.length field >= program_hash_prefix_len
+               && String.sub field 0 program_hash_prefix_len = program_hash_prefix ->
+            field :: json_field "graphHash" (json_string graph_hash) :: rest
+        | field :: rest -> field :: insert_graph_hash rest
+      in
+      let json = json_obj (insert_graph_hash fields) ^ "\n" in
+      graph_json_memo :=
+        (checked, version, include_capability_scope_ref, json)
+        :: List.filteri (fun i _ -> i < 5) !graph_json_memo;
+      json
 
 let checked_to_graph_json checked =
   checked_to_graph_json_for ~version:canonical_graph_version

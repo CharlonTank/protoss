@@ -385,9 +385,11 @@ let validate_node_graph graph program_hash defs =
   let nodes = json_array_field "nodes" node_graph in
   let node_ids = List.map (json_string_field "id") nodes in
   ensure_unique "node" node_ids;
-  let node_by_id id =
-    List.find_opt (fun node -> String.equal (json_string_field "id" node) id) nodes
-  in
+  (* Ids are unique past this point, so an index lookup is equivalent to the
+     first-match linear scan; edge/reachability checks hit this per edge. *)
+  let node_index = Hashtbl.create 1024 in
+  List.iter (fun node -> Hashtbl.replace node_index (json_string_field "id" node) node) nodes;
+  let node_by_id id = Hashtbl.find_opt node_index id in
   List.iter
     (fun node ->
       let id = json_string_field "id" node in
@@ -410,13 +412,14 @@ let validate_node_graph graph program_hash defs =
   ensure_unique "node def" (List.map (json_string_field "name") node_defs);
   if List.length node_defs <> List.length defs then
     fail "canonical node graph def count mismatch";
+  let node_def_index = Hashtbl.create 256 in
+  List.iter
+    (fun obj -> Hashtbl.replace node_def_index (json_string_field "name" obj) obj)
+    node_defs;
   List.iter
     (fun (d : Kernel.canonical_def) ->
       let node_def =
-        match
-          List.find_opt (fun obj -> String.equal (json_string_field "name" obj) d.cname)
-            node_defs
-        with
+        match Hashtbl.find_opt node_def_index d.cname with
         | Some obj -> obj
         | None -> fail ("canonical node graph missing def ref: " ^ d.cname)
       in
@@ -473,23 +476,41 @@ let validate_exact_serialization version ~include_capability_scope_ref graph inp
   if not (String.equal (String.trim input) expected) then
     fail "canonical graph serialization mismatch"
 
-let graph_json_cache : (string, Json.t) Hashtbl.t = Hashtbl.create 8
+(* Cache keys are whole multi-megabyte graph JSON strings; the polymorphic
+   hash walks the entire key on every lookup. Sampling the length plus both
+   ends discriminates real graphs just as well, and full string equality still
+   guards correctness on the rare collision. *)
+module Graph_key = struct
+  type t = string
 
-let parsed_graph_cache : (string, string list * Kernel.canonical_def list) Hashtbl.t =
-  Hashtbl.create 8
+  let equal = String.equal
 
-let checked_graph_cache : (string, Kernel.checked) Hashtbl.t = Hashtbl.create 8
+  let hash s =
+    let n = String.length s in
+    let head = String.sub s 0 (min 512 n) in
+    let tail = if n > 1024 then String.sub s (n - 512) 512 else "" in
+    Hashtbl.hash (n, head, tail)
+end
 
-let graph_content_hash_cache : (string, string) Hashtbl.t = Hashtbl.create 8
+module Graph_cache = Hashtbl.Make (Graph_key)
+
+let graph_json_cache : Json.t Graph_cache.t = Graph_cache.create 8
+
+let parsed_graph_cache : (string list * Kernel.canonical_def list) Graph_cache.t =
+  Graph_cache.create 8
+
+let checked_graph_cache : Kernel.checked Graph_cache.t = Graph_cache.create 8
+
+let graph_content_hash_cache : string Graph_cache.t = Graph_cache.create 8
 
 let parse_graph_json input =
-  match Hashtbl.find_opt graph_json_cache input with
+  match Graph_cache.find_opt graph_json_cache input with
   | Some graph -> graph
   | None ->
       let graph =
         try Json.parse input with Json.Error msg -> fail ("invalid canonical graph JSON: " ^ msg)
       in
-      Hashtbl.add graph_json_cache input graph;
+      Graph_cache.add graph_json_cache input graph;
       graph
 
 let parse_graph_uncached input =
@@ -552,33 +573,33 @@ let parse_graph_uncached input =
   (caps, defs)
 
 let parse_graph input =
-  match Hashtbl.find_opt parsed_graph_cache input with
+  match Graph_cache.find_opt parsed_graph_cache input with
   | Some parsed -> parsed
   | None ->
       let parsed = parse_graph_uncached input in
-      Hashtbl.add parsed_graph_cache input parsed;
+      Graph_cache.add parsed_graph_cache input parsed;
       parsed
 
 let graph_content_hash input =
-  match Hashtbl.find_opt graph_content_hash_cache input with
+  match Graph_cache.find_opt graph_content_hash_cache input with
   | Some hash -> hash
   | None ->
       let graph = parse_graph_json input in
       let version = json_string_field "version" graph in
       let checked =
-        match Hashtbl.find_opt checked_graph_cache input with
+        match Graph_cache.find_opt checked_graph_cache input with
         | Some checked -> checked
         | None ->
             let caps, defs = parse_graph input in
             let checked = Kernel.checked_of_canonical caps defs in
-            Hashtbl.add checked_graph_cache input checked;
+            Graph_cache.add checked_graph_cache input checked;
             checked
       in
       if not (String.equal version Kernel.canonical_graph_legacy_v1) then (
         let expected = Kernel.checked_to_graph_json checked in
         if not (String.equal input expected) then fail "canonical graph serialization mismatch");
       let hash = json_string_field "graphHash" graph in
-      Hashtbl.add graph_content_hash_cache input hash;
+      Graph_cache.add graph_content_hash_cache input hash;
       hash
 
 let graph_to_program input =
@@ -586,12 +607,12 @@ let graph_to_program input =
   Kernel.serialize_program caps defs
 
 let checked_of_graph input =
-  match Hashtbl.find_opt checked_graph_cache input with
+  match Graph_cache.find_opt checked_graph_cache input with
   | Some checked -> checked
   | None ->
       let caps, defs = parse_graph input in
       let checked = Kernel.checked_of_canonical caps defs in
-      Hashtbl.add checked_graph_cache input checked;
+      Graph_cache.add checked_graph_cache input checked;
       checked
 
 let migrate_graph input =

@@ -486,20 +486,24 @@ let parse_source_unit path source hash =
     parsed_from_source = true;
   }
 
-let write_unit store unit =
+let unit_defs_source unit =
   let forms = List.map string_of_type_alias unit.type_aliases @ List.map string_of_def unit.defs in
-  let defs_source = String.concat "\n" forms ^ if forms = [] then "" else "\n" in
-  write_file (unit_defs_path store unit.path) defs_source;
-	  write_file (unit_meta_path store unit.path)
-	    ("path=" ^ unit.path ^ "\nsource_hash=" ^ unit.source_hash ^ "\nimports="
-	   ^ String.concat " " unit.imports ^ "\ncapabilities="
-	    ^ String.concat " " unit.capabilities ^ "\nmodule="
-	    ^ Option.value unit.module_name ~default:"" ^ "\nexports="
-	    ^ Option.value (Option.map (String.concat " ") unit.exports) ~default:"" ^ "\npublic_symbols="
-	    ^ String.concat " " unit.public_symbols ^ "\nall_symbols="
-	    ^ String.concat " " unit.all_symbols ^ "\ndefs="
-	   ^ String.concat " " (List.map (fun (d : def) -> d.name) unit.defs)
-	   ^ "\n")
+  String.concat "\n" forms ^ if forms = [] then "" else "\n"
+
+let unit_meta_content unit =
+  "path=" ^ unit.path ^ "\nsource_hash=" ^ unit.source_hash ^ "\nimports="
+  ^ String.concat " " unit.imports ^ "\ncapabilities="
+  ^ String.concat " " unit.capabilities ^ "\nmodule="
+  ^ Option.value unit.module_name ~default:"" ^ "\nexports="
+  ^ Option.value (Option.map (String.concat " ") unit.exports) ~default:"" ^ "\npublic_symbols="
+  ^ String.concat " " unit.public_symbols ^ "\nall_symbols="
+  ^ String.concat " " unit.all_symbols ^ "\ndefs="
+  ^ String.concat " " (List.map (fun (d : def) -> d.name) unit.defs)
+  ^ "\n"
+
+let write_unit store unit =
+  write_file (unit_defs_path store unit.path) (unit_defs_source unit);
+  write_file (unit_meta_path store unit.path) (unit_meta_content unit)
 
 let manifest_roots manifest =
   let stdlib =
@@ -700,14 +704,19 @@ type prepared_build = {
   stats : build_stats;
   build_id : string;
   program_canonical : string;
-  program_graph : string;
+  (* Generating the node graph JSON is by far the most expensive part of a
+     build (quadratic per-node canonical serialization + hashing). It is only
+     needed when the store actually has to be (re)written or when lock/package
+     flows export graph hashes, so it is deferred; an up-to-date incremental
+     build never forces it. *)
+  program_graph : string Lazy.t;
 }
 
 type prepared_core = {
   core_checked : Kernel.checked;
   core_build_id : string;
   core_program_canonical : string;
-  core_program_graph : string;
+  core_program_graph : string Lazy.t;
 }
 
 let prepared_build_cache : (string, prepared_core) Hashtbl.t = Hashtbl.create 16
@@ -808,7 +817,7 @@ let prepare_build manifest =
         try Kernel.check_program program with Kernel.Error msg -> fail msg
       in
       let program_canonical = Kernel.serialize_checked_program checked in
-      let program_graph = Kernel.checked_to_graph_json checked in
+      let program_graph = lazy (Kernel.checked_to_graph_json checked) in
       let build_id = Kernel.hash_string program_canonical in
       Hashtbl.replace prepared_build_cache cache_key
         {
@@ -823,7 +832,7 @@ let prepared_graph_hash prepared =
   Kernel.checked_to_graph_content_hash prepared.checked
 
 let prepared_host_contract_hash prepared =
-  host_contract_hash (Canonical_ir.graph_host_contract prepared.program_graph)
+  host_contract_hash (Canonical_ir.graph_host_contract (Lazy.force prepared.program_graph))
 
 let file_exact path expected =
   Sys.file_exists path && String.equal (read_file path) expected
@@ -857,14 +866,41 @@ let prepared_def_artifacts_current store cd =
   && Sys.file_exists (normal_path store name)
   && Sys.file_exists (capability_scope_path store name)
 
+(* Units are keyed by their absolute source path, so a store copied from
+   another location (or written for another project layout) can satisfy every
+   program-level check below while missing the unit metadata for the current
+   paths. The skip predicate must cover everything the skipped block writes,
+   units and type aliases included, or incremental reuse silently breaks. *)
+let prepared_units_current store prepared =
+  List.for_all
+    (fun unit ->
+      file_exact (unit_defs_path store unit.path) (unit_defs_source unit)
+      && file_exact (unit_meta_path store unit.path) (unit_meta_content unit))
+    prepared.units
+
+let prepared_type_aliases_current store prepared =
+  let path = Store.type_aliases_path store in
+  match prepared.checked.Kernel.program.type_aliases with
+  | [] -> not (Sys.file_exists path)
+  | aliases ->
+      file_exact path (String.concat "\n" (List.map string_of_type_alias aliases) ^ "\n")
+
 let prepared_store_current store prepared =
   file_exact (Filename.concat store "current") (prepared.build_id ^ "\n")
   && file_exact (Filename.concat store "capabilities")
        (String.concat "\n" prepared.checked.program.capabilities ^ "\n")
   && file_exact (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n")
-  && file_exact (Store.graph_path store (prepared_graph_hash prepared)) prepared.program_graph
-  && file_exact (host_contract_current_path store) (prepared_host_contract_hash prepared ^ "\n")
-  && Sys.file_exists (host_contract_object_path store (prepared_host_contract_hash prepared))
+  (* The stored graph and host contract are deterministic pure functions of the
+     checked program: with a matching build_id they were written from this very
+     program, so only their presence is checked here — regenerating them just
+     to compare would force the expensive node-graph serialization on every
+     up-to-date build. Content corruption is the audit's job. *)
+  && Sys.file_exists (Filename.concat store "program.graph.json")
+  && (let current = host_contract_current_path store in
+      Sys.file_exists current
+      && Sys.file_exists (host_contract_object_path store (trim (read_file current))))
+  && prepared_units_current store prepared
+  && prepared_type_aliases_current store prepared
   && List.for_all (prepared_def_artifacts_current store) prepared.checked.defs
 
 let build_prepared ?(write = true) ?lock_hash manifest prepared =
@@ -879,8 +915,8 @@ let build_prepared ?(write = true) ?lock_hash manifest prepared =
         (String.concat "\n" prepared.checked.program.capabilities ^ "\n");
       Store.write_type_aliases store prepared.checked.program.type_aliases;
       write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
-      write_program_graph store prepared.checked prepared.program_graph;
-      ignore (write_host_contract store prepared.program_graph);
+      write_program_graph store prepared.checked (Lazy.force prepared.program_graph);
+      ignore (write_host_contract store (Lazy.force prepared.program_graph));
       cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
       List.iter
         (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)

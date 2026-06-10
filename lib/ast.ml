@@ -96,7 +96,13 @@ type program = {
 
 let compare_field (a, _) (b, _) = String.compare a b
 
-let sort_fields xs = List.sort compare_field xs
+(* Field lists are usually built from already-canonical (sorted) terms, so the
+   common case returns the list unchanged without allocating. *)
+let rec fields_sorted = function
+  | [] | [ _ ] -> true
+  | a :: (b :: _ as rest) -> compare_field a b <= 0 && fields_sorted rest
+
+let sort_fields xs = if fields_sorted xs then xs else List.sort compare_field xs
 
 let rec equal_typ a b =
   match (a, b) with

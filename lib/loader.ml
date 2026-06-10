@@ -86,7 +86,26 @@ let line_col source offset =
   done;
   (!line, !col)
 
-let find_named_form_offsets keywords source name =
+(* Offsets of every line start, so repeated location lookups over the same
+   source cost a binary search instead of a scan from the beginning. *)
+let line_starts source =
+  let starts = ref [ 0 ] in
+  String.iteri (fun i c -> if c = '\n' then starts := (i + 1) :: !starts) source;
+  Array.of_list (List.rev !starts)
+
+let line_col_at starts source offset =
+  let limit = min (max 0 offset) (String.length source) in
+  let lo = ref 0 and hi = ref (Array.length starts - 1) in
+  while !lo < !hi do
+    let mid = (!lo + !hi + 1) / 2 in
+    if starts.(mid) <= limit then lo := mid else hi := mid - 1
+  done;
+  (!lo + 1, limit - starts.(!lo) + 1)
+
+(* Single pass collecting (keyword, name, offset) for every top-level form, in
+   source order. Location tables are built from one scan instead of one full
+   scan per definition. *)
+let top_level_named_forms source =
   let len = String.length source in
   let rec loop depth i acc =
     if i >= len then List.rev acc
@@ -94,24 +113,30 @@ let find_named_form_offsets keywords source name =
       match source.[i] with
       | '"' -> loop depth (skip_string source i) acc
       | ';' -> loop depth (skip_comment source i) acc
-      | '(' -> (
+      | '(' ->
           let acc =
             if depth = 0 then
               let keyword_start = skip_spaces source (i + 1) in
               match atom_at source keyword_start with
-              | Some (keyword, after_keyword) when is_named_keyword keywords keyword -> (
+              | Some (keyword, after_keyword) -> (
                   let name_start = skip_spaces source after_keyword in
                   match atom_at source name_start with
-                  | Some (candidate, _) when String.equal candidate name -> i :: acc
-                  | _ -> acc)
-              | _ -> acc
+                  | Some (candidate, _) -> (keyword, candidate, i) :: acc
+                  | None -> acc)
+              | None -> acc
             else acc
           in
-          loop (depth + 1) (i + 1) acc)
+          loop (depth + 1) (i + 1) acc
       | ')' -> loop (max 0 (depth - 1)) (i + 1) acc
       | _ -> loop depth (i + 1) acc
   in
   loop 0 0 []
+
+let find_named_form_offsets keywords source name =
+  top_level_named_forms source
+  |> List.filter_map (fun (keyword, candidate, offset) ->
+         if is_named_keyword keywords keyword && String.equal candidate name then Some offset
+         else None)
 
 let find_named_form_offset keywords source name =
   match find_named_form_offsets keywords source name with
@@ -178,35 +203,41 @@ type source_location = {
   kind : location_kind;
 }
 
-let def_locations path source defs =
+(* First top-level offset per name for the keyword class, resolved like
+   [find_named_form_offset_for_name] (exact name, then local name). *)
+let named_form_index keywords source =
+  let index = Hashtbl.create 64 in
+  List.iter
+    (fun (keyword, name, offset) ->
+      if is_named_keyword keywords keyword && not (Hashtbl.mem index name) then
+        Hashtbl.add index name offset)
+    (top_level_named_forms source);
+  index
+
+let named_form_index_lookup index name =
+  match Hashtbl.find_opt index name with
+  | Some _ as found -> found
+  | None ->
+      let local = local_name name in
+      if String.equal local name then None else Hashtbl.find_opt index local
+
+let symbol_locations kind keywords path source names =
+  let index = named_form_index keywords source in
+  let starts = line_starts source in
   List.map
-    (fun d ->
-      let offset = Option.value (find_def_offset source d.name) ~default:0 in
-      let loc = location_for_offset path source offset in
-      {
-        symbol = d.name;
-        loc;
-        path;
-        source;
-        offset;
-        kind = Def_location;
-      })
-    defs
+    (fun name ->
+      let offset = Option.value (named_form_index_lookup index name) ~default:0 in
+      let line, col = line_col_at starts source offset in
+      let loc = path ^ ":" ^ string_of_int line ^ ":" ^ string_of_int col in
+      { symbol = name; loc; path; source; offset; kind })
+    names
+
+let def_locations path source defs =
+  symbol_locations Def_location def_keywords path source (List.map (fun d -> d.name) defs)
 
 let type_alias_locations path source aliases =
-  List.map
-    (fun a ->
-      let offset = Option.value (find_type_alias_offset source a.type_name) ~default:0 in
-      let loc = location_for_offset path source offset in
-      {
-        symbol = a.type_name;
-        loc;
-        path;
-        source;
-        offset;
-        kind = Type_location;
-      })
-    aliases
+  symbol_locations Type_location type_keywords path source
+    (List.map (fun a -> a.type_name) aliases)
 
 let source_location_by_symbol locations name =
   List.find_opt (fun l -> String.equal l.symbol name) locations

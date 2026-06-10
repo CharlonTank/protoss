@@ -1,3 +1,10 @@
+(* Batch-tool GC tuning: a large minor heap and a relaxed space overhead cut
+   GC time substantially on allocation-heavy canonicalization/eval workloads.
+   Purely a time/memory trade-off; no observable behavior change. *)
+let () =
+  Gc.set
+    { (Gc.get ()) with Gc.minor_heap_size = 8 * 1024 * 1024; Gc.space_overhead = 200 }
+
 let usage () =
   prerr_endline
     "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
