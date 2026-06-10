@@ -807,3 +807,42 @@ let branches root =
   in
   let s = String.concat "\n" (world_lines @ branch_lines) in
   if s = "" then "" else s ^ "\n"
+
+let resolve_branch_or_world root name =
+  let branch = branch_path root name in
+  if Sys.file_exists branch then String.trim (read_file branch)
+  else if Sys.file_exists (world_path root name) then name
+  else failwith ("branch or world not found: " ^ name)
+
+let harness_ref harness =
+  if Sys.file_exists harness then Kernel.hash_string (read_file harness)
+  else Kernel.hash_string ("protoss-harness-name-v1\n" ^ harness)
+
+let compare_branches_by_harness root harness left right =
+  ignore (init root);
+  let left_world = resolve_branch_or_world root left in
+  let right_world = resolve_branch_or_world root right in
+  ignore (inspect_world root left_world);
+  ignore (inspect_world root right_world);
+  let diff_text = diff root left_world right_world in
+  let only_a =
+    match field "only_a" (parse_lines diff_text) with Some value -> value | None -> ""
+  in
+  let only_b =
+    match field "only_b" (parse_lines diff_text) with Some value -> value | None -> ""
+  in
+  let result = if String.equal only_a "" && String.equal only_b "" then "pass" else "diff" in
+  String.concat "\n"
+    [
+      "protoss-branch-harness-comparison-v1";
+      "harness=" ^ harness;
+      "harness-ref=" ^ harness_ref harness;
+      "left=" ^ left;
+      "left-world=" ^ left_world;
+      "right=" ^ right;
+      "right-world=" ^ right_world;
+      "result=" ^ result;
+      "only-left=" ^ only_a;
+      "only-right=" ^ only_b;
+      "";
+    ]

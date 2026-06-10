@@ -25,7 +25,7 @@ let usage () =
      \       protoss resume --graph <graph.json> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss resume --store-graph <project-or-store> <graphHash> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss world init [<ledger-root>]\n\
-     \       protoss ledger event|world|inspect|replay|diff|export|import|fork|simulate|merge|branches|reject [args]\n\
+     \       protoss ledger event|world|inspect|replay|diff|export|import|fork|simulate|compare-branches|merge|branches|reject [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
@@ -474,6 +474,8 @@ let command_ledger = function
   | [ "simulate"; root; name; world; description ] ->
       let event, simulated_world = Protoss.Ledger.simulate root name world description in
       Printf.printf "SimulationEvent %s\nWorld %s\n" event simulated_world
+  | [ "compare-branches"; root; harness; left; right ] ->
+      print_string (Protoss.Ledger.compare_branches_by_harness root harness left right)
   | [ "merge"; world_a; world_b ] ->
       print_endline (Protoss.Ledger.merge default_ledger world_a world_b)
   | [ "merge"; root; world_a; world_b ] ->

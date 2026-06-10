@@ -6679,6 +6679,26 @@ let () =
        ("only_b=" ^ simulation_event));
   assert_true "ledger simulation updates branch pointer"
     (contains_substring (Ledger.branches ledger_web) ("branch feature world=" ^ simulation_world));
+  let harness_compare_path = Filename.concat ledger_web "branch-compare.pth" in
+  let harness_compare_content = "harness branchComparison = ledgerDiff\n" in
+  write_file harness_compare_path harness_compare_content;
+  let _control_event, control_world =
+    Ledger.simulate ledger_web "control" world1 "try control local-storage value"
+  in
+  let branch_comparison =
+    Ledger.compare_branches_by_harness ledger_web harness_compare_path "feature" "control"
+  in
+  assert_true "ledger harness branch comparison reports diff"
+    (contains_substring branch_comparison "protoss-branch-harness-comparison-v1"
+    && contains_substring branch_comparison
+         ("harness-ref=" ^ Kernel.hash_string harness_compare_content)
+    && contains_substring branch_comparison ("left-world=" ^ simulation_world)
+    && contains_substring branch_comparison ("right-world=" ^ control_world)
+    && contains_substring branch_comparison "result=diff");
+  assert_true "ledger harness branch comparison passes identical branch"
+    (contains_substring
+       (Ledger.compare_branches_by_harness ledger_web harness_compare_path "feature" "feature")
+       "result=pass");
 
   let ledger_root = temp_dir "ledger-inspect" in
   let world = Ledger.init ledger_root in

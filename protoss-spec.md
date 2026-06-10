@@ -481,7 +481,11 @@ factorisation des doublons via `Agent_protocol.factor_identical_json`,
   simulate`, assertions "ledger simulation event records fork", "ledger
   simulation diff is isolated to fork" et "ledger simulation updates branch
   pointer" dans `test/test_protoss.ml`, `README.md`.
-- [ ] Comparer deux branches par harness.
+- [x] Comparer deux branches par harness.
+  Preuves: `Ledger.compare_branches_by_harness`, commande `protoss ledger
+  compare-branches`, assertions "ledger harness branch comparison reports
+  diff" et "ledger harness branch comparison passes identical branch" dans
+  `test/test_protoss.ml`, `README.md`.
 - [x] Generer des vues humaines lisibles depuis le graphe.
 - [x] Interdire aux agents l'ecriture directe du programme canonique.
   Preuves: `Agent_protocol.guard_write_json`,
