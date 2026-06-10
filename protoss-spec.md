@@ -204,7 +204,10 @@ listees dans la section "Gates de validation".
 - [x] Inspecter, rejouer et differ les ledgers.
 - [x] Valider les metadonnees de capability et codec a l'inspection.
 - [x] Tester les invariants request/resume.
-- [ ] Faire du ledger un Merkle-DAG avec branches et merges explicites.
+- [x] Faire du ledger un Merkle-DAG avec branches et merges explicites.
+  Preuves: `Ledger.add_event`, `Ledger.merge`, `Ledger.replay_events`,
+  `Ledger.branches`, assertions "ledger merged" dans `test/test_protoss.ml` et
+  `README.md`.
 - [ ] Ajouter verification cryptographique optionnelle des evenements signes.
 - [ ] Lier le ledger de provenance des patches au ledger monde.
 - [ ] Ajouter politiques de retention et garbage collection content-addressed.
@@ -447,7 +450,9 @@ listees dans la section "Gates de validation".
 - [x] `WorldRef`/`EventRef` prototype.
 - [x] Evenements ledger.
 - [x] Replay.
-- [ ] Fork/merge de mondes.
+- [x] Fork/merge de mondes.
+  Preuves: `protoss ledger fork`, `protoss ledger merge` et assertions
+  "ledger merged" dans `test/test_protoss.ml`.
 
 ### v0.5 - Harness IA
 
@@ -473,7 +478,9 @@ listees dans la section "Gates de validation".
 - [ ] Les formats `.pt`, `.ptc`, `.ptb` sont implementes et round-trippes.
 - [ ] Le serveur MCP est utilisable par un client MCP standard.
 - [ ] Les harnesses sont canoniques, hashes et obligatoires pour patches risqués.
-- [ ] Le ledger monde supporte branches et merges.
+- [x] Le ledger monde supporte branches et merges.
+  Preuves: `Ledger.branches`, `Ledger.merge`, `protoss ledger merge` et
+  assertions "ledger merged" dans `test/test_protoss.ml`.
 - [ ] Les secrets sont scelles et jamais hashes en clair.
 - [ ] Le self-hosted path couvre parser, canonicalizer, normalizer, typechecker,
   patch validator, harness runner, package resolver et MCP server.
