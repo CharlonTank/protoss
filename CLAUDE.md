@@ -29,14 +29,24 @@ dune exec protoss -- <args>      # run the CLI (see README for the full command 
   `@stdlibtest` (PROTOSS_RUN_STDLIB_TESTS), `@integrationtest` (PROTOSS_RUN_INTEGRATION_TESTS,
   itself split by PROTOSS_INTEGRATION_PART into `@integrationtest-workspace`,
   `@integrationtest-web`, `@integrationtest-runtime`). `@fulltest` aggregates them so dune
-  runs the sections as parallel processes (~1.5 min wall clock). Default `dune runtest` only
-  runs the quick smoke suite — run `@fulltest --force` before declaring kernel/runtime/workspace
-  changes safe. Test temp files must be pid-qualified (see `temp_dir`/`patch_file`): sections
-  run concurrently and race on fixed temp paths otherwise.
+  runs the sections as parallel processes (~1 min wall clock, bounded by the workspace part).
+  Default `dune runtest` only runs the quick smoke suite — run `@fulltest --force` before
+  declaring kernel/runtime/workspace changes safe. Test temp files must be pid-qualified (see
+  `temp_dir`/`patch_file`): sections run concurrently and race on fixed temp paths otherwise.
 - Compilation is fast (~1-2 s incremental); the slow part is *running* tests, because the
   interpreted self-hosted frontend (prelude evaluation) dominates. Keep cache-key hashing and
   other bookkeeping out of the evaluator's hot path (see `Runtime.eval_app`) — work that only
   serves the opt-in persistent cache/tracing must stay behind those flags.
+- `kernel.ml` has a **frozen inferred `kernel.mli`** so body-only edits (including new private
+  helpers) don't recompile every dependent module; when adding public kernel API, add its
+  signature to `kernel.mli` too (the compiler error dictates it).
+- SHA-256 dispatches to a hardware-accelerated C stub on macOS (`protoss_sha256_stubs.c`,
+  CommonCrypto) and falls back to the pure-OCaml `Hashcons.digest_pure` elsewhere; both are
+  asserted bit-identical in the core tests. The same stub file exposes `Store.try_clone`
+  (APFS copy-on-write clonefile) used by tests to copy project trees cheaply.
+- Store writes go through `Store.write_file_atomic_if_changed`/`ensure_dir_cached`: artifacts
+  are deterministic, so identical rewrites are skipped and directory chains are stat'd once
+  per process. Nothing in the project model may depend on store-file mtimes.
 - If a store-write skip predicate (e.g. `Workspace.prepared_store_current`) guards a write
   block, it must cover *everything* that block writes (units and type aliases included) —
   unit metadata is keyed by absolute source path, so program-level hashes alone are not enough.
@@ -60,7 +70,7 @@ dispatcher (pattern-matches argv → `command_*` functions → `Protoss.<Module>
 2. `ast.ml` — the surface AST (`typ`, `expr`, `def`, `program`, `req`). Plain data, no logic.
 3. `loader.ml` — reads files/workspaces, applies aliases/desugaring, attaches `path:line:col`
    source locations to errors.
-4. `kernel.ml` — **the pure, total core** (~3600 lines, by far the most important file). Holds the
+4. `kernel.ml` — **the pure, total core** (~4000 lines, by far the most important file). Holds the
    typechecker, the canonicalizer (surface AST → canonical `cterm`/graph), capability checking,
    normalization, and all serialization/hashing logic. `canonical_ir.ml`, `canonical_type.ml`,
    `typechecker.ml`, `normalizer.ml`, `hasher.ml`, `normal_value.ml`, and `kernel_error.ml` are
