@@ -307,7 +307,11 @@ Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
   Preuves: imports `path#p2:...` valides par `Workspace.load_units`,
   assertion "workspace import hash mismatch error" dans `test/test_protoss.ml`
   et `README.md`.
-- [ ] Supporter alias humain vers hash `package@semver`.
+- [x] Supporter alias humain vers hash `package@semver`.
+  Preuves: champ manifest `package_aliases = ["name@semver=path"]`,
+  resolution dans `Workspace.package_import_manifest`, champs
+  `package-aliases` des locks/packages, assertions "package alias ..." dans
+  `test/test_protoss.ml` et `README.md`.
 - [ ] Supporter resolution par politique `package@policy`.
 - [ ] Inclure harnesses dans les packages.
 - [x] Inclure policies dans les packages.

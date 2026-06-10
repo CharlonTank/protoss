@@ -5214,6 +5214,35 @@ let () =
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
   trace_test "integration:consumer-package:checked";
+  let alias_consumer_ws = make_workspace "workspace-consumer-alias" 7 "a" in
+  let alias_consumer_manifest_path = Filename.concat alias_consumer_ws "protoss.toml" in
+  let alias_consumer_manifest_base = Store.read_file alias_consumer_manifest_path in
+  write_file alias_consumer_manifest_path
+    (alias_consumer_manifest_base ^ "package_aliases = [\"workspace-a@0.4.0=" ^ ws_a
+   ^ "\"]\npackage_imports = [\"workspace-a=workspace-a@0.4.0\"]\npackage_interfaces = [\"workspace-a="
+   ^ interface_hash ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash
+   ^ "\"]\n");
+  let alias_consumer_manifest = Workspace.parse_manifest alias_consumer_ws in
+  let alias_consumer_package = Workspace.write_package alias_consumer_manifest in
+  let alias_consumer_package_content = Store.read_file alias_consumer_package.package_path in
+  assert_true "package alias records semver alias"
+    (contains_substring alias_consumer_package_content ("workspace-a@0.4.0=" ^ ws_a));
+  assert_true "package alias resolves imported package ref"
+    (contains_substring alias_consumer_package_content ("workspace-a=" ^ package_a.package_ref));
+  let alias_bad_ws = make_workspace "workspace-consumer-alias-bad" 7 "b" in
+  let alias_bad_manifest_path = Filename.concat alias_bad_ws "protoss.toml" in
+  write_file alias_bad_manifest_path
+    (Store.read_file alias_bad_manifest_path ^ "package_aliases = [\"workspace-a@9.9.9="
+   ^ ws_a ^ "\"]\npackage_imports = [\"workspace-a=workspace-a@9.9.9\"]\n");
+  let alias_bad_manifest = Workspace.parse_manifest alias_bad_ws in
+  (try
+     ignore (Workspace.write_package alias_bad_manifest);
+     fail "package semver alias mismatch should reject"
+   with Workspace.Error msg ->
+     assert_true "package semver alias mismatch reports version"
+       (contains_substring msg
+          "package alias version mismatch for workspace-a: expected 9.9.9, got 0.4.0"));
+  trace_test "integration:consumer-package:alias";
   let consumer_package_invariants = Invariants.check_package consumer_ws in
   trace_test "integration:consumer-package:invariants";
   assert_equal "package invariant ref" consumer_package.package_ref
