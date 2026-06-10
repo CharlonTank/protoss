@@ -402,10 +402,16 @@ et `protoss diff`, assertions patch/diff/audit dans `test/test_protoss.ml`.
 
 Preuves de section: commande `protoss duplicates`, `Kernel.def_id`, generation
 de vues via `Workspace.store_graph_source_view`, assertions doublons et vues
-humaines dans `test/test_protoss.ml`.
+humaines dans `test/test_protoss.ml`; API `Canonical_ir.agent_graph_*_json`,
+commande `protoss agent graph` et assertions "agent graph" dans
+`test/test_protoss.ml`.
 
 - [ ] Definir le protocole agent: `AI -> PatchCandidate -> Validator -> Harness -> Commit`.
-- [ ] Fournir une API d'exploration du graphe pour agents.
+- [x] Fournir une API d'exploration du graphe pour agents.
+  Preuves: `Canonical_ir.agent_graph_summary_json`,
+  `Canonical_ir.agent_graph_node_json`,
+  `Canonical_ir.agent_graph_definition_json`, commande `protoss agent graph`,
+  assertions "agent graph" dans `test/test_protoss.ml`.
 - [ ] Fournir generation de migrations assistee.
 - [ ] Fournir synthese de tests assistee.
 - [ ] Fournir explication de definition.
@@ -626,7 +632,9 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 ### v0.3 - MCP-first
 
 - [ ] Serveur MCP Protoss.
-- [ ] Query graph.
+- [x] Query graph.
+  Preuves: API `Canonical_ir.agent_graph_*_json`, commande
+  `protoss agent graph`, assertions "agent graph" dans `test/test_protoss.ml`.
 - [ ] ProposePatch.
 - [ ] CheckPatch.
 - [ ] ApplyPatch.

@@ -1063,6 +1063,224 @@ let check_graph_host_contract graph_input contract_input =
       ^ ", got " ^ contract_hash_of_json contract_json);
   "Host contract OK\n"
 
+type agent_graph_source = {
+  agent_graph_source_kind : string;
+  agent_graph_source_ref : string;
+}
+
+let agent_graph_source kind source_ref =
+  { agent_graph_source_kind = kind; agent_graph_source_ref = source_ref }
+
+let agent_json_string_list xs = Kernel.json_array Kernel.json_string xs
+
+let agent_graph_source_to_json source =
+  Kernel.json_obj
+    [
+      Kernel.json_field "kind" (Kernel.json_string source.agent_graph_source_kind);
+      Kernel.json_field "ref" (Kernel.json_string source.agent_graph_source_ref);
+    ]
+
+let agent_graph_default_source = agent_graph_source "input" ""
+
+let agent_graph_base_fields ?source query stats =
+  let source = match source with Some source -> source | None -> agent_graph_default_source in
+  [
+    Kernel.json_field "format" (Kernel.json_string "protoss-agent-graph-v1");
+    Kernel.json_field "query" (Kernel.json_string query);
+    Kernel.json_field "source" (agent_graph_source_to_json source);
+    Kernel.json_field "graphHash" (Kernel.json_string stats.graph_hash);
+    Kernel.json_field "programHash" (Kernel.json_string stats.program_hash);
+    Kernel.json_field "canonicalGraphVersion" (Kernel.json_string stats.version);
+    Kernel.json_field "canonicalVersion" (Kernel.json_string stats.canonical_version);
+    Kernel.json_field "nodeGraphVersion" (Kernel.json_string stats.node_graph_version);
+  ]
+
+let agent_graph_stats_to_json stats =
+  Kernel.json_obj
+    [
+      Kernel.json_field "definitions" (string_of_int stats.defs);
+      Kernel.json_field "declaredCapabilities" (string_of_int stats.capabilities);
+      Kernel.json_field "capabilityDescriptors" (string_of_int stats.capability_descriptors);
+      Kernel.json_field "nodes" (string_of_int stats.nodes);
+      Kernel.json_field "typeNodes" (string_of_int stats.type_nodes);
+      Kernel.json_field "termNodes" (string_of_int stats.term_nodes);
+      Kernel.json_field "edges" (string_of_int stats.edges);
+    ]
+
+let agent_graph_node_to_json node =
+  Kernel.json_obj
+    [
+      Kernel.json_field "id" (Kernel.json_string node.node_id);
+      Kernel.json_field "kind" (Kernel.json_string node.node_kind);
+      Kernel.json_field "payloadTag" (Kernel.json_string node.node_payload_tag);
+      Kernel.json_field "canonical" (Kernel.json_string node.node_canonical);
+      Kernel.json_field "edgeCount" (string_of_int (List.length node.node_edge_refs));
+      Kernel.json_field "edgeRefs" (agent_json_string_list node.node_edge_refs);
+    ]
+
+let agent_graph_definition_to_json def =
+  Kernel.json_obj
+    [
+      Kernel.json_field "name" (Kernel.json_string def.graph_def_name);
+      Kernel.json_field "defId" (Kernel.json_string def.graph_def_id);
+      Kernel.json_field "hash" (Kernel.json_string def.graph_def_hash);
+      Kernel.json_field "typeRef" (Kernel.json_string def.graph_def_type_ref);
+      Kernel.json_field "termRef" (Kernel.json_string def.graph_def_term_ref);
+      Kernel.json_field "deps" (agent_json_string_list def.graph_def_deps);
+      Kernel.json_field "capabilityScope" (agent_json_string_list def.graph_def_capability_scope);
+      Kernel.json_field "capabilityScopeRefs"
+        (agent_json_string_list def.graph_def_capability_scope_refs);
+      Kernel.json_field "capabilityScopeRef"
+        (Kernel.json_string def.graph_def_capability_scope_ref);
+      Kernel.json_field "typeCanonical" (Kernel.json_string def.graph_def_type_canonical);
+      Kernel.json_field "termCanonical" (Kernel.json_string def.graph_def_term_canonical);
+    ]
+
+let agent_graph_dependency_to_json dep =
+  Kernel.json_obj
+    [
+      Kernel.json_field "def" (Kernel.json_string dep.graph_dep_def_name);
+      Kernel.json_field "defId" (Kernel.json_string dep.graph_dep_def_id);
+      Kernel.json_field "defHash" (Kernel.json_string dep.graph_dep_def_hash);
+      Kernel.json_field "dependsOn" (Kernel.json_string dep.graph_dep_name);
+      Kernel.json_field "dependencyDefId" (Kernel.json_string dep.graph_dep_id);
+      Kernel.json_field "dependencyHash" (Kernel.json_string dep.graph_dep_hash);
+    ]
+
+let agent_graph_capability_request_to_json req =
+  Kernel.json_obj
+    [
+      Kernel.json_field "ref" (Kernel.json_string req.graph_cap_req_ref);
+      Kernel.json_field "tag" (Kernel.json_string req.graph_cap_req_tag);
+      Kernel.json_field "payloadTypeCanonical"
+        (Kernel.json_string (Kernel.type_to_canonical req.graph_cap_req_payload_type));
+      Kernel.json_field "payloadType" (Kernel.type_to_graph_json req.graph_cap_req_payload_type);
+      Kernel.json_field "responseTypeCanonical"
+        (Kernel.json_string (Kernel.type_to_canonical req.graph_cap_req_response_type));
+      Kernel.json_field "responseType" (Kernel.type_to_graph_json req.graph_cap_req_response_type);
+    ]
+
+let agent_graph_capability_to_json cap =
+  Kernel.json_obj
+    [
+      Kernel.json_field "name" (Kernel.json_string cap.graph_cap_name);
+      Kernel.json_field "ref" (Kernel.json_string cap.graph_cap_ref);
+      Kernel.json_field "requests"
+        (Kernel.json_array agent_graph_capability_request_to_json cap.graph_cap_requests);
+    ]
+
+let agent_graph_capability_scope_to_json scope =
+  Kernel.json_obj
+    [
+      Kernel.json_field "def" (Kernel.json_string scope.graph_scope_def_name);
+      Kernel.json_field "defId" (Kernel.json_string scope.graph_scope_def_id);
+      Kernel.json_field "defHash" (Kernel.json_string scope.graph_scope_def_hash);
+      Kernel.json_field "scopeRef" (Kernel.json_string scope.graph_scope_ref);
+      Kernel.json_field "capability" (Kernel.json_string scope.graph_scope_capability);
+      Kernel.json_field "capabilityRef" (Kernel.json_string scope.graph_scope_capability_ref);
+    ]
+
+let agent_graph_json ?source query stats fields =
+  Kernel.json_obj (agent_graph_base_fields ?source query stats @ fields) ^ "\n"
+
+let agent_graph_stats_json ?source input =
+  let stats = graph_stats input in
+  agent_graph_json ?source "stats" stats
+    [ Kernel.json_field "stats" (agent_graph_stats_to_json stats) ]
+
+let agent_graph_definitions_json ?source input =
+  let stats = graph_stats input in
+  agent_graph_json ?source "definitions" stats
+    [
+      Kernel.json_field "definitions"
+        (Kernel.json_array agent_graph_definition_to_json (graph_definitions input));
+    ]
+
+let agent_graph_summary_json ?source input =
+  let stats = graph_stats input in
+  agent_graph_json ?source "summary" stats
+    [
+      Kernel.json_field "stats" (agent_graph_stats_to_json stats);
+      Kernel.json_field "definitions"
+        (Kernel.json_array agent_graph_definition_to_json (graph_definitions input));
+      Kernel.json_field "dependencies"
+        (Kernel.json_array agent_graph_dependency_to_json (graph_dependencies input));
+      Kernel.json_field "capabilities"
+        (Kernel.json_array agent_graph_capability_to_json (graph_capabilities input));
+      Kernel.json_field "capabilityScopes"
+        (Kernel.json_array agent_graph_capability_scope_to_json (graph_capability_scopes input));
+    ]
+
+let agent_graph_node_json ?source input node_ref =
+  let stats = graph_stats input in
+  agent_graph_json ?source "node" stats
+    [
+      Kernel.json_field "nodeRef" (Kernel.json_string node_ref);
+      Kernel.json_field "node" (agent_graph_node_to_json (graph_node input node_ref));
+    ]
+
+let agent_graph_definition_json ?source input id =
+  let stats = graph_stats input in
+  agent_graph_json ?source "definition" stats
+    [
+      Kernel.json_field "id" (Kernel.json_string id);
+      Kernel.json_field "definition" (agent_graph_definition_to_json (graph_definition input id));
+    ]
+
+let agent_graph_dependencies_json ?source input id =
+  let stats = graph_stats input in
+  let deps =
+    match id with None -> graph_dependencies input | Some id -> graph_dependencies_for input id
+  in
+  let filter_fields =
+    match id with None -> [] | Some id -> [ Kernel.json_field "id" (Kernel.json_string id) ]
+  in
+  agent_graph_json ?source "dependencies" stats
+    (filter_fields
+    @ [
+        Kernel.json_field "dependencies"
+          (Kernel.json_array agent_graph_dependency_to_json deps);
+      ])
+
+let agent_graph_capabilities_json ?source input =
+  let stats = graph_stats input in
+  agent_graph_json ?source "capabilities" stats
+    [
+      Kernel.json_field "capabilities"
+        (Kernel.json_array agent_graph_capability_to_json (graph_capabilities input));
+    ]
+
+let agent_graph_capability_json ?source input id =
+  let stats = graph_stats input in
+  agent_graph_json ?source "capability" stats
+    [
+      Kernel.json_field "id" (Kernel.json_string id);
+      Kernel.json_field "capability"
+        (agent_graph_capability_to_json (graph_capability input id));
+    ]
+
+let agent_graph_capability_scopes_json ?source input id =
+  let stats = graph_stats input in
+  let scopes =
+    match id with
+    | None -> graph_capability_scopes input
+    | Some id -> graph_capability_scopes_for input id
+  in
+  let filter_fields =
+    match id with None -> [] | Some id -> [ Kernel.json_field "id" (Kernel.json_string id) ]
+  in
+  agent_graph_json ?source "capability-scopes" stats
+    (filter_fields
+    @ [
+        Kernel.json_field "capabilityScopes"
+          (Kernel.json_array agent_graph_capability_scope_to_json scopes);
+      ])
+
+let agent_graph_host_contract_json ?source input =
+  let stats = graph_stats input in
+  agent_graph_json ?source "host-contract" stats
+    [ Kernel.json_field "hostContract" (String.trim (graph_host_contract input)) ]
+
 let parse_def = Kernel.parse_serialized_def
 
 let parse_program = Kernel.parse_serialized_program

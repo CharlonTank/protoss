@@ -52,6 +52,8 @@ let usage () =
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --capability-scopes <graph.json> [nameOrCapRef] | --host-contract <graph.json> | --check-host-contract <graph.json> <contract.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
      \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --host-contract | --check-host-contract <contract.json> | --node <nodeRef> | --def <nameOrDefId>\n\
+     \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>]\n\
+     \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>]\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
      \       protoss grammar kernel\n\
@@ -968,6 +970,49 @@ let command_graph = function
       Printf.printf "Wrote %s\n" out
   | _ -> usage ()
 
+let command_agent_graph_query source input = function
+  | [] | [ "--summary" ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_summary_json ~source input)
+  | [ "--stats" ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_stats_json ~source input)
+  | [ "--roots" ] | [ "--defs" ] | [ "--definitions" ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_definitions_json ~source input)
+  | [ "--deps" ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_dependencies_json ~source input None)
+  | [ "--deps"; id ] ->
+      print_string
+        (Protoss.Canonical_ir.agent_graph_dependencies_json ~source input (Some id))
+  | [ "--capabilities" ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_capabilities_json ~source input)
+  | [ "--capability"; id ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_capability_json ~source input id)
+  | [ "--capability-scopes" ] ->
+      print_string
+        (Protoss.Canonical_ir.agent_graph_capability_scopes_json ~source input None)
+  | [ "--capability-scopes"; id ] ->
+      print_string
+        (Protoss.Canonical_ir.agent_graph_capability_scopes_json ~source input (Some id))
+  | [ "--host-contract" ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_host_contract_json ~source input)
+  | [ "--node"; node_ref ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_node_json ~source input node_ref)
+  | [ "--def"; id ] ->
+      print_string (Protoss.Canonical_ir.agent_graph_definition_json ~source input id)
+  | _ -> usage ()
+
+let command_agent = function
+  | "graph" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      let source =
+        Protoss.Canonical_ir.agent_graph_source "store-graph"
+          (project_or_store ^ "#" ^ graph_hash)
+      in
+      command_agent_graph_query source (Protoss.Workspace.graph_store store graph_hash) args
+  | "graph" :: file :: args ->
+      let source = Protoss.Canonical_ir.agent_graph_source "graph-file" file in
+      command_agent_graph_query source (Protoss.Store.read_file file) args
+  | _ -> usage ()
+
 let command_repl () =
   print_endline "Protoss REPL. Enter a single expression or EOF.";
   try
@@ -1372,6 +1417,7 @@ let () =
       | "invariants" :: args -> command_invariants args
       | "fmt" :: args -> command_fmt args
       | "graph" :: args -> command_graph args
+      | "agent" :: args -> command_agent args
       | [ "repl" ] -> command_repl ()
       | "explain" :: args -> command_explain args
       | "grammar" :: args -> command_grammar args

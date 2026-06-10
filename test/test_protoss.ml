@@ -79,6 +79,11 @@ let json_array_field name obj =
   | Some xs -> xs
   | None -> fail ("JSON field is not array: " ^ name)
 
+let json_nat_field name obj =
+  match json_field name obj with
+  | Json.Num n when n >= 0 -> n
+  | _ -> fail ("JSON field is not natural number: " ^ name)
+
 let json_string_array_field name obj =
   json_array_field name obj
   |> List.map (function Json.String s -> s | _ -> fail ("JSON field is not string array: " ^ name))
@@ -1174,6 +1179,46 @@ let () =
     (string_of_int (List.length (Canonical_ir.graph_dependencies_for dep_graph_json "three")));
   assert_equal "canonical graph dependency leaf edge count" "0"
     (string_of_int (List.length (Canonical_ir.graph_dependencies_for dep_graph_json "two")));
+  let agent_source = Canonical_ir.agent_graph_source "test" "dep_graph" in
+  let dep_graph = Json.parse dep_graph_json in
+  let agent_summary =
+    Json.parse (Canonical_ir.agent_graph_summary_json ~source:agent_source dep_graph_json)
+  in
+  assert_equal "agent graph summary format" "protoss-agent-graph-v1"
+    (json_string_field "format" agent_summary);
+  assert_equal "agent graph summary query" "summary" (json_string_field "query" agent_summary);
+  assert_equal "agent graph summary source kind" "test"
+    (json_string_field "kind" (json_field "source" agent_summary));
+  assert_equal "agent graph summary graph hash" (json_string_field "graphHash" dep_graph)
+    (json_string_field "graphHash" agent_summary);
+  let agent_stats = json_field "stats" agent_summary in
+  assert_equal "agent graph summary definition count" "2"
+    (string_of_int (json_nat_field "definitions" agent_stats));
+  assert_true "agent graph summary includes three"
+    (json_array_field "definitions" agent_summary
+    |> List.exists (fun def -> String.equal "three" (json_string_field "name" def)));
+  assert_equal "agent graph summary dependency count" "1"
+    (string_of_int (List.length (json_array_field "dependencies" agent_summary)));
+  let agent_def = Json.parse (Canonical_ir.agent_graph_definition_json dep_graph_json "three") in
+  let agent_def_body = json_field "definition" agent_def in
+  assert_equal "agent graph def query" "definition" (json_string_field "query" agent_def);
+  assert_equal "agent graph def name" "three" (json_string_field "name" agent_def_body);
+  assert_equal "agent graph def deps" "two"
+    (String.concat "," (json_string_array_field "deps" agent_def_body));
+  let dep_three_term_ref = json_string_field "termRef" (graph_def dep_graph "three") in
+  let agent_node = Json.parse (Canonical_ir.agent_graph_node_json dep_graph_json dep_three_term_ref) in
+  let agent_node_body = json_field "node" agent_node in
+  assert_equal "agent graph node query" "node" (json_string_field "query" agent_node);
+  assert_equal "agent graph node id" dep_three_term_ref (json_string_field "id" agent_node_body);
+  assert_equal "agent graph node kind" "Term" (json_string_field "kind" agent_node_body);
+  assert_true "agent graph node edge refs"
+    (json_string_array_field "edgeRefs" agent_node_body <> []);
+  let agent_deps =
+    Json.parse (Canonical_ir.agent_graph_dependencies_json dep_graph_json (Some "three"))
+  in
+  assert_equal "agent graph deps filter" "three" (json_string_field "id" agent_deps);
+  let agent_dep = List.hd (json_array_field "dependencies" agent_deps) in
+  assert_equal "agent graph dep target" "two" (json_string_field "dependsOn" agent_dep);
   let duplicate_ref_checked = check "(def a Nat 1)\n(def b Nat 1)\n(def c Nat b)" in
   let duplicate_ref_graph_json = Canonical_ir.serialize_graph duplicate_ref_checked in
   let duplicate_ref_roundtrip =
@@ -3618,8 +3663,39 @@ let () =
     (string_of_int
        (List.length
           (Canonical_ir.graph_capability_scopes_for process_graph_json human_capability_ref)));
+  let process_agent_capability =
+    Json.parse (Canonical_ir.agent_graph_capability_json process_graph_json "Human.ask")
+  in
+  let process_agent_capability_body = json_field "capability" process_agent_capability in
+  assert_equal "process agent graph capability query" "capability"
+    (json_string_field "query" process_agent_capability);
+  assert_equal "process agent graph capability ref" human_capability_ref
+    (json_string_field "ref" process_agent_capability_body);
+  let process_agent_request =
+    List.hd (json_array_field "requests" process_agent_capability_body)
+  in
+  assert_equal "process agent graph request tag" "AskHuman"
+    (json_string_field "tag" process_agent_request);
+  assert_equal "process agent graph request payload" "(Record (prompt String))"
+    (json_string_field "payloadTypeCanonical" process_agent_request);
+  let process_agent_scopes =
+    Json.parse
+      (Canonical_ir.agent_graph_capability_scopes_json process_graph_json (Some "Human.ask"))
+  in
+  assert_equal "process agent graph scope query" "capability-scopes"
+    (json_string_field "query" process_agent_scopes);
+  assert_equal "process agent graph scope count" "1"
+    (string_of_int (List.length (json_array_field "capabilityScopes" process_agent_scopes)));
   let process_host_contract_json = Canonical_ir.graph_host_contract process_graph_json in
   let process_host_contract = Json.parse process_host_contract_json in
+  let process_agent_host =
+    Json.parse (Canonical_ir.agent_graph_host_contract_json process_graph_json)
+  in
+  let process_agent_host_contract = json_field "hostContract" process_agent_host in
+  assert_equal "process agent graph host query" "host-contract"
+    (json_string_field "query" process_agent_host);
+  assert_equal "process agent graph host format" "protoss-host-contract-v1"
+    (json_string_field "format" process_agent_host_contract);
   assert_equal "process host contract format" "protoss-host-contract-v1"
     (json_string_field "format" process_host_contract);
   assert_equal "process host contract codec version" Canonical_ir.host_codec_version
