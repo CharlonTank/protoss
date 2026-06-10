@@ -258,8 +258,18 @@ Process/ledger/web runtime dans `test/test_protoss.ml`.
 - [x] Suspendre les requetes externes et reprendre avec reponse typee.
 - [x] Rejeter les reprises avec mauvais tag/type de reponse.
 - [x] Exporter les metadonnees de requete dans le runtime web.
-- [ ] Promouvoir `Process` vers `Process caps a` dans le langage surface.
-- [ ] Rendre les capabilities visibles dans le type de `Process`.
+- [x] Promouvoir `Process` vers `Process caps a` dans le langage surface.
+  Preuves: `Ast.TProcess` porte `string list option`, `Parser.parse_type`
+  accepte `(Process (capabilities ...) A)`, `Elm_syntax.parse_signature_type_text`
+  abaisse `Process { ... } A`, `Kernel.executable_grammar_text`,
+  `Surface_syntax.human_grammar_text`, assertions "sexp Process capability
+  type visible" et "human Process capability type visible" dans
+  `test/test_protoss.ml`, `README.md`, `CLAUDE.md`.
+- [x] Rendre les capabilities visibles dans le type de `Process`.
+  Preuves: `Ast.string_of_typ`, `Kernel.type_to_canonical`,
+  `Kernel.type_to_graph_json`, `Canonical_ir.type_of_graph_json`, assertion
+  "Process type graph exposes capabilities" et rejet `Process (capabilities)`
+  dans `test/test_protoss.ml`.
 - [x] Representer `WorldRef` comme Merkle-DAG evenementiel complet.
   Preuves: `Ledger.add_event`, `Ledger.merge`, `Ledger.validate_event_hash`,
   `Ledger.validate_world_content`, assertions "ledger event hash mismatch",

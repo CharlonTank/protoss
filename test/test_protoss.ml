@@ -327,7 +327,7 @@ let rec runtime_value_matches_type value typ =
          | None -> false)
   | Runtime.VView _, Ast.TView _ -> true
   | Runtime.VAttribute _, Ast.TAttr _ -> true
-  | Runtime.VProcessDone value, Ast.TProcess typ -> runtime_value_matches_type value typ
+  | Runtime.VProcessDone value, Ast.TProcess (_, typ) -> runtime_value_matches_type value typ
   | Runtime.VProcessRequest _, Ast.TProcess _ -> true
   | _ -> false
 
@@ -3695,13 +3695,32 @@ let () =
   in
   assert_equal "human Process capability scope" "Human.ask"
     (String.concat "," (checked_def human_scoped_process "askScoped").Kernel.capabilities);
+  assert_equal "human Process capability type visible"
+    "(Process (capabilities Human.ask) String)"
+    (Ast.string_of_typ (checked_def human_scoped_process "askScoped").Kernel.def.typ);
   let human_scoped_pv, _ = Runtime.eval_entry human_scoped_process "askScoped" in
   assert_true "human Process capability type should allow process request"
     (match human_scoped_pv with
     | Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true
     | _ -> false);
+  let sexp_scoped_process =
+    check
+      "(capabilities Human.ask)\n\
+       (def askScoped (Process (capabilities Human.ask) String) (Human.ask \"Name?\"))"
+  in
+  assert_equal "sexp Process capability type visible"
+    "(Process (capabilities Human.ask) String)"
+    (Ast.string_of_typ (checked_def sexp_scoped_process "askScoped").Kernel.def.typ);
   expect_check_error
     "capabilities Human.ask\nbad : Process { } String\nbad = Human.ask \"Name?\"\n";
+  expect_check_error
+    "(capabilities Human.ask)\n\
+     (def bad (Process (capabilities) String) (Human.ask \"Name?\"))";
+  let scoped_process_graph = Json.parse (Canonical_ir.serialize_graph human_scoped_process) in
+  assert_equal "Process type graph exposes capabilities" "Human.ask"
+    (String.concat ","
+       (json_string_array_field "capabilities"
+          (json_field "type" (graph_def scoped_process_graph "askScoped"))));
   let effect_sensors_path = find_up (Sys.getcwd ()) "examples/effect_sensors.protoss" in
   let effect_sensors = Loader.check_file effect_sensors_path in
   let assert_sensor_request name expected_req expected_scope =
@@ -4128,6 +4147,19 @@ let () =
        (def both (Process String)\n\
        \  (bind (Clock.read) (lambda (now String) (Human.ask \"Name?\"))))"
   in
+  let multi_cap_scoped_process =
+    check
+      "(capabilities Human.ask Clock.read)\n\
+       (def both (Process (capabilities Clock.read Human.ask) String)\n\
+       \  (bind (Clock.read) (lambda (now String) (Human.ask \"Name?\"))))"
+  in
+  assert_equal "scoped Process bind union type visible"
+    "(Process (capabilities Clock.read Human.ask) String)"
+    (Ast.string_of_typ (checked_def multi_cap_scoped_process "both").Kernel.def.typ);
+  expect_check_error
+    "(capabilities Human.ask Clock.read)\n\
+     (def bad (Process (capabilities Human.ask) String)\n\
+     \  (bind (Clock.read) (lambda (now String) (Human.ask \"Name?\"))))";
   let multi_cap_graph_json = Canonical_ir.serialize_graph multi_cap_process in
   ignore (Canonical_ir.parse_graph multi_cap_graph_json);
   let multi_cap_graph = Json.parse multi_cap_graph_json in

@@ -49,12 +49,12 @@ let check_contract checked =
   let view_def = require_def checked "view" in
   let model_ty =
     match init_def.def.typ with
-    | TProcess model -> model
+    | TProcess (_, model) -> model
     | t -> fail ("WEB002 init must have type Process Model, got " ^ string_of_typ t)
   in
   let msg_ty =
     match update_def.def.typ with
-    | TFun (msg, TFun (model, TProcess model')) ->
+    | TFun (msg, TFun (model, TProcess (_, model'))) ->
         if not (equal_typ model_ty model) then
           fail
             ("WEB003 update model argument mismatch: expected " ^ string_of_typ model_ty

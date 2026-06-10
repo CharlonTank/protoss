@@ -313,7 +313,16 @@ let parse_signature_type_text text =
             ensure_unique_names "process capability" acc;
             let capabilities = List.sort String.compare acc in
             let value_type = parse_type value_tokens in
-            { typ = Sexp.List [ Sexp.Atom "Process"; value_type ]; capabilities = Some capabilities }
+            {
+              typ =
+                Sexp.List
+                  [
+                    Sexp.Atom "Process";
+                    Sexp.List (Sexp.Atom "capabilities" :: List.map (fun c -> Sexp.Atom c) capabilities);
+                    value_type;
+                  ];
+              capabilities = Some capabilities;
+            }
         | Comma :: rest -> caps acc rest
         | Ident name :: rest ->
             if not (is_name name) then fail ("invalid process capability: " ^ name);

@@ -120,6 +120,8 @@ dispatcher (pattern-matches argv → `command_*` functions → `Protoss.<Module>
    S-expressions directly (`sexp.ml`). Either way the result is one canonical S-expression AST,
    so both syntaxes converge before checking.
 2. `ast.ml` — the surface AST (`typ`, `expr`, `def`, `program`, `req`). Plain data, no logic.
+   `Ast.TProcess` carries an optional exact capability scope; `None` is the legacy
+   unconstrained `Process A` form, while `Some caps` is the explicit `Process caps A` type.
 3. `loader.ml` — reads files/workspaces, applies aliases/desugaring, attaches `path:line:col`
    source locations to errors.
 4. `kernel.ml` — **the pure, total core** (~4000 lines, by far the most important file). Holds the

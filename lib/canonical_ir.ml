@@ -87,7 +87,20 @@ let rec type_of_graph_json obj =
   | "List" -> Ast.TList (type_of_graph_json (json_field "item" obj))
   | "View" -> Ast.TView (type_of_graph_json (json_field "message" obj))
   | "Attr" -> Ast.TAttr (type_of_graph_json (json_field "message" obj))
-  | "Process" -> Ast.TProcess (type_of_graph_json (json_field "result" obj))
+  | "Process" ->
+      let capabilities =
+        match Json.field "capabilities" obj with
+        | None -> None
+        | Some (Json.Array caps) ->
+            Some
+              (caps
+              |> List.map (function
+                   | Json.String cap -> cap
+                   | _ -> fail "canonical graph Process capability must be string")
+              |> List.sort_uniq String.compare)
+        | Some _ -> fail "canonical graph Process capabilities must be an array"
+      in
+      Ast.TProcess (capabilities, type_of_graph_json (json_field "result" obj))
   | "SecretRef" ->
       Ast.TSecretRef
         (json_string_field "scope" obj, type_of_graph_json (json_field "value" obj))

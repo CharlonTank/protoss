@@ -9,7 +9,7 @@ type typ =
   | TList of typ
   | TView of typ
   | TAttr of typ
-  | TProcess of typ
+  | TProcess of string list option * typ
   | TSecretRef of string * typ
   | TVar of int
   | TForall of int * typ
@@ -107,6 +107,13 @@ let rec fields_sorted = function
 
 let sort_fields xs = if fields_sorted xs then xs else List.sort compare_field xs
 
+let equal_process_capabilities a b =
+  match (a, b) with
+  | None, _ | _, None -> true
+  | Some a, Some b ->
+      let a = List.sort_uniq String.compare a and b = List.sort_uniq String.compare b in
+      List.length a = List.length b && List.for_all2 String.equal a b
+
 let rec equal_typ a b =
   match (a, b) with
   | TUnit, TUnit | TBool, TBool | TNat, TNat | TString, TString -> true
@@ -116,7 +123,8 @@ let rec equal_typ a b =
   | TView a, TView b -> equal_typ a b
   | TAttr TUnit, TAttr _ | TAttr _, TAttr TUnit -> true
   | TAttr a, TAttr b -> equal_typ a b
-  | TProcess a, TProcess b -> equal_typ a b
+  | TProcess (caps_a, a), TProcess (caps_b, b) ->
+      equal_process_capabilities caps_a caps_b && equal_typ a b
   | TSecretRef (scope_a, a), TSecretRef (scope_b, b) ->
       String.equal scope_a scope_b && equal_typ a b
   | TVar a, TVar b -> a = b
@@ -173,7 +181,11 @@ let rec string_of_typ_with_params params = function
   | TList t -> "(List " ^ string_of_typ_with_params params t ^ ")"
   | TView t -> "(View " ^ string_of_typ_with_params params t ^ ")"
   | TAttr t -> "(Attr " ^ string_of_typ_with_params params t ^ ")"
-  | TProcess t -> "(Process " ^ string_of_typ_with_params params t ^ ")"
+  | TProcess (None, t) -> "(Process " ^ string_of_typ_with_params params t ^ ")"
+  | TProcess (Some caps, t) ->
+      "(Process (capabilities"
+      ^ (match caps with [] -> "" | _ -> " " ^ String.concat " " caps)
+      ^ ") " ^ string_of_typ_with_params params t ^ ")"
   | TSecretRef (scope, t) ->
       "(SecretRef " ^ scope ^ " " ^ string_of_typ_with_params params t ^ ")"
   | TVar i -> (

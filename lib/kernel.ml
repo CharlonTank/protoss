@@ -40,6 +40,24 @@ let require cond msg = if not cond then fail msg
 
 let option_or_fail msg = function Some x -> x | None -> fail msg
 
+let normalize_process_capabilities = function
+  | None -> None
+  | Some caps -> Some (List.sort_uniq String.compare caps)
+
+let merge_process_capabilities a b =
+  match (normalize_process_capabilities a, normalize_process_capabilities b) with
+  | Some a, Some b -> Some (List.sort_uniq String.compare (a @ b))
+  | _ -> None
+
+let process_capabilities_to_canonical = function
+  | None -> ""
+  | Some caps ->
+      " (Capabilities"
+      ^ (match List.sort_uniq String.compare caps with
+        | [] -> ""
+        | caps -> " " ^ String.concat " " (List.map Ast.quote caps))
+      ^ ")"
+
 let rec type_to_canonical = function
   | TUnit -> "Unit"
   | TBool -> "Bool"
@@ -63,7 +81,8 @@ let rec type_to_canonical = function
   | TList t -> "(List " ^ type_to_canonical t ^ ")"
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
   | TAttr t -> "(Attr " ^ type_to_canonical t ^ ")"
-  | TProcess t -> "(Process " ^ type_to_canonical t ^ ")"
+  | TProcess (caps, t) ->
+      "(Process" ^ process_capabilities_to_canonical caps ^ " " ^ type_to_canonical t ^ ")"
   | TSecretRef (scope, t) -> "(SecretRef " ^ scope ^ " " ^ type_to_canonical t ^ ")"
   | TVar i -> "(TVar " ^ string_of_int i ^ ")"
   | TForall (arity, body) ->
@@ -317,7 +336,7 @@ let rec direct_self_refs alias guarded = function
   | TRecord fields -> List.concat_map (fun (_, t) -> direct_self_refs alias guarded t) fields
   | TVariant cases -> List.concat_map (fun (_, t) -> direct_self_refs alias true t) cases
   | TList t -> direct_self_refs alias guarded t
-  | TView t | TAttr t | TProcess t | TSecretRef (_, t) -> direct_self_refs alias false t
+  | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) -> direct_self_refs alias false t
   | TForall (_, body) -> direct_self_refs alias guarded body
   | TNamed (n, args) ->
       let arg_refs = List.concat_map (direct_self_refs alias guarded) args in
@@ -360,7 +379,7 @@ let rec expand_type recursive_names aliases vars stack = function
   | TList t -> TList (expand_type recursive_names aliases vars stack t)
   | TView t -> TView (expand_type recursive_names aliases vars stack t)
   | TAttr t -> TAttr (expand_type recursive_names aliases vars stack t)
-  | TProcess t -> TProcess (expand_type recursive_names aliases vars stack t)
+  | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, expand_type recursive_names aliases vars stack t)
   | TSecretRef (scope, t) -> TSecretRef (scope, expand_type recursive_names aliases vars stack t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, expand_type recursive_names aliases vars stack body)
@@ -780,7 +799,7 @@ let rec subst_type args = function
   | TList t -> TList (subst_type args t)
   | TView t -> TView (subst_type args t)
   | TAttr t -> TAttr (subst_type args t)
-  | TProcess t -> TProcess (subst_type args t)
+  | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, subst_type args t)
   | TSecretRef (scope, t) -> TSecretRef (scope, subst_type args t)
   | TVar i -> option_or_fail ("type argument missing for TVar " ^ string_of_int i) (List.nth_opt args i)
   | TForall (arity, body) -> TForall (arity, subst_type args body)
@@ -813,7 +832,7 @@ let rec subst_named_type_params vars = function
   | TList t -> TList (subst_named_type_params vars t)
   | TView t -> TView (subst_named_type_params vars t)
   | TAttr t -> TAttr (subst_named_type_params vars t)
-  | TProcess t -> TProcess (subst_named_type_params vars t)
+  | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, subst_named_type_params vars t)
   | TSecretRef (scope, t) -> TSecretRef (scope, subst_named_type_params vars t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, subst_named_type_params vars body)
@@ -1005,6 +1024,17 @@ let rec contains_process_type = function
   | TVar _ | TUnit | TBool | TNat | TString -> false
 
 let is_process_type = function TProcess _ -> true | _ -> false
+
+let require_process_capabilities expected actual context =
+  if not (equal_process_capabilities expected actual) then
+    let show = function
+      | None -> "unspecified"
+      | Some [] -> "{}"
+      | Some caps -> "{" ^ String.concat ", " (List.sort_uniq String.compare caps) ^ "}"
+    in
+    fail
+      (context ^ ": expected Process capabilities " ^ show expected ^ ", got "
+     ^ show actual)
 
 let fold_branch_ctx ctx target result payload_name payload_ty =
   {
@@ -1239,26 +1269,28 @@ let rec infer ctx = function
   | EOn (event, msg) ->
       require_type TString (infer ctx event) "on event";
       TAttr (infer ctx msg)
-  | EDone e -> TProcess (infer ctx e)
+  | EDone e -> TProcess (Some [], infer ctx e)
   | ERequest req ->
       let cap = req_capability req in
       if not (has_capability ctx cap) then fail ("missing capability: " ^ cap);
-      TProcess (req_result_type req)
+      TProcess (Some [ cap ], req_result_type req)
   | EBind (p, x, annotation, body) -> (
       match infer ctx p with
-      | TProcess a ->
+      | TProcess (process_caps, a) ->
           require_type a annotation "bind annotation";
           let body_ty = infer (bind_local ctx x a) body in
           (match body_ty with
-          | TProcess _ -> body_ty
+          | TProcess (body_caps, value_ty) ->
+              TProcess (merge_process_capabilities process_caps body_caps, value_ty)
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
   | EBindInfer (p, x, body) -> (
       match infer ctx p with
-      | TProcess a ->
+      | TProcess (process_caps, a) ->
           let body_ty = infer (bind_local ctx x a) body in
           (match body_ty with
-          | TProcess _ -> body_ty
+          | TProcess (body_caps, value_ty) ->
+              TProcess (merge_process_capabilities process_caps body_caps, value_ty)
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
@@ -1549,24 +1581,28 @@ let rec infer_elab ctx expr =
       (TAttr msg_ty, EOn (event, msg))
   | EDone e ->
       let t, e = infer_elab ctx e in
-      (TProcess t, EDone e)
+      (TProcess (Some [], t), EDone e)
   | EBind (p, x, annotation, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
-      | TProcess a ->
+      | TProcess (process_caps, a) ->
           require_type a annotation "bind annotation";
           let body_ty, body = infer_elab (bind_local ctx x a) body in
           (match body_ty with
-          | TProcess _ -> (body_ty, EBind (p, x, annotation, body))
+          | TProcess (body_caps, value_ty) ->
+              ( TProcess (merge_process_capabilities process_caps body_caps, value_ty),
+                EBind (p, x, annotation, body) )
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
   | EBindInfer (p, x, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
-      | TProcess a ->
+      | TProcess (process_caps, a) ->
           let body_ty, body = infer_elab (bind_local ctx x a) body in
           (match body_ty with
-          | TProcess _ -> (body_ty, EBind (p, x, a, body))
+          | TProcess (body_caps, value_ty) ->
+              ( TProcess (merge_process_capabilities process_caps body_caps, value_ty),
+                EBind (p, x, a, body) )
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
@@ -1634,7 +1670,8 @@ and check_elab ctx expected expr =
           (sort_fields expected_fields)
       in
       (expected, ERecord fields)
-  | TProcess expected_value, EDone e ->
+  | TProcess (expected_caps, expected_value), EDone e ->
+      require_process_capabilities expected_caps (Some []) "done";
       let _, e = check_elab ctx expected_value e in
       (expected, EDone e)
   | TView msg_ty, ENode (tag, attrs, children) ->
@@ -1692,19 +1729,35 @@ and check_elab ctx expected expr =
       (expected, ELet (x, e, body))
   | _, ELetRecord (record, fields, body) ->
       check_elab ctx expected (desugar_let_record ctx record fields body)
-  | TProcess _, EBind (p, x, annotation, body) ->
+  | TProcess (expected_caps, expected_value), EBind (p, x, annotation, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
-      | TProcess a ->
+      | TProcess (process_caps, a) ->
           require_type a annotation "bind annotation";
-          let _, body = check_elab (bind_local ctx x a) expected body in
+          let body_ctx = bind_local ctx x a in
+          let _, body = check_elab body_ctx (TProcess (None, expected_value)) body in
+          let body_ty = infer body_ctx body in
+          (match body_ty with
+          | TProcess (body_caps, _) ->
+              require_process_capabilities expected_caps
+                (merge_process_capabilities process_caps body_caps)
+                "bind"
+          | _ -> ());
           (expected, EBind (p, x, annotation, body))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
-  | TProcess _, EBindInfer (p, x, body) ->
+  | TProcess (expected_caps, expected_value), EBindInfer (p, x, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
-      | TProcess a ->
-          let _, body = check_elab (bind_local ctx x a) expected body in
+      | TProcess (process_caps, a) ->
+          let body_ctx = bind_local ctx x a in
+          let _, body = check_elab body_ctx (TProcess (None, expected_value)) body in
+          let body_ty = infer body_ctx body in
+          (match body_ty with
+          | TProcess (body_caps, _) ->
+              require_process_capabilities expected_caps
+                (merge_process_capabilities process_caps body_caps)
+                "bind"
+          | _ -> ());
           (expected, EBind (p, x, a, body))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
   | _, EName _ | _, EApp _ -> (
@@ -1806,9 +1859,12 @@ and poly_app_elab ctx expected expr =
                 match actual with TView a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected View"))
             | TAttr p -> (
                 match actual with TAttr a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected Attr"))
-            | TProcess p -> (
+            | TProcess (pattern_caps, p) -> (
                 match actual with
-                | TProcess a -> unify p a
+                | TProcess (actual_caps, a) ->
+                    require_process_capabilities pattern_caps actual_caps
+                      ("cannot infer " ^ name);
+                    unify p a
                 | _ -> fail ("cannot infer " ^ name ^ ": expected Process"))
             | TNamed (pn, ps) -> (
                 match actual with
@@ -2217,6 +2273,7 @@ let executable_grammar_text =
       "declaration ::= (defpolycap Name (params TypeName*) (capabilities Capability*) type expr)";
       "declaration ::= (defrec Name type-params? type recursion-body)";
       "type ::= Unit | Bool | Nat | String | (-> type type) | (List type) | (Process type)";
+      "type ::= (Process (capabilities Capability*) type)";
       "type ::= (Record field*) | (Variant variant-case*) | (Named Name type*) | TypeName";
       "expr ::= unit | true | false | Nat | String | Name | (lambda binder+ expr)";
       "expr ::= (let binding expr) | (record field*) | (get expr Field)";
@@ -2430,8 +2487,13 @@ let rec type_to_graph_json = function
       json_obj [ json_field "tag" (json_string "View"); json_field "message" (type_to_graph_json t) ]
   | TAttr t ->
       json_obj [ json_field "tag" (json_string "Attr"); json_field "message" (type_to_graph_json t) ]
-  | TProcess t ->
-      json_obj [ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
+  | TProcess (caps, t) ->
+      json_obj
+        ([ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
+        @
+        match normalize_process_capabilities caps with
+        | None -> []
+        | Some caps -> [ json_field "capabilities" (json_array json_string caps) ])
   | TSecretRef (scope, t) ->
       json_obj
         [
@@ -2801,7 +2863,7 @@ let type_node_edges_via type_id = function
   | TUnit | TBool | TNat | TString | TVar _ -> []
   | TFun (a, b) -> [ type_id a; type_id b ]
   | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_id t)
-  | TList t | TView t | TAttr t | TProcess t | TSecretRef (_, t) -> [ type_id t ]
+  | TList t | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) -> [ type_id t ]
   | TForall (_, body) -> [ type_id body ]
   | TNamed (_, args) -> List.map type_id args
 
@@ -2936,7 +2998,7 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
         add_type a;
         add_type b
     | TRecord fields | TVariant fields -> List.iter (fun (_, t) -> add_type t) fields
-    | TList t | TView t | TAttr t | TProcess t | TSecretRef (_, t) | TForall (_, t) ->
+    | TList t | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) | TForall (_, t) ->
         add_type t
     | TNamed (_, args) -> List.iter add_type args
   in
@@ -3084,7 +3146,16 @@ let rec type_of_canonical_sexp = function
   | Sexp.Atom "String" -> TString
   | Sexp.List [ Sexp.Atom "Fun"; a; b ] ->
       TFun (type_of_canonical_sexp a, type_of_canonical_sexp b)
-  | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (None, type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Process"; Sexp.List (Sexp.Atom "Capabilities" :: caps); t ] ->
+      let caps =
+        caps
+        |> List.map (function
+             | Sexp.Atom cap | Sexp.Str cap -> cap
+             | x -> fail ("invalid Process capability in canonical type: " ^ Sexp.to_string x))
+        |> List.sort_uniq String.compare
+      in
+      TProcess (Some caps, type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "SecretRef"; Sexp.Atom scope; t ] ->
       TSecretRef (scope, type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (type_of_canonical_sexp t)

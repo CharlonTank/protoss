@@ -38,6 +38,7 @@ type ::= Unit | Bool | Nat | String
        | (View type)
        | (Attr type)
        | (Process type)
+       | (Process (capabilities CapabilityName*) type)
        | (SecretRef Scope type)
        | (forall Nat type)
        | (Name type*)

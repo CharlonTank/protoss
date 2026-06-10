@@ -38,6 +38,11 @@ let ensure_unique what xs =
       Hashtbl.add seen n ())
     xs
 
+let parse_capability_atoms what caps =
+  let caps = List.map atom caps in
+  ensure_unique what caps;
+  List.sort String.compare caps
+
 let tuple_field_name index = "_" ^ string_of_int (index + 1)
 
 let ensure_tuple_arity what xs =
@@ -124,7 +129,9 @@ let rec parse_type = function
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (parse_type t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (parse_type t)
   | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (parse_type t)
-  | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (parse_type t)
+  | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (None, parse_type t)
+  | Sexp.List [ Sexp.Atom "Process"; Sexp.List (Sexp.Atom "capabilities" :: caps); t ] ->
+      TProcess (Some (parse_capability_atoms "process capability" caps), parse_type t)
   | Sexp.List [ Sexp.Atom "SecretRef"; Sexp.Atom scope; t ] ->
       TSecretRef (scope, parse_type t)
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> TVar (int_of_string n)
@@ -200,9 +207,7 @@ let parse_named_type_fields what fields =
 
 let parse_capability_clause = function
   | Sexp.List (Sexp.Atom "capabilities" :: caps) ->
-      let caps = List.map atom caps in
-      ensure_unique "definition capability" caps;
-      List.sort String.compare caps
+      parse_capability_atoms "definition capability" caps
   | x -> fail ("invalid definition capabilities: " ^ Sexp.to_string x)
 
 let rec parse_expr = function
@@ -487,7 +492,7 @@ let rec qualify_type local_types params = function
   | TList t -> TList (qualify_type local_types params t)
   | TView t -> TView (qualify_type local_types params t)
   | TAttr t -> TAttr (qualify_type local_types params t)
-  | TProcess t -> TProcess (qualify_type local_types params t)
+  | TProcess (caps, t) -> TProcess (caps, qualify_type local_types params t)
   | TSecretRef (scope, t) -> TSecretRef (scope, qualify_type local_types params t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, qualify_type local_types params body)
