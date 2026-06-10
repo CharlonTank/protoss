@@ -2116,20 +2116,36 @@ let () =
 
   let cache_dir = temp_dir "persistent-cache" in
   let eval_key_b = Runtime.eval_key_for_def memo "b" in
+  let eval_key_b_alt_policy =
+    Runtime.eval_key_for_def ~cache_scope:"alternate-runtime-policy" memo "b"
+  in
   assert_equal "eval key explicit shape"
     (Kernel.hash_string
        ("protoss.eval.v1\ndef-id=p2:def\nargs-hash=p2:args\nruntime-policy=policy"))
     (Runtime.eval_key ~def_id:"p2:def" ~args_hash:"p2:args" ~runtime_policy:"policy");
   assert_true "eval key uses content hash prefix"
     (contains_substring eval_key_b "p2:");
+  assert_true "eval key partitions by runtime policy"
+    (not (String.equal eval_key_b eval_key_b_alt_policy));
+  assert_true "runtime policy records stdlib fast paths"
+    (contains_substring
+       (Runtime.eval_runtime_policy ~stdlib_fast_paths:true
+          ~cache_scope:"alternate-runtime-policy" memo)
+       "stdlib-fast-paths=true");
   let _, _ = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let _, persistent_trace = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
+  let _, _ =
+    Runtime.eval_entry ~trace_cache:true ~cache_dir
+      ~cache_scope:"alternate-runtime-policy" memo "b"
+  in
   let hits, misses, entries = Runtime.persistent_cache_stats cache_dir in
   assert_true "persistent cache should have entries" (entries > 0);
   assert_true "persistent cache should record misses" (misses > 0);
   assert_true "persistent cache should record hits" (hits > 0);
   assert_true "persistent cache should contain eval key file"
     (Sys.file_exists (Filename.concat cache_dir (eval_key_b ^ ".cache")));
+  assert_true "persistent cache should contain alternate policy eval key file"
+    (Sys.file_exists (Filename.concat cache_dir (eval_key_b_alt_policy ^ ".cache")));
   assert_true "persistent cache trace should contain eval-key disk hit"
     (List.exists
        (fun line -> String.equal line ("cache hit eval " ^ eval_key_b))

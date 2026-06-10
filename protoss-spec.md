@@ -168,7 +168,9 @@ listees dans la section "Gates de validation".
 - [x] Ajouter un cache d'evaluation pure persistent.
 - [ ] Implementer `EvalKey` avec `WorldRef` et `CapScope` pour processus.
 - [x] Ajouter une commande d'inspection des entrees de cache.
-- [ ] Partitionner le cache par politique runtime.
+- [x] Partitionner le cache par politique runtime.
+  Preuves: `Runtime.runtime_policy_text`, `app-v5` cache keys et assertions
+  "eval key partitions by runtime policy" dans `test/test_protoss.ml`.
 
 ## 7. Effets, Process et monde
 

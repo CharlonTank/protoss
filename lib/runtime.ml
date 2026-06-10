@@ -88,6 +88,13 @@ type eval_state = {
   mutable cap_scope : string list;
 }
 
+let runtime_policy_text ~cache_scope ~stdlib_fast_paths =
+  "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ cache_scope
+  ^ "\nstdlib-fast-paths=" ^ string_of_bool stdlib_fast_paths
+
+let runtime_policy_of_state st =
+  runtime_policy_text ~cache_scope:st.cache_scope ~stdlib_fast_paths:st.stdlib_fast_paths
+
 let rec value_to_string = function
   | VThunk thunk -> value_to_string (force_value (VThunk thunk))
   | VUnit -> "unit"
@@ -299,8 +306,9 @@ let app_cache_key st fv av =
       | Some _ ->
           Some
             (Kernel.hash_string
-               ("app-v4:" ^ st.cache_scope ^ ":" ^ recur_stack_to_cache_key st.recur_stack
-              ^ ":" ^ value_to_cache_key fv ^ ":" ^ value_to_cache_key av)))
+               ("app-v5:" ^ runtime_policy_of_state st ^ "\nrecur="
+              ^ recur_stack_to_cache_key st.recur_stack ^ "\nfunction="
+              ^ value_to_cache_key fv ^ "\nargument=" ^ value_to_cache_key av)))
 
 let trace st line = if st.trace_cache then st.trace <- line :: st.trace
 
@@ -961,13 +969,9 @@ and apply_value st fv av =
       eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
   | v, _ -> fail ("application of non-function runtime value: " ^ value_to_string v)
 
-and eval_runtime_policy_of_state st =
-  "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ st.cache_scope
-  ^ "\nstdlib-fast-paths=" ^ string_of_bool st.stdlib_fast_paths
-
 and eval_key_for_checked_def st (d : Kernel.checked_def) =
   eval_key ~def_id:d.def_id ~args_hash:no_args_hash
-    ~runtime_policy:(eval_runtime_policy_of_state st)
+    ~runtime_policy:(runtime_policy_of_state st)
 
 and eval_def st n =
   match Hashtbl.find_opt st.def_cache n with
@@ -1010,8 +1014,7 @@ let eval_runtime_policy ?(stdlib_fast_paths = false) ?cache_scope checked =
   let scope =
     match cache_scope with Some scope -> scope | None -> program_cache_scope checked
   in
-  "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ scope ^ "\nstdlib-fast-paths="
-  ^ string_of_bool stdlib_fast_paths
+  runtime_policy_text ~cache_scope:scope ~stdlib_fast_paths
 
 let eval_key_for_def ?(stdlib_fast_paths = false) ?cache_scope checked name =
   match def_by_ref checked name with
