@@ -2,7 +2,7 @@
   "name": "protoss-syntax",
   "displayName": "Protoss Syntax",
   "description": "Syntax highlighting for Protoss .protoss files in Cursor and VS Code.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "protoss",
   "license": "MIT",
   "main": "./extension.js",
@@ -42,6 +42,31 @@
         "scopeName": "source.protoss",
         "path": "./syntaxes/protoss.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Protoss",
+      "properties": {
+        "protoss.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run Protoss checks and publish editor diagnostics for .protoss files."
+        },
+        "protoss.diagnostics.command": {
+          "type": "string",
+          "default": "protoss",
+          "description": "Command used for Protoss diagnostics."
+        },
+        "protoss.diagnostics.args": {
+          "type": "array",
+          "default": [
+            "check"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed before the file path when running diagnostics."
+        }
+      }
+    }
   }
 }

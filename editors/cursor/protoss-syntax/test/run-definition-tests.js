@@ -4,7 +4,9 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const {
+  fallbackCheckCommand,
   findDefinitionInText,
+  parseProtossDiagnostic,
   scanDefinitions,
   stripLineComment,
   symbolAtTextOffset
@@ -61,6 +63,16 @@ user =
     }
 `;
 
+function findRepoRoot() {
+  const candidates = [process.cwd(), path.join(__dirname, "..", "..", "..", "..")];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "dune-project"))) {
+      return candidate;
+    }
+  }
+  return process.cwd();
+}
+
 assert.deepStrictEqual(
   scanDefinitions(elmLike).map((def) => def.name),
   ["Model", "add", "total", "view"]
@@ -91,5 +103,41 @@ const grammar = JSON.parse(
 );
 assert.strictEqual(grammar.scopeName, "source.protoss");
 assert.ok(JSON.stringify(grammar).includes("keyword.operator.pipeline.protoss"));
+
+assert.deepStrictEqual(
+  parseProtossDiagnostic(
+    "load error: /repo/examples/bad_type.protoss:1:14: definition bad: expected Nat",
+    "/repo/examples/bad_type.protoss"
+  ),
+  {
+    line: 0,
+    character: 13,
+    message: "definition bad: expected Nat"
+  }
+);
+assert.deepStrictEqual(parseProtossDiagnostic("Error: something global", "/repo/a.protoss"), {
+  line: 0,
+  character: 0,
+  message: "Error: something global"
+});
+const fakeVscode = {
+  workspace: {
+    getWorkspaceFolder() {
+      return { uri: { fsPath: findRepoRoot() } };
+    }
+  }
+};
+assert.deepStrictEqual(
+  fallbackCheckCommand(fakeVscode, { uri: { fsPath: __filename } }, {
+    command: "protoss"
+  }),
+  { command: "dune", args: ["exec", "protoss", "--", "check"] }
+);
+assert.strictEqual(
+  fallbackCheckCommand(fakeVscode, { uri: { fsPath: __filename } }, {
+    command: "custom-protoss"
+  }),
+  null
+);
 
 console.log("protoss definition tests ok");

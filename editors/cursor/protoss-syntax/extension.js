@@ -1,9 +1,12 @@
 "use strict";
 
+const childProcess = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_.]*/g;
 const WORD_RE = /[A-Za-z_][A-Za-z0-9_.]*/;
+const DIAGNOSTIC_DELAY_MS = 450;
 
 // Primitives intégrées au kernel (aucune définition .protoss). Cmd/Ctrl+Click
 // les renvoie vers les signatures documentées dans builtins.protoss.
@@ -135,8 +138,72 @@ function symbolAtTextOffset(lineText, character) {
   return null;
 }
 
+function workspaceRootForDocument(vscode, document) {
+  const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+  return folder ? folder.uri.fsPath : path.dirname(document.uri.fsPath);
+}
+
+function parseProtossDiagnostic(output, documentPath) {
+  const text = String(output || "").trim();
+  if (text === "") {
+    return null;
+  }
+
+  const escapedPath =
+    documentPath && documentPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    escapedPath
+      ? new RegExp(`${escapedPath}:(\\d+):(\\d+):\\s*(.*)`, "s")
+      : null,
+    /(?:load error|Error):\s+([^:\n]+\.protoss):(\d+):(\d+):\s*(.*)/s,
+    /([^:\n]+\.protoss):(\d+):(\d+):\s*(.*)/s
+  ].filter(Boolean);
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const hasFile = match.length === 5;
+    const line = Number(match[hasFile ? 2 : 1]);
+    const character = Number(match[hasFile ? 3 : 2]);
+    const message = match[hasFile ? 4 : 3].trim();
+    if (Number.isFinite(line) && Number.isFinite(character)) {
+      return {
+        line: Math.max(0, line - 1),
+        character: Math.max(0, character - 1),
+        message: message || text
+      };
+    }
+  }
+
+  return { line: 0, character: 0, message: text };
+}
+
+function commandConfig(vscode) {
+  const config = vscode.workspace.getConfiguration("protoss");
+  return {
+    enabled: config.get("diagnostics.enabled", true),
+    command: config.get("diagnostics.command", "protoss"),
+    args: config.get("diagnostics.args", ["check"])
+  };
+}
+
+function fallbackCheckCommand(vscode, document, config) {
+  if (config.command !== "protoss") {
+    return null;
+  }
+  const root = workspaceRootForDocument(vscode, document);
+  if (!fs.existsSync(path.join(root, "dune-project"))) {
+    return null;
+  }
+  return { command: "dune", args: ["exec", "protoss", "--", "check"] };
+}
+
 function activate(context) {
   const vscode = require("vscode");
+  const diagnostics = vscode.languages.createDiagnosticCollection("protoss");
+  const pendingDiagnostics = new Map();
 
   function locationFor(documentOrUri, def) {
     const uri = documentOrUri.uri || documentOrUri;
@@ -210,7 +277,95 @@ function activate(context) {
     }
   };
 
+  function setDiagnostic(document, parsed) {
+    if (!parsed) {
+      diagnostics.set(document.uri, []);
+      return;
+    }
+    const lineText =
+      parsed.line < document.lineCount ? document.lineAt(parsed.line).text : "";
+    const start = new vscode.Position(parsed.line, parsed.character);
+    const end = new vscode.Position(
+      parsed.line,
+      Math.max(parsed.character + 1, lineText.length)
+    );
+    const diagnostic = new vscode.Diagnostic(
+      new vscode.Range(start, end),
+      parsed.message,
+      vscode.DiagnosticSeverity.Error
+    );
+    diagnostic.source = "protoss";
+    diagnostics.set(document.uri, [diagnostic]);
+  }
+
+  function runDiagnostics(document) {
+    if (document.languageId !== "protoss" || document.uri.scheme !== "file") {
+      return;
+    }
+    const config = commandConfig(vscode);
+    if (!config.enabled) {
+      diagnostics.delete(document.uri);
+      return;
+    }
+    const run = (command, args, allowFallback) => childProcess.execFile(
+      command,
+      [...args, document.uri.fsPath],
+      { cwd: workspaceRootForDocument(vscode, document), timeout: 15000 },
+      (error, stdout, stderr) => {
+        if (document.isClosed) {
+          return;
+        }
+        if (allowFallback && error && error.code === "ENOENT") {
+          const fallback = fallbackCheckCommand(vscode, document, config);
+          if (fallback) {
+            run(fallback.command, fallback.args, false);
+            return;
+          }
+        }
+        if (!error) {
+          diagnostics.set(document.uri, []);
+          return;
+        }
+        setDiagnostic(document, parseProtossDiagnostic(`${stderr}\n${stdout}`, document.uri.fsPath));
+      }
+    );
+    run(config.command, config.args, true);
+  }
+
+  function scheduleDiagnostics(document) {
+    if (document.languageId !== "protoss" || document.uri.scheme !== "file") {
+      return;
+    }
+    const key = document.uri.toString();
+    const existing = pendingDiagnostics.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    pendingDiagnostics.set(
+      key,
+      setTimeout(() => {
+        pendingDiagnostics.delete(key);
+        runDiagnostics(document);
+      }, DIAGNOSTIC_DELAY_MS)
+    );
+  }
+
+  vscode.workspace.textDocuments.forEach(scheduleDiagnostics);
+
   context.subscriptions.push(
+    diagnostics,
+    vscode.workspace.onDidOpenTextDocument(scheduleDiagnostics),
+    vscode.workspace.onDidSaveTextDocument(runDiagnostics),
+    vscode.workspace.onDidChangeTextDocument((event) => scheduleDiagnostics(event.document)),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      const key = document.uri.toString();
+      const existing = pendingDiagnostics.get(key);
+      if (existing) {
+        clearTimeout(existing);
+        pendingDiagnostics.delete(key);
+      }
+      diagnostics.delete(document.uri);
+    }),
     vscode.languages.registerDefinitionProvider({ language: "protoss", scheme: "file" }, provider),
     vscode.languages.registerDefinitionProvider({ language: "protoss", scheme: "untitled" }, provider)
   );
@@ -221,8 +376,10 @@ function deactivate() {}
 module.exports = {
   activate,
   deactivate,
+  fallbackCheckCommand,
   scanDefinitions,
   findDefinitionInText,
+  parseProtossDiagnostic,
   stripLineComment,
   symbolAtTextOffset
 };
