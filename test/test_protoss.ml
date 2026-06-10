@@ -3241,6 +3241,21 @@ let () =
     | Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true
     | _ -> false);
   expect_check_error "askName : Process String\naskName = Human.ask \"Name?\"\n";
+  let human_scoped_process =
+    check
+      "capabilities Human.ask\n\
+       askScoped : Process { Human.ask } String\n\
+       askScoped = Human.ask \"Name?\"\n"
+  in
+  assert_equal "human Process capability scope" "Human.ask"
+    (String.concat "," (checked_def human_scoped_process "askScoped").Kernel.capabilities);
+  let human_scoped_pv, _ = Runtime.eval_entry human_scoped_process "askScoped" in
+  assert_true "human Process capability type should allow process request"
+    (match human_scoped_pv with
+    | Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true
+    | _ -> false);
+  expect_check_error
+    "capabilities Human.ask\nbad : Process { } String\nbad = Human.ask \"Name?\"\n";
   let defcap_process =
     check
       "(capabilities Human.ask)\n\

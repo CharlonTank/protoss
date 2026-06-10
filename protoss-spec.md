@@ -96,7 +96,9 @@ listees dans la section "Gates de validation".
 - [x] Supporter les declarations de capabilities en syntaxe humaine.
   Preuves: `test/test_protoss.ml` assertion "human capabilities declaration"
   et `README.md`.
-- [ ] Supporter les effets `Process { cap } A` en syntaxe humaine.
+- [x] Supporter les effets `Process { cap } A` en syntaxe humaine.
+  Preuves: `test/test_protoss.ml` assertions "human Process capability" et
+  `README.md`.
 - [x] Supporter les record updates humains `{ model | x = y }`.
   Preuves: `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`,
   `test/test_protoss.ml` assertions "Elm-like record update" et `README.md`.

@@ -53,6 +53,14 @@ let strip_line_comment line =
 let split_words s =
   s |> String.split_on_char ' ' |> List.map trim |> List.filter (( <> ) "")
 
+let ensure_unique_names what names =
+  let seen = Hashtbl.create 16 in
+  List.iter
+    (fun name ->
+      if Hashtbl.mem seen name then fail ("duplicate " ^ what ^ ": " ^ name);
+      Hashtbl.add seen name ())
+    names
+
 let nonempty_lines text =
   text |> String.split_on_char '\n' |> List.map strip_line_comment |> List.map trim
   |> List.filter (( <> ) "")
@@ -278,6 +286,46 @@ and parse_record_type st =
   fields []
 
 let parse_type_text text = parse_type (tokenize text)
+
+type signature_type = {
+  typ : Sexp.t;
+  capabilities : string list option;
+}
+
+let plain_signature typ = { typ; capabilities = None }
+
+let parse_signature_type_text text =
+  let tokens = tokenize text in
+  match tokens with
+  | Ident "Process" :: LBrace :: rest ->
+      let rec caps acc = function
+        | RBrace :: value_tokens ->
+            ensure_unique_names "process capability" acc;
+            let capabilities = List.sort String.compare acc in
+            let value_type = parse_type value_tokens in
+            { typ = Sexp.List [ Sexp.Atom "Process"; value_type ]; capabilities = Some capabilities }
+        | Comma :: rest -> caps acc rest
+        | Ident name :: rest ->
+            if not (is_name name) then fail ("invalid process capability: " ^ name);
+            caps (name :: acc) rest
+        | tok :: _ -> fail ("invalid process capability token: " ^ token_name tok)
+        | [] -> fail "unterminated Process capability set"
+      in
+      caps [] rest
+  | _ -> plain_signature (parse_type tokens)
+
+let definition_form name typ capabilities expr =
+  match capabilities with
+  | None -> Sexp.List [ Sexp.Atom "def"; Sexp.Atom name; typ; expr ]
+  | Some caps ->
+      Sexp.List
+        [
+          Sexp.Atom "defcap";
+          Sexp.Atom name;
+          Sexp.List (Sexp.Atom "capabilities" :: List.map (fun c -> Sexp.Atom c) caps);
+          typ;
+          expr;
+        ]
 
 let split_variant_cases tokens =
   let rec loop depth current acc = function
@@ -784,14 +832,6 @@ let parse_type_decl text =
         @ cases)
   | _ -> fail "invalid type declaration"
 
-let ensure_unique_names what names =
-  let seen = Hashtbl.create 16 in
-  List.iter
-    (fun name ->
-      if Hashtbl.mem seen name then fail ("duplicate " ^ what ^ ": " ^ name);
-      Hashtbl.add seen name ())
-    names
-
 let parse_exposing_clause text =
   let text = trim text in
   let len = String.length text in
@@ -892,19 +932,20 @@ let to_sexp_source input =
       else
         match signature_separator line with
         | Some (name, ty) ->
-            Hashtbl.replace signatures name (parse_type_text ty);
+            Hashtbl.replace signatures name (parse_signature_type_text ty);
             loop (i + 1)
         | None -> (
             match value_separator line with
             | Some (name, params, first_body) ->
                 let body, next = collect_block lines (i + 1) first_body in
-                let typ =
+                let signature =
                   match Hashtbl.find_opt signatures name with
-                  | Some typ -> typ
-                  | None -> infer_missing_value_type name params body
+                  | Some signature -> signature
+                  | None -> plain_signature (infer_missing_value_type name params body)
                 in
                 let expr = parse_expr_text body |> wrap_lambdas params in
-                forms := Sexp.List [ Sexp.Atom "def"; Sexp.Atom name; typ; expr ] :: !forms;
+                forms :=
+                  definition_form name signature.typ signature.capabilities expr :: !forms;
                 loop next
             | None -> fail ("invalid Elm-like top-level line: " ^ line))
   in
