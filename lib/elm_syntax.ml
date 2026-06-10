@@ -150,7 +150,9 @@ let tokenize input =
       && (not (is_space input.[!j]))
       &&
       match input.[!j] with
-      | '(' | ')' | '{' | '}' | '[' | ']' | ':' | '=' | ',' | '|' | '+' | '\\' -> false
+      | '(' | ')' | '{' | '}' | '[' | ']' | ':' | '=' | ',' | '|' | '+' | '<' | '>' | '&'
+      | '/' | '\\' ->
+          false
       | '-' when !j + 1 < len && input.[!j + 1] = '>' -> false
       | _ -> true
     do
@@ -171,10 +173,19 @@ let tokenize input =
       | '[' -> loop (LBracket :: acc) (i + 1)
       | ']' -> loop (RBracket :: acc) (i + 1)
       | ':' -> loop (Colon :: acc) (i + 1)
+      | '=' when i + 1 < len && input.[i + 1] = '=' -> loop (Ident "==" :: acc) (i + 2)
       | '=' -> loop (Equals :: acc) (i + 1)
       | ',' -> loop (Comma :: acc) (i + 1)
       | '+' -> loop (Ident "+" :: acc) (i + 1)
+      | '/' when i + 1 < len && input.[i + 1] = '=' -> loop (Ident "/=" :: acc) (i + 2)
+      | '<' when i + 1 < len && input.[i + 1] = '=' -> loop (Ident "<=" :: acc) (i + 2)
+      | '>' when i + 1 < len && input.[i + 1] = '=' -> loop (Ident ">=" :: acc) (i + 2)
+      | '<' -> loop (Ident "<" :: acc) (i + 1)
+      | '>' -> loop (Ident ">" :: acc) (i + 1)
+      | '&' when i + 1 < len && input.[i + 1] = '&' -> loop (Ident "&&" :: acc) (i + 2)
+      | '&' -> fail "unexpected character: &"
       | '\\' -> loop (Backslash :: acc) (i + 1)
+      | '|' when i + 1 < len && input.[i + 1] = '|' -> loop (Ident "||" :: acc) (i + 2)
       | '|' when i + 1 < len && input.[i + 1] = '>' -> loop (PipeGt :: acc) (i + 2)
       | '|' -> loop (Pipe :: acc) (i + 1)
       | '-' when i + 1 < len && input.[i + 1] = '>' -> loop (Arrow :: acc) (i + 2)
@@ -308,6 +319,25 @@ let nat_add_expr left right =
       right;
       Sexp.List [ Sexp.Atom "lambda"; Sexp.Atom "__infix_add_acc"; Sexp.List [ Sexp.Atom "succ"; Sexp.Atom "__infix_add_acc" ] ];
     ]
+
+let call2 name left right = Sexp.List [ Sexp.List [ Sexp.Atom name; left ]; right ]
+
+let infix_expr name left right =
+  match name with
+  | "+" -> nat_add_expr left right
+  | "==" -> call2 "Nat.eqNat" left right
+  | "/=" -> Sexp.List [ Sexp.Atom "Bool.not"; call2 "Nat.eqNat" left right ]
+  | "<" -> call2 "Nat.lt" left right
+  | "<=" -> call2 "Nat.lte" left right
+  | ">" -> call2 "Nat.gt" left right
+  | ">=" -> call2 "Nat.gte" left right
+  | "&&" -> call2 "Bool.and" left right
+  | "||" -> call2 "Bool.or" left right
+  | _ -> fail ("unsupported infix operator: " ^ name)
+
+let is_infix_operator = function
+  | "+" | "==" | "/=" | "<" | "<=" | ">" | ">=" | "&&" | "||" -> true
+  | _ -> false
 
 let wrap_lambdas params body =
   let rec ensure_unique_params seen = function
@@ -487,14 +517,42 @@ and parse_pipeline st =
         loop (append_pipeline_arg (parse_app st) acc)
     | _ -> acc
   in
-  loop (parse_sum st)
+  loop (parse_bool_or st)
+
+and parse_bool_or st =
+  let rec loop acc =
+    match peek st with
+    | Some (Ident "||") ->
+        ignore (take st);
+        loop (infix_expr "||" acc (parse_bool_and st))
+    | _ -> acc
+  in
+  loop (parse_bool_and st)
+
+and parse_bool_and st =
+  let rec loop acc =
+    match peek st with
+    | Some (Ident "&&") ->
+        ignore (take st);
+        loop (infix_expr "&&" acc (parse_compare st))
+    | _ -> acc
+  in
+  loop (parse_compare st)
+
+and parse_compare st =
+  let left = parse_sum st in
+  match peek st with
+  | Some (Ident (("==" | "/=" | "<" | "<=" | ">" | ">=") as op)) ->
+      ignore (take st);
+      infix_expr op left (parse_sum st)
+  | _ -> left
 
 and parse_sum st =
   let rec loop acc =
     match peek st with
     | Some (Ident "+") ->
         ignore (take st);
-        loop (nat_add_expr acc (parse_app st))
+        loop (infix_expr "+" acc (parse_app st))
     | _ -> acc
   in
   loop (parse_app st)
@@ -502,7 +560,7 @@ and parse_sum st =
 and parse_app st =
   let rec collect acc =
     match peek st with
-    | Some (Ident "+") -> List.rev acc
+    | Some (Ident op) when is_infix_operator op -> List.rev acc
     | Some (Ident _ | Str _ | LParen | LBrace | LBracket | Backslash) ->
         collect (parse_atom_expr st :: acc)
     | _ -> List.rev acc
@@ -515,7 +573,8 @@ and parse_app st =
 and parse_atom_expr st =
   match take st with
   | Some (Ident "if") -> parse_if_expr st
-  | Some (Ident "+") -> fail "+ is an infix operator"
+  | Some (Ident "not") -> Sexp.List [ Sexp.Atom "Bool.not"; parse_atom_expr st ]
+  | Some (Ident op) when is_infix_operator op -> fail (op ^ " is an infix operator")
   | Some (Ident name) -> (
       match field_access_expr name with Some expr -> expr | None -> Sexp.Atom name)
   | Some (Str value) -> Sexp.Str value

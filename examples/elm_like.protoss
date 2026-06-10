@@ -47,6 +47,22 @@ nestedPicked : Nat
 nestedPicked =
     if false then pick true 1 2 else if true then 3 else 4
 
+comparisonPassed : Bool
+comparisonPassed =
+    3 == 3
+
+comparisonFailed : Bool
+comparisonFailed =
+    3 /= 4
+
+ordered : Bool
+ordered =
+    2 < 3 && 4 >= 4
+
+notTooLarge : Bool
+notTooLarge =
+    not (5 > 6) || false
+
 user : User
 user =
     { name = "Ada"

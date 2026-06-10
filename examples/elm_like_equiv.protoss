@@ -43,6 +43,18 @@
         (true 3)
         (false 4)))))
 
+(def comparisonPassed Bool
+  ((Nat.eqNat 3) 3))
+
+(def comparisonFailed Bool
+  (Bool.not ((Nat.eqNat 3) 4)))
+
+(def ordered Bool
+  ((Bool.and ((Nat.lt 2) 3)) ((Nat.gte 4) 4)))
+
+(def notTooLarge Bool
+  ((Bool.or (Bool.not ((Nat.gt 5) 6))) false))
+
 (def user User
   (record
     (active true)

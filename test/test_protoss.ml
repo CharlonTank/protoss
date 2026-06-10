@@ -367,6 +367,18 @@ let () =
   let elm_like_nested_picked, _ = Runtime.normalize_def elm_like "nestedPicked" in
   assert_equal "Elm-like nested if normalizes" "3"
     (Runtime.value_to_string elm_like_nested_picked);
+  let elm_like_comparison_passed, _ = Runtime.normalize_def elm_like "comparisonPassed" in
+  assert_equal "Elm-like Nat equality normalizes" "true"
+    (Runtime.value_to_string elm_like_comparison_passed);
+  let elm_like_comparison_failed, _ = Runtime.normalize_def elm_like "comparisonFailed" in
+  assert_equal "Elm-like Nat inequality normalizes" "true"
+    (Runtime.value_to_string elm_like_comparison_failed);
+  let elm_like_ordered, _ = Runtime.normalize_def elm_like "ordered" in
+  assert_equal "Elm-like boolean and comparison normalizes" "true"
+    (Runtime.value_to_string elm_like_ordered);
+  let elm_like_not_too_large, _ = Runtime.normalize_def elm_like "notTooLarge" in
+  assert_equal "Elm-like boolean not/or normalizes" "true"
+    (Runtime.value_to_string elm_like_not_too_large);
   let elm_like_user, _ = Runtime.normalize_def elm_like "user" in
   assert_equal "Elm-like record literal normalizes" "{active = true, name = \"Ada\"}"
     (Runtime.value_to_string elm_like_user);

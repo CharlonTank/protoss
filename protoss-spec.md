@@ -94,7 +94,10 @@ listees dans la section "Gates de validation".
 - [x] Supporter les record updates humains `{ model | x = y }`.
   Preuves: `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`,
   `test/test_protoss.ml` assertions "Elm-like record update" et `README.md`.
-- [ ] Supporter les comparaisons et booleens de surface necessaires aux exemples.
+- [x] Supporter les comparaisons Nat et booleens de surface necessaires aux
+  exemples (`==`, `/=`, `<`, `<=`, `>`, `>=`, `not`, `&&`, `||`).
+  Preuves: `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`,
+  `test/test_protoss.ml` assertions "Elm-like Nat equality" et `README.md`.
 - [ ] Ajouter un formatter Protoss/H idempotent pour toute la grammaire.
 
 ## 4. Syntaxe canonique Protoss/C et graphe
