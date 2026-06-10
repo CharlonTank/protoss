@@ -398,8 +398,14 @@ listees dans la section "Gates de validation".
 - [x] Produire diff structurel entre stores.
 - [x] Produire patch JSON depuis diff.
 - [x] Representer Git comme mecanisme export/push du prototype actuel.
-- [ ] Produire diff canonique avec chemins structurels riches.
-- [ ] Lister definitions/harnesses affectes par diff.
+- [x] Produire diff canonique avec chemins structurels riches.
+  Preuves: `Workspace.diff_to_text` et `diff --json` exposent `path` et
+  `changedPaths` en chemins `/definitions/<name>/...`, testes dans
+  `test/test_protoss.ml`.
+- [x] Lister definitions/harnesses affectes par diff.
+  Preuves: `diff --json` expose `affected.definitions` et
+  `affected.harnesses`; les harnesses restent une surface vide stable tant que
+  le systeme de harness de la section 12 n'existe pas.
 - [ ] Ajouter vue review humaine pour patches structurels.
 - [ ] Mapper `Git commit -> UniverseRoot`.
 - [ ] Mapper `Git branch -> Universe branch`.

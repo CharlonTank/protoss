@@ -5478,9 +5478,32 @@ let () =
   let build_b = Workspace.build (Workspace.parse_manifest ws_b) in
   let semantic_diff = Workspace.diff build_a.store build_b.store in
   assert_true "semantic diff should not be empty" (semantic_diff <> []);
+  let semantic_diff_text = Workspace.diff_to_text semantic_diff in
   assert_true "semantic diff text names change"
-    (String.contains (Workspace.diff_to_text semantic_diff) 'b');
-  assert_true "semantic diff json" (String.contains (Workspace.diff_to_json semantic_diff) '{');
+    (String.contains semantic_diff_text 'b');
+  assert_true "semantic diff text has structural paths"
+    (contains_substring semantic_diff_text "/definitions/");
+  assert_true "semantic diff text has affected definitions"
+    (contains_substring semantic_diff_text "affected.definitions=[");
+  let semantic_diff_json_text = Workspace.diff_to_json semantic_diff in
+  let semantic_diff_json = Json.parse semantic_diff_json_text in
+  let affected = json_field "affected" semantic_diff_json in
+  assert_true "semantic diff json affected definition"
+    (List.exists (String.equal "base") (json_string_array_field "definitions" affected));
+  assert_equal "semantic diff json affected harnesses empty" "0"
+    (string_of_int (List.length (json_array_field "harnesses" affected)));
+  let first_change =
+    match json_array_field "changes" semantic_diff_json with
+    | [] -> fail "semantic diff json should include changes"
+    | change :: _ -> change
+  in
+  assert_true "semantic diff json path"
+    (contains_substring (json_string_field "path" first_change) "/definitions/");
+  assert_true "semantic diff json changed paths"
+    (json_string_array_field "changedPaths" first_change <> []);
+  let change_affected = json_field "affected" first_change in
+  assert_true "semantic diff json change affected definitions"
+    (json_string_array_field "definitions" change_affected <> []);
 
   let patch_from_diff = patch_file "protoss-from-diff.json" (Workspace.patch_from_diff build_a.store build_b.store) in
   let patched_store = temp_dir "patched-from-diff" in

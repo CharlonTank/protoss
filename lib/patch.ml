@@ -708,6 +708,35 @@ let write_program_metadata store_root checked =
   Store.write_graph store_root (Kernel.checked_to_graph_content_hash checked) graph_json;
   write_host_contract store_root graph_json
 
+let sidecar_path store_root dir name suffix =
+  Filename.concat (Filename.concat store_root dir) (Store.sanitize_name name ^ suffix)
+
+let type_path store_root name = sidecar_path store_root "types" name ".type"
+
+let deps_path store_root name = sidecar_path store_root "deps" name ".deps"
+
+let normal_path store_root name = sidecar_path store_root "normal" name ".nf"
+
+let defid_path store_root name = sidecar_path store_root "defids" name ".defid"
+
+let remove_if_exists path = if Sys.file_exists path then Sys.remove path
+
+let delete_workspace_sidecars store_root name =
+  remove_if_exists (type_path store_root name);
+  remove_if_exists (deps_path store_root name);
+  remove_if_exists (normal_path store_root name);
+  remove_if_exists (defid_path store_root name)
+
+let write_workspace_sidecars store_root checked (cd : Kernel.checked_def) normal =
+  let name = cd.def.name in
+  let deps =
+    Kernel.dependencies_of_defs checked.Kernel.program.defs name |> List.sort_uniq String.compare
+  in
+  Store.write_file_atomic_if_changed (type_path store_root name) (string_of_typ cd.def.typ ^ "\n");
+  Store.write_file_atomic_if_changed (deps_path store_root name) (String.concat "\n" deps ^ "\n");
+  Store.write_file_atomic_if_changed (normal_path store_root name) (normal ^ "\n");
+  Store.write_file_atomic_if_changed (defid_path store_root name) (cd.def_id ^ "\n")
+
 let capability_scopes_dir store_root = Filename.concat store_root "capability-scopes"
 
 let capability_scope_path store_root name =
@@ -743,6 +772,7 @@ let apply store_root patch_path =
     (fun (d : def) ->
       if not (List.exists (String.equal d.name) final_names) then (
         Store.delete_def store_root d.name;
+        delete_workspace_sidecars store_root d.name;
         delete_capability_scope store_root d.name))
     current.defs;
   List.iter
@@ -750,13 +780,16 @@ let apply store_root patch_path =
       match change.previous_name with
       | Some name when not (List.exists (String.equal name) final_names) ->
           Store.delete_def store_root name;
+          delete_workspace_sidecars store_root name;
           delete_capability_scope store_root name
       | _ -> ())
     checked_patch.changes;
   List.iter
     (fun (cd : Kernel.checked_def) ->
       let normal, _ = Runtime.normalize_def checked_patch.checked cd.def.name in
-      ignore (Store.write_def store_root cd.def cd.canonical (Runtime.value_to_string normal));
+      let normal = Runtime.value_to_string normal in
+      ignore (Store.write_def store_root cd.def cd.canonical normal);
+      write_workspace_sidecars store_root checked_patch.checked cd normal;
       write_capability_scope store_root cd)
     checked_patch.checked.defs;
   write_program_metadata store_root checked_patch.checked;

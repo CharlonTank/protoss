@@ -2026,12 +2026,17 @@ type stored_def = {
   s_canonical : string;
   s_hash : string;
   s_deps : string list;
+  s_normal : string option;
+  s_capability_scope : string list;
 }
 
-let read_deps store name =
-  let path = deps_path store name in
+let read_line_list path =
   if not (Sys.file_exists path) then []
   else read_file path |> String.split_on_char '\n' |> List.map trim |> List.filter (( <> ) "")
+
+let read_deps store name = read_line_list (deps_path store name)
+
+let read_capability_scope store name = read_line_list (capability_scope_path store name)
 
 let stored_defs store =
   canonical_files store
@@ -2045,6 +2050,8 @@ let stored_defs store =
            s_canonical = canonical;
            s_hash = Kernel.hash_string canonical;
            s_deps = read_deps store d.cname;
+           s_normal = read_trim (normal_path store d.cname);
+           s_capability_scope = read_capability_scope store d.cname;
          })
   |> List.sort (fun a b -> String.compare a.s_name b.s_name)
 
@@ -2244,9 +2251,13 @@ type diff_kind = Added | Removed | Modified
 type diff_item = {
   kind : diff_kind;
   name : string;
+  path : string;
+  changed_paths : string list;
   before : stored_def option;
   after : stored_def option;
   impacted : string list;
+  affected_definitions : string list;
+  affected_harnesses : string list;
 }
 
 let assoc_def name defs = List.find_opt (fun d -> String.equal d.s_name name) defs
@@ -2257,6 +2268,55 @@ let dependents defs name =
   |> List.map (fun d -> d.s_name)
   |> sort_uniq
 
+let json_pointer_segment s =
+  let b = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '~' -> Buffer.add_string b "~0"
+      | '/' -> Buffer.add_string b "~1"
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
+let diff_def_path name = "/definitions/" ^ json_pointer_segment name
+
+let diff_field_path name field = diff_def_path name ^ "/" ^ field
+
+let changed_paths name before after =
+  let field_when changed field acc =
+    if changed then diff_field_path name field :: acc else acc
+  in
+  [
+    ("defId", not (String.equal before.s_def_id after.s_def_id));
+    ("canonicalHash", not (String.equal before.s_hash after.s_hash));
+    ("type", not (equal_typ before.s_typ after.s_typ));
+    ("canonical", not (String.equal before.s_canonical after.s_canonical));
+    ("dependencies", before.s_deps <> after.s_deps);
+    ("normal", before.s_normal <> after.s_normal);
+    ("capabilityScope", before.s_capability_scope <> after.s_capability_scope);
+  ]
+  |> List.fold_left (fun acc (field, changed) -> field_when changed field acc) []
+  |> List.rev
+
+let make_diff_item kind name before after impacted =
+  let path = diff_def_path name in
+  let changed_paths =
+    match (before, after) with
+    | Some b, Some a -> changed_paths name b a
+    | _ -> [ path ]
+  in
+  {
+    kind;
+    name;
+    path;
+    changed_paths;
+    before;
+    after;
+    impacted;
+    affected_definitions = sort_uniq (name :: impacted);
+    affected_harnesses = [];
+  }
+
 let diff store_a store_b =
   let a = stored_defs store_a and b = stored_defs store_b in
   let names =
@@ -2266,36 +2326,15 @@ let diff store_a store_b =
   |> List.filter_map (fun name ->
          match (assoc_def name a, assoc_def name b) with
          | None, Some after ->
-             Some
-               {
-                 kind = Added;
-                 name;
-                 before = None;
-                 after = Some after;
-                 impacted = dependents b name;
-               }
+             Some (make_diff_item Added name None (Some after) (dependents b name))
          | Some before, None ->
-             Some
-               {
-                 kind = Removed;
-                 name;
-                 before = Some before;
-                 after = None;
-                 impacted = dependents a name;
-               }
+             Some (make_diff_item Removed name (Some before) None (dependents a name))
          | Some before, Some after ->
-             if String.equal before.s_def_id after.s_def_id
-                && String.equal before.s_canonical after.s_canonical
-             then None
+             if changed_paths name before after = [] then None
              else
                Some
-                 {
-                   kind = Modified;
-                   name;
-                   before = Some before;
-                   after = Some after;
-                   impacted = sort_uniq (dependents a name @ dependents b name);
-                 }
+                 (make_diff_item Modified name (Some before) (Some after)
+                    (sort_uniq (dependents a name @ dependents b name)))
          | None, None -> None)
 
 let kind_to_string = function Added -> "added" | Removed -> "removed" | Modified -> "modified"
@@ -2313,8 +2352,10 @@ let diff_item_to_text item =
         " type=" ^ string_of_typ a.s_typ ^ "->" ^ string_of_typ b.s_typ
     | _ -> ""
   in
-  kind_to_string item.kind ^ " " ^ item.name ^ " " ^ before_id ^ " -> " ^ after_id
-  ^ type_change ^ " impacted=[" ^ String.concat "," item.impacted ^ "]"
+  kind_to_string item.kind ^ " " ^ item.path ^ " " ^ before_id ^ " -> " ^ after_id
+  ^ type_change ^ " changedPaths=[" ^ String.concat "," item.changed_paths
+  ^ "] affected.definitions=[" ^ String.concat "," item.affected_definitions
+  ^ "] affected.harnesses=[" ^ String.concat "," item.affected_harnesses ^ "]"
 
 let diff_to_text items =
   match items with
@@ -2324,6 +2365,15 @@ let diff_to_text items =
 let json_string s = Ast.quote s
 
 let json_array xs = "[" ^ String.concat ", " (List.map json_string xs) ^ "]"
+
+let affected_definitions items =
+  items |> List.concat_map (fun item -> item.affected_definitions) |> sort_uniq
+
+let affected_harnesses items =
+  items |> List.concat_map (fun item -> item.affected_harnesses) |> sort_uniq
+
+let affected_json definitions harnesses =
+  "{ \"definitions\": " ^ json_array definitions ^ ", \"harnesses\": " ^ json_array harnesses ^ " }"
 
 let diff_item_to_json item =
   let field_def prefix = function
@@ -2335,12 +2385,15 @@ let diff_item_to_json item =
         ]
   in
   "{ \"kind\": " ^ json_string (kind_to_string item.kind) ^ ", \"name\": "
-  ^ json_string item.name ^ ", "
+  ^ json_string item.name ^ ", \"path\": " ^ json_string item.path ^ ", \"changedPaths\": "
+  ^ json_array item.changed_paths ^ ", "
   ^ String.concat ", " (field_def "before" item.before @ field_def "after" item.after)
-  ^ ", \"impacted\": " ^ json_array item.impacted ^ " }"
+  ^ ", \"impacted\": " ^ json_array item.impacted ^ ", \"affected\": "
+  ^ affected_json item.affected_definitions item.affected_harnesses ^ " }"
 
 let diff_to_json items =
-  "{ \"changes\": [" ^ String.concat ", " (List.map diff_item_to_json items) ^ "] }\n"
+  "{ \"affected\": " ^ affected_json (affected_definitions items) (affected_harnesses items)
+  ^ ", \"changes\": [" ^ String.concat ", " (List.map diff_item_to_json items) ^ "] }\n"
 
 let load_store_program_with_caps store =
   let p = Store.load_program store in
