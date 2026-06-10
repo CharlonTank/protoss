@@ -265,21 +265,21 @@ let parse_lines content =
 let field name fields =
   List.find_opt (fun (k, _) -> String.equal k name) fields |> Option.map snd
 
-let validate_resume_response root event resume response =
-  let target_fields = parse_lines (read_event root resume) in
+let validate_response_target root event target =
+  let target_fields = parse_lines (read_event root target) in
   let target_need name =
     match field name target_fields with
     | Some value -> value
     | None ->
         failwith
-          ("maltyped event " ^ event ^ ": resume target missing " ^ name)
+          ("maltyped event " ^ event ^ ": response target missing " ^ name)
   in
   (match field "kind" target_fields with
   | Some "request" -> ()
   | Some kind ->
       failwith
-        ("maltyped event " ^ event ^ ": resume target is not a request event: " ^ kind)
-  | None -> failwith ("maltyped event " ^ event ^ ": resume target missing kind"));
+        ("maltyped event " ^ event ^ ": response target is not a request event: " ^ kind)
+  | None -> failwith ("maltyped event " ^ event ^ ": response target missing kind"));
   ignore (target_need "request-id");
   ignore (target_need "continuation-id");
   let request = target_need "request" in
@@ -305,11 +305,18 @@ let validate_resume_response root event resume response =
     failwith ("maltyped event " ^ event ^ ": suspended request-id mismatch");
   if not (String.equal (Runtime.continuation_id suspended) (target_need "continuation-id")) then
     failwith ("maltyped event " ^ event ^ ": suspended continuation-id mismatch");
-  (try ignore (Runtime.response_value suspended.Runtime.req response)
-   with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": invalid response: " ^ msg));
   ( type_text signature.response_type,
     request_signature_ref signature,
-    response_codec_ref signature )
+    response_codec_ref signature,
+    suspended.Runtime.req )
+
+let validate_resume_response root event resume response =
+  let response_type, signature_ref, codec_ref, req =
+    validate_response_target root event resume
+  in
+  (try ignore (Runtime.response_value req response)
+   with Kernel.Error msg -> failwith ("maltyped event " ^ event ^ ": invalid response: " ^ msg));
+  (response_type, signature_ref, codec_ref)
 
 let record_resume root world event response result =
   let response_type, signature_ref, codec_ref =
@@ -320,6 +327,17 @@ let record_resume root world event response result =
    ^ "\nresponse-type=" ^ response_type ^ "\nhost-codec-version=" ^ host_codec_version
    ^ "\nresponse-codec-ref=" ^ codec_ref ^ "\nresponse="
    ^ String.escaped response ^ "\nresult=" ^ String.escaped result)
+
+let record_external_error root world event code message =
+  let response_type, signature_ref, codec_ref, _ =
+    validate_response_target root "<new>" event
+  in
+  add_event root world
+    ("kind=external-error\nnegative=" ^ event ^ "\nrequest-signature-ref="
+   ^ signature_ref ^ "\nresponse-type=" ^ response_type
+   ^ "\nhost-codec-version=" ^ host_codec_version
+   ^ "\nresponse-codec-ref=" ^ codec_ref ^ "\nerror-code="
+   ^ String.escaped code ^ "\nerror-message=" ^ String.escaped message)
 
 let validate_event root event content =
   let fields = parse_lines content in
@@ -400,6 +418,49 @@ let validate_event root event content =
       let response = Option.value (field "response" fields) ~default:"" |> Scanf.unescaped in
       let response_type, signature_ref, codec_ref =
         validate_resume_response root event resume response
+      in
+      (match field "response-type" fields with
+      | Some declared when String.equal declared response_type -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": response-type mismatch: expected "
+           ^ response_type ^ ", got " ^ declared)
+      | None -> assert false);
+      (match field "request-signature-ref" fields with
+      | Some declared when String.equal declared signature_ref -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": request-signature-ref mismatch: expected "
+           ^ signature_ref ^ ", got " ^ declared)
+      | None -> assert false);
+      (match field "host-codec-version" fields with
+      | Some declared when String.equal declared host_codec_version -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": host-codec-version mismatch: expected "
+           ^ host_codec_version ^ ", got " ^ declared)
+      | None -> assert false);
+      (match field "response-codec-ref" fields with
+      | Some declared when String.equal declared codec_ref -> ()
+      | Some declared ->
+          failwith
+            ("maltyped event " ^ event ^ ": response-codec-ref mismatch: expected "
+           ^ codec_ref ^ ", got " ^ declared)
+      | None -> assert false)
+  | Some "external-error" ->
+      List.iter need
+        [
+          "negative";
+          "request-signature-ref";
+          "response-type";
+          "host-codec-version";
+          "response-codec-ref";
+          "error-code";
+          "error-message";
+        ];
+      let negative = Option.value (field "negative" fields) ~default:"" in
+      let response_type, signature_ref, codec_ref, _ =
+        validate_response_target root event negative
       in
       (match field "response-type" fields with
       | Some declared when String.equal declared response_type -> ()

@@ -25,7 +25,7 @@ let usage () =
      \       protoss resume --graph <graph.json> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss resume --store-graph <project-or-store> <graphHash> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss world init [<ledger-root>]\n\
-     \       protoss ledger event|world|inspect|replay|diff|export|import|fork|branches [args]\n\
+     \       protoss ledger event|world|inspect|replay|diff|export|import|fork|branches|reject [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
@@ -451,6 +451,11 @@ let command_ledger = function
   | [ "fork"; root; name; world ] -> print_endline (Protoss.Ledger.fork root name world)
   | [ "branches" ] -> print_string (Protoss.Ledger.branches default_ledger)
   | [ "branches"; root ] -> print_string (Protoss.Ledger.branches root)
+  | [ "reject"; root; world; event; code; message ] ->
+      let negative_event, next_world =
+        Protoss.Ledger.record_external_error root world event code message
+      in
+      Printf.printf "ExternalErrorEvent %s\nWorld %s\n" negative_event next_world
   | _ -> usage ()
 
 let command_patch = function

@@ -187,7 +187,10 @@ listees dans la section "Gates de validation".
 - [ ] Ajouter fork/merge de mondes.
 - [x] Ajouter branches de monde deterministes.
 - [ ] Garantir que toute lecture monde passe par evenement explicite.
-- [ ] Ajouter API pour reponse externe negative comme evenement typed.
+- [x] Ajouter API pour reponse externe negative comme evenement typed.
+  Preuves: `Ledger.record_external_error`, `protoss ledger reject`,
+  assertions "ledger negative external event" dans `test/test_protoss.ml` et
+  `README.md`.
 - [ ] Ajouter fixtures pour capteurs ou autres effets extensibles.
 
 ## 8. Ledger

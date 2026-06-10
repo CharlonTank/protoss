@@ -5788,6 +5788,36 @@ let () =
        ("response-codec-ref=" ^ string_response_codec_ref));
   assert_true "ledger resume world inspectable"
     (String.length (Ledger.inspect_world ledger_root resume_world) > 0);
+  let negative_event, negative_world =
+    Ledger.record_external_error ledger_root next_world event "HOST_TIMEOUT" "host timed out"
+  in
+  let inspected_negative_event = Ledger.inspect_event ledger_root negative_event in
+  assert_true "ledger negative external event inspectable"
+    (String.length inspected_negative_event > 0);
+  assert_true "ledger negative external event records kind"
+    (contains_substring inspected_negative_event "kind=external-error");
+  assert_true "ledger negative external event links request"
+    (contains_substring inspected_negative_event ("negative=" ^ event));
+  assert_true "ledger negative external event records response type"
+    (contains_substring inspected_negative_event "response-type=String");
+  assert_true "ledger negative external event records signature ref"
+    (contains_substring inspected_negative_event ("request-signature-ref=" ^ human_signature_ref));
+  assert_true "ledger negative external event records response codec ref"
+    (contains_substring inspected_negative_event
+       ("response-codec-ref=" ^ string_response_codec_ref));
+  assert_true "ledger negative external event records typed error"
+    (contains_substring inspected_negative_event "error-code=HOST_TIMEOUT"
+    && contains_substring inspected_negative_event "error-message=host timed out");
+  assert_true "ledger negative external world inspectable"
+    (String.length (Ledger.inspect_world ledger_root negative_world) > 0);
+  let bad_negative_signature_ref_event = "p2:bad-negative-signature-ref-event" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_negative_signature_ref_event)
+    (replace_once inspected_negative_event ("request-signature-ref=" ^ human_signature_ref)
+       "request-signature-ref=p2:bad");
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_negative_signature_ref_event);
+     fail "ledger negative external event with bad signature ref should be rejected"
+   with Failure _ -> ());
   let bad_resume_signature_ref_event = "p2:bad-resume-signature-ref-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_resume_signature_ref_event)
     (replace_once inspected_resume_event ("request-signature-ref=" ^ human_signature_ref)
