@@ -5,7 +5,7 @@ open Protoss
    Purely a time/memory trade-off; no observable behavior change. *)
 let () =
   Gc.set
-    { (Gc.get ()) with Gc.minor_heap_size = 32 * 1024 * 1024; Gc.space_overhead = 400 }
+    { (Gc.get ()) with Gc.minor_heap_size = 16 * 1024 * 1024; Gc.space_overhead = 120 }
 
 let fail msg = raise (Failure msg)
 

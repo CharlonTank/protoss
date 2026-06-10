@@ -28,11 +28,14 @@ dune exec protoss -- <args>      # run the CLI (see README for the full command 
   `@coretest` (always-on core), `@selftest` (PROTOSS_RUN_SELF_HOST_TESTS),
   `@stdlibtest` (PROTOSS_RUN_STDLIB_TESTS), `@integrationtest` (PROTOSS_RUN_INTEGRATION_TESTS,
   itself split by PROTOSS_INTEGRATION_PART into `@integrationtest-workspace`,
-  `@integrationtest-web`, `@integrationtest-runtime`). `@fulltest` aggregates them so dune
-  runs the sections as parallel processes (~1 min wall clock, bounded by the workspace part).
-  Default `dune runtest` only runs the quick smoke suite — run `@fulltest --force` before
-  declaring kernel/runtime/workspace changes safe. Test temp files must be pid-qualified (see
-  `temp_dir`/`patch_file`): sections run concurrently and race on fixed temp paths otherwise.
+  `@integrationtest-web`, `@integrationtest-runtime`; the workspace part is sliced once more
+  by PROTOSS_WORKSPACE_PART into `@integrationtest-workspace-project`/`-consumer`/`-corruption`,
+  where the consumer/corruption slices rebuild the workspace-a chain deterministically instead
+  of sharing state). `@fulltest` aggregates the leaf aliases so dune runs them as parallel
+  processes. Default `dune runtest` only runs the quick smoke suite — run `@fulltest --force`
+  before declaring kernel/runtime/workspace changes safe. Test temp files must be pid-qualified
+  (see `temp_dir`/`patch_file`): sections run concurrently and race on fixed temp paths
+  otherwise.
 - Compilation is fast (~1-2 s incremental); the slow part is *running* tests, because the
   interpreted self-hosted frontend (prelude evaluation) dominates. Keep cache-key hashing and
   other bookkeeping out of the evaluator's hot path (see `Runtime.eval_app`) — work that only

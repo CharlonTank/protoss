@@ -5,7 +5,7 @@ open Protoss
    Purely a time/memory trade-off; no observable behavior change. *)
 let () =
   Gc.set
-    { (Gc.get ()) with Gc.minor_heap_size = 32 * 1024 * 1024; Gc.space_overhead = 400 }
+    { (Gc.get ()) with Gc.minor_heap_size = 16 * 1024 * 1024; Gc.space_overhead = 120 }
 
 let fail msg = raise (Failure msg)
 
@@ -96,6 +96,26 @@ let integration_part name =
   && (match Sys.getenv_opt "PROTOSS_INTEGRATION_PART" with
       | None -> true
       | Some part -> String.equal part name)
+
+(* The workspace integration part is itself split into independent slices
+   (project / consumer / corruption) so dune can run them as parallel
+   processes; PROTOSS_WORKSPACE_PART selects one (unset = run every slice).
+   Slices that need the workspace-a project rebuild it from scratch — the
+   store is content-addressed and every artifact write is deterministic, so
+   the rebuild is byte-identical to the state the project slice leaves
+   behind, and cheap when it already exists. *)
+let workspace_part =
+  let known = [ "project"; "consumer"; "corruption" ] in
+  (match Sys.getenv_opt "PROTOSS_WORKSPACE_PART" with
+  | Some part when not (List.mem part known) ->
+      (* An unknown slice would silently skip every workspace test and still
+         report success — fail loudly instead. *)
+      fail ("unknown PROTOSS_WORKSPACE_PART: " ^ part)
+  | _ -> ());
+  fun name ->
+    match Sys.getenv_opt "PROTOSS_WORKSPACE_PART" with
+    | None -> true
+    | Some part -> String.equal part name
 
 let () =
   assert_equal "sha256 empty digest"
@@ -4130,6 +4150,46 @@ let () =
 
   if integration_part "workspace" then (
   trace_test "integration:start";
+  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
+  let make_workspace name base_value bound =
+    let root = temp_dir name in
+    ensure_dir root;
+    ensure_dir (Filename.concat root "src");
+    write_file (Filename.concat root "protoss.toml")
+      ("name = \"" ^ name ^ "\"\nversion = \"0.4.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
+     ^ stdlib_path
+      ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Human.ask\"]\n");
+    write_file (Filename.concat root "src/math.protoss")
+      ("(def base Nat " ^ string_of_int base_value
+     ^ ")\n(def total Nat ((Nat.add base) 40))\n");
+	    write_file (Filename.concat root "src/app.protoss")
+	      ("(import \"math.protoss\")\n\
+	        (record PublicBox (value Nat))\n\
+	        (def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
+	        (def bumped (List Nat) ((List.mapNat numbers) (lambda ("
+	      ^ bound ^ " Nat) (succ " ^ bound
+	      ^ "))))\n(def appMain Nat ((Nat.add total) base))\n\
+	        (def askName (Process String) (Human.ask \"Name?\"))\n");
+    root
+  in
+  (* Rebuilds the workspace-a chain (build + lock + package + locked-build
+     record) for slices that run without the project slice. Every step is
+     deterministic over content-addressed state, so the resulting tree is
+     byte-identical to what the project slice leaves behind — and re-running
+     it over an existing tree is cheap (cached prepare, identical writes
+     skipped). The interface*.json scratch files the project slice drops in
+     the project root are intentionally absent: nothing downstream reads
+     them. *)
+  let rebuild_workspace_a () =
+    let ws_a = make_workspace "workspace-a" 2 "x" in
+    let manifest_a = Workspace.parse_manifest ws_a in
+    let build_a = Workspace.build manifest_a in
+    let lock_path, lock_hash = Workspace.write_lock manifest_a in
+    let package_a = Workspace.write_package manifest_a in
+    ignore (Workspace.build_locked manifest_a);
+    (ws_a, manifest_a, build_a, lock_path, lock_hash, package_a)
+  in
+  if workspace_part "project" then (
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
   let init_manifest = Workspace.parse_manifest project_init_root in
@@ -4154,29 +4214,6 @@ let () =
    with Workspace.Error msg ->
      assert_true "project syntax error has file line column"
        (contains_substring msg (bad_project_file ^ ":1:1: unterminated list")));
-
-  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
-  let make_workspace name base_value bound =
-    let root = temp_dir name in
-    ensure_dir root;
-    ensure_dir (Filename.concat root "src");
-    write_file (Filename.concat root "protoss.toml")
-      ("name = \"" ^ name ^ "\"\nversion = \"0.4.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
-     ^ stdlib_path
-      ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Human.ask\"]\n");
-    write_file (Filename.concat root "src/math.protoss")
-      ("(def base Nat " ^ string_of_int base_value
-     ^ ")\n(def total Nat ((Nat.add base) 40))\n");
-	    write_file (Filename.concat root "src/app.protoss")
-	      ("(import \"math.protoss\")\n\
-	        (record PublicBox (value Nat))\n\
-	        (def numbers (List Nat) (Cons Nat 1 (Cons Nat 2 (Nil Nat))))\n\
-	        (def bumped (List Nat) ((List.mapNat numbers) (lambda ("
-	      ^ bound ^ " Nat) (succ " ^ bound
-	      ^ "))))\n(def appMain Nat ((Nat.add total) base))\n\
-	        (def askName (Process String) (Human.ask \"Name?\"))\n");
-    root
-  in
   let ws_a = make_workspace "workspace-a" 2 "x" in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";
@@ -4650,8 +4687,16 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "invalid package interface write leaves package store untouched"
     (package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss"));
-  trace_test "integration:package-a:invalid-constraint";
+  trace_test "integration:package-a:invalid-constraint");
+  if workspace_part "consumer" then (
   trace_test "integration:consumer-package";
+  let ws_a, manifest_a, _build_a, lock_path, lock_hash, package_a = rebuild_workspace_a () in
+  let lock_before = Store.read_file lock_path in
+  let package_content = Store.read_file package_a.Workspace.package_path in
+  let interface_hash = sexp_atom_field "interface-hash" package_content in
+  let package_interface_contract_hash =
+    json_string_field "contractHash" (Json.parse (Workspace.package_interface_json manifest_a))
+  in
   let consumer_ws = make_workspace "workspace-consumer" 5 "z" in
   let consumer_manifest_path = Filename.concat consumer_ws "protoss.toml" in
   let consumer_manifest_base = Store.read_file consumer_manifest_path in
@@ -4819,7 +4864,9 @@ let () =
       (Workspace.sanitize_id locked_build.Workspace.build_id ^ ".build")
   in
   assert_true "locked build records lock hash"
-    (contains_substring (Store.read_file locked_build_meta) ("lock_hash=" ^ lock_hash));
+    (contains_substring (Store.read_file locked_build_meta) ("lock_hash=" ^ lock_hash)));
+  if workspace_part "corruption" then (
+  let ws_a, manifest_a, build_a, _lock_path, _lock_hash, _package_a = rebuild_workspace_a () in
   let scope_corrupt_root = temp_dir "workspace-scope-corrupt" in
   copy_tree ws_a scope_corrupt_root;
   let scope_corrupt_manifest = Workspace.parse_manifest scope_corrupt_root in
@@ -5117,7 +5164,7 @@ let () =
   (try
      ignore (Workspace.audit corrupt_manifest);
      fail "audit should reject corrupt store"
-   with Workspace.Error _ | Kernel.Error _ -> ()));
+   with Workspace.Error _ | Kernel.Error _ -> ())));
 
   if integration_part "web" then (
   let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in

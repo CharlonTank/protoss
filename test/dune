@@ -41,6 +41,32 @@
           (setenv PROTOSS_INTEGRATION_PART workspace
            (run ./test_protoss.exe)))))
 
+; The workspace part itself dominates the integration section, so it is
+; sliced once more by PROTOSS_WORKSPACE_PART (project chain / consumer
+; packages / corruption+diff). Slices needing the workspace-a project rebuild
+; it deterministically, so they are independent processes; plain
+; @integrationtest-workspace still runs every slice in one process.
+(rule
+ (alias integrationtest-workspace-project)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART workspace
+           (setenv PROTOSS_WORKSPACE_PART project
+            (run ./test_protoss.exe))))))
+
+(rule
+ (alias integrationtest-workspace-consumer)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART workspace
+           (setenv PROTOSS_WORKSPACE_PART consumer
+            (run ./test_protoss.exe))))))
+
+(rule
+ (alias integrationtest-workspace-corruption)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART workspace
+           (setenv PROTOSS_WORKSPACE_PART corruption
+            (run ./test_protoss.exe))))))
+
 (rule
  (alias integrationtest-web)
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
@@ -64,6 +90,8 @@
   (alias coretest)
   (alias selftest)
   (alias stdlibtest)
-  (alias integrationtest-workspace)
+  (alias integrationtest-workspace-project)
+  (alias integrationtest-workspace-consumer)
+  (alias integrationtest-workspace-corruption)
   (alias integrationtest-web)
   (alias integrationtest-runtime)))
