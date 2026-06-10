@@ -55,7 +55,7 @@ let usage () =
      \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent explain <graph.json> <nameOrDefId> | protoss agent explain --store-graph <project-or-store> <graphHash> <nameOrDefId>\n\
-     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json> | factor-identical <project-or-store> [--out <patch.json>] | synthesize-tests <project-or-store> | compare-candidates <project-or-store> <left.patch.json> <right.patch.json>\n\
+     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json> | factor-identical <project-or-store> [--out <patch.json>] | synthesize-tests <project-or-store> | generate-migration <old-project-or-store> <new-project-or-store> | compare-candidates <project-or-store> <left.patch.json> <right.patch.json>\n\
      \       protoss mcp serve\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
@@ -1042,6 +1042,10 @@ let command_agent = function
       let store = Protoss.Workspace.store_of_arg project_or_store in
       let checked = Protoss.Store.load_program store |> Protoss.Kernel.check_program in
       print_string (Protoss.Agent_protocol.synthesize_tests_json checked)
+  | [ "generate-migration"; old_project_or_store; new_project_or_store ] ->
+      let old_store = Protoss.Workspace.store_of_arg old_project_or_store in
+      let new_store = Protoss.Workspace.store_of_arg new_project_or_store in
+      print_string (Protoss.Agent_protocol.generate_migration_json old_store new_store)
   | "graph" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       let source =

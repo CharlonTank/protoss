@@ -464,7 +464,10 @@ factorisation des doublons via `Agent_protocol.factor_identical_json`,
   `Canonical_ir.agent_graph_node_json`,
   `Canonical_ir.agent_graph_definition_json`, commande `protoss agent graph`,
   assertions "agent graph" dans `test/test_protoss.ml`.
-- [ ] Fournir generation de migrations assistee.
+- [x] Fournir generation de migrations assistee.
+  Preuves: `Agent_protocol.generate_migration_json`, commande `protoss agent
+  generate-migration`, assertion "agent migration generation proposes model
+  migration" dans `test/test_protoss.ml`, `README.md`.
 - [x] Fournir synthese de tests assistee.
   Preuves: `Agent_protocol.synthesize_tests_json`, commande `protoss agent
   synthesize-tests`, assertion "agent test synthesis suggests normalization

@@ -6629,6 +6629,21 @@ let () =
   assert_true "valid web patch changed store" (before_web_patch <> snapshot web_store);
 
   ignore (Web.build ~out:(temp_dir "web-dist-reset") todo);
+  let migration_todo = make_todo () in
+  let migration_base = Web.build ~out:(temp_dir "web-migration-base-dist") migration_todo in
+  let migration_old_store = migration_base.Web.build.Workspace.store in
+  let migration_new_store = temp_dir "web-migration-new-store" in
+  copy_tree migration_old_store migration_new_store;
+  ignore (Patch.apply migration_new_store (Filename.concat patch_dir "model_with_migration.json"));
+  let migration_report =
+    Json.parse (Agent_protocol.generate_migration_json migration_old_store migration_new_store)
+  in
+  let migration_ops = json_array_field "ops" (json_field "patchCandidate" migration_report) in
+  let migration_op = match migration_ops with op :: _ -> op | [] -> fail "expected migration op" in
+  assert_true "agent migration generation proposes model migration"
+    (json_bool_field "required" migration_report
+    && contains_substring (json_string_field "expr" migration_report) "(filter \"\")"
+    && String.equal (json_string_field "name" migration_op) "migrate_v1_v2");
   (try
      ignore (Patch.check web_store (Filename.concat patch_dir "model_without_migration.json"));
      fail "model patch without migration should be rejected"

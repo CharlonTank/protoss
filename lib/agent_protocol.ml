@@ -17,6 +17,8 @@ let candidate_comparison_format = "protoss-agent-candidate-comparison-v1"
 
 let test_synthesis_format = "protoss-agent-test-synthesis-v1"
 
+let migration_generation_format = "protoss-agent-migration-generation-v1"
+
 let json_string_list xs = Kernel.json_array Kernel.json_string xs
 
 let sort_uniq_strings xs = List.sort_uniq String.compare xs
@@ -456,6 +458,111 @@ let synthesize_tests_json checked =
       Kernel.json_field "suggestions" (Kernel.json_array test_suggestion_json defs);
       Kernel.json_field "nextCommand"
         (Kernel.json_string "protoss harness run <store> <harness.pth>");
+    ]
+  ^ "\n"
+
+let rec default_expr_source = function
+  | Ast.TUnit -> Some "unit"
+  | Ast.TBool -> Some "false"
+  | Ast.TNat -> Some "0"
+  | Ast.TString -> Some "\"\""
+  | Ast.TList t -> Some ("(Nil " ^ Ast.string_of_typ t ^ ")")
+  | Ast.TRecord fields ->
+      let field_exprs =
+        fields
+        |> List.map (fun (name, typ) ->
+               Option.map (fun expr -> "(" ^ name ^ " " ^ expr ^ ")") (default_expr_source typ))
+      in
+      if List.for_all Option.is_some field_exprs then
+        Some
+          ("(record "
+          ^ String.concat " " (List.map (fun item -> Option.get item) field_exprs)
+          ^ ")")
+      else None
+  | _ -> None
+
+let migration_record_field old_fields (name, typ) =
+  match List.assoc_opt name old_fields with
+  | Some old_typ when Ast.equal_typ old_typ typ -> ("copy", "(get old " ^ name ^ ")")
+  | _ -> (
+      match default_expr_source typ with
+      | Some expr -> ("default", expr)
+      | None -> ("manual", "unit"))
+
+let migration_expr_source old_model new_model =
+  let body, strategies =
+    match (old_model, new_model) with
+    | Ast.TRecord old_fields, Ast.TRecord new_fields ->
+        let planned = List.map (migration_record_field old_fields) new_fields in
+        let body =
+          "(record "
+          ^ String.concat " "
+              (List.map2
+                 (fun (name, _) (_, expr) -> "(" ^ name ^ " " ^ expr ^ ")")
+                 new_fields planned)
+          ^ ")"
+        in
+        (body, planned |> List.map fst |> sort_uniq_strings)
+    | _ -> (
+        match default_expr_source new_model with
+        | Some expr -> (expr, [ "default" ])
+        | None -> ("old", [ "manual" ]))
+  in
+  ( "(lambda (old " ^ Ast.string_of_typ old_model ^ ") " ^ body ^ ")",
+    strategies )
+
+let migration_patch_candidate old_model new_model expr =
+  Kernel.json_obj
+    [
+      Kernel.json_field "ops"
+        (Kernel.json_array
+           (fun () ->
+             Kernel.json_obj
+               [
+                 Kernel.json_field "op" (Kernel.json_string "AddDef");
+                 Kernel.json_field "name" (Kernel.json_string "migrate_v1_v2");
+                 Kernel.json_field "deps" (json_string_list []);
+                 Kernel.json_field "type"
+                   (Kernel.json_obj
+                      [
+                        Kernel.json_field "source"
+                          (Kernel.json_string
+                             (Ast.string_of_typ (Ast.TFun (old_model, new_model))));
+                      ]);
+                 Kernel.json_field "expr"
+                   (Kernel.json_obj [ Kernel.json_field "source" (Kernel.json_string expr) ]);
+               ])
+           [ () ]);
+    ]
+
+let generate_migration_json old_store new_store =
+  let old_checked = Store.load_program old_store |> Kernel.check_program in
+  let new_checked = Store.load_program new_store |> Kernel.check_program in
+  let old_contract = Web.check_contract old_checked in
+  let new_contract = Web.check_contract new_checked in
+  let required = not (Ast.equal_typ old_contract.Web.model_ty new_contract.Web.model_ty) in
+  let expr, strategies =
+    if required then migration_expr_source old_contract.model_ty new_contract.model_ty
+    else ("", [])
+  in
+  Kernel.json_obj
+    [
+      Kernel.json_field "format" (Kernel.json_string migration_generation_format);
+      Kernel.json_field "protocol" (Kernel.json_string format);
+      Kernel.json_field "stage" (Kernel.json_string "PatchCandidate");
+      Kernel.json_field "oldStore" (Kernel.json_string old_store);
+      Kernel.json_field "newStore" (Kernel.json_string new_store);
+      Kernel.json_field "oldModel" (Kernel.json_string (Ast.string_of_typ old_contract.model_ty));
+      Kernel.json_field "newModel" (Kernel.json_string (Ast.string_of_typ new_contract.model_ty));
+      Kernel.json_field "required" (Kernel.json_bool required);
+      Kernel.json_field "migrationName" (Kernel.json_string "migrate_v1_v2");
+      Kernel.json_field "strategies" (json_string_list strategies);
+      Kernel.json_field "expr" (Kernel.json_string expr);
+      Kernel.json_field "patchCandidate"
+        (if required then migration_patch_candidate old_contract.model_ty new_contract.model_ty expr
+         else Kernel.json_obj [ Kernel.json_field "ops" (Kernel.json_array (fun x -> x) []) ]);
+      Kernel.json_field "validationCommand"
+        (Kernel.json_string "protoss patch check <old-store> <migration.patch.json>");
     ]
   ^ "\n"
 
