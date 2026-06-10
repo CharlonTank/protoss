@@ -89,6 +89,9 @@ let () =
   let ptb_checked = Loader.check_file ptb_file in
   assert_equal ".ptb canonical binary round-trip hash" (Kernel.hash_program norm)
     (Kernel.hash_program ptb_checked);
+  let converted_pt = Ast.string_of_program norm.Kernel.program |> check in
+  assert_equal "pt source projection round-trip hash" (Kernel.hash_program norm)
+    (Kernel.hash_program converted_pt);
 
   let memo =
     check

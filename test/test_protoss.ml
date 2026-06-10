@@ -329,6 +329,9 @@ let () =
   assert_equal ".ptb fixture matches canonical binary serialization"
     (Canonical_binary.checked_to_binary basic_protoss)
     (Store.read_file basic_ptb_path);
+  let basic_pt_projection = Ast.string_of_program basic_protoss.Kernel.program in
+  assert_equal ".pt projection parses with same hash" (Kernel.hash_program basic_protoss)
+    (Kernel.hash_program (check basic_pt_projection));
   let elm_like = Loader.check_file elm_like_path in
   let elm_like_equiv = Loader.check_file elm_like_equiv_path in
   assert_equal "Elm-like surface hashes as S-expression surface"

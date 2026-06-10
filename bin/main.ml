@@ -10,6 +10,7 @@ let usage () =
     "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
      \       protoss check|nf|hash --store-graph <project-or-store> <graphHash>\n\
      \       protoss canon <file> | protoss canon --ptb <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
+     \       protoss convert --to pt|ptc|ptb <file>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -193,6 +194,14 @@ let command_canon_from_graph file =
 
 let command_canon_migrate_graph file =
   print_string (Protoss.Canonical_ir.migrate_graph (Protoss.Store.read_file file))
+
+let command_convert = function
+  | [ "--to"; "pt"; file ] ->
+      let checked = parse_and_check file in
+      print_string (Protoss.Ast.string_of_program checked.Protoss.Kernel.program)
+  | [ "--to"; "ptc"; file ] -> command_canon file
+  | [ "--to"; "ptb"; file ] -> command_canon_ptb file
+  | _ -> usage ()
 
 let command_eval file args =
   let entry, rest = find_entry args in
@@ -1146,6 +1155,7 @@ let () =
       | [ "canon"; "--from-graph"; file ] -> command_canon_from_graph file
       | [ "canon"; "--migrate-graph"; file ] -> command_canon_migrate_graph file
       | [ "canon"; file ] -> command_canon file
+      | "convert" :: args -> command_convert args
       | "eval" :: "--graph" :: file :: args -> command_eval_graph file args
       | "eval" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
           command_eval_store_graph project_or_store graph_hash args

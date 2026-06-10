@@ -58,7 +58,7 @@ listees dans la section "Gates de validation".
 - [x] Supporter `.pt` comme syntaxe humaine officielle Protoss/H.
 - [x] Supporter `.ptc` comme texte canonique officiel Protoss/C.
 - [x] Supporter `.ptb` comme binaire canonique officiel Protoss/B.
-- [ ] Fournir `protoss convert --to pt|ptc|ptb`.
+- [x] Fournir `protoss convert --to pt|ptc|ptb`.
 - [x] Garantir `hash(parse(.pt)) == hash(parse(.ptc)) == hash(.ptb)`.
 - [x] Ajouter une fixture equivalente `.pt`.
 - [x] Ajouter une fixture equivalente `.ptc`.
