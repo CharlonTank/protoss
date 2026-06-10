@@ -6,6 +6,14 @@ let assert_true msg b = if not b then fail msg
 
 let assert_equal msg a b = if a <> b then fail (msg ^ ": expected " ^ a ^ ", got " ^ b)
 
+let test_trace_enabled () = Sys.getenv_opt "PROTOSS_TEST_TRACE" = Some "1"
+
+let test_started_at = Unix.gettimeofday ()
+
+let trace_test label =
+  if test_trace_enabled () then (
+    Printf.eprintf "[test %.3fs] %s\n%!" (Unix.gettimeofday () -. test_started_at) label)
+
 let contains_substring haystack needle =
   let lh = String.length haystack and ln = String.length needle in
   let rec loop i =
@@ -4068,6 +4076,7 @@ let () =
   assert_true "store dedupe object count" (List.length (Store.list_objects dedupe_store) = 1);
 
   if Sys.getenv_opt "PROTOSS_RUN_INTEGRATION_TESTS" = Some "1" then (
+  trace_test "integration:start";
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
   let init_manifest = Workspace.parse_manifest project_init_root in
@@ -4117,8 +4126,10 @@ let () =
   in
   let ws_a = make_workspace "workspace-a" 2 "x" in
   let manifest_a = Workspace.parse_manifest ws_a in
+  trace_test "integration:workspace-a";
   Workspace.check_project manifest_a;
   let build_a = Workspace.build manifest_a in
+  trace_test "integration:workspace-a:built";
   assert_true "project build parsed sources" (build_a.Workspace.stats.Workspace.parsed > 0);
   assert_true "project build normalized defs" (build_a.Workspace.stats.Workspace.normalized > 0);
   assert_true "project store list" (String.contains (Workspace.list_store build_a.store) 'a');
@@ -4127,6 +4138,7 @@ let () =
     (String.concat "," (Workspace.read_deps build_a.store "appMain"));
   assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
   assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
+  trace_test "integration:workspace-a:audit";
   let patch_audit_ws = make_workspace "workspace-patch-audit" 5 "p" in
   let patch_audit_manifest = Workspace.parse_manifest patch_audit_ws in
   let patch_audit_build = Workspace.build patch_audit_manifest in
@@ -4143,10 +4155,11 @@ let () =
   (try
      ignore (Workspace.audit patch_audit_manifest);
      fail "project audit should reject patch audit drift"
-   with Workspace.Error msg ->
+  with Workspace.Error msg ->
      assert_true "project audit reports patch audit drift"
        (contains_substring msg "patch audit invalid"
        && contains_substring msg "patch audit program hash mismatch"));
+  trace_test "integration:workspace-a:patch-audit";
   let loaded_store_program = Store.load_program build_a.store in
   assert_true "project store preserves recursive Json alias"
     (List.exists
@@ -4176,6 +4189,7 @@ let () =
     (contains_substring (Workspace.graphs_store build_a.store) store_graph_hash);
   assert_equal "project store graph by hash" (Store.read_file store_graph_path)
     (Workspace.graph_store build_a.store store_graph_hash);
+  trace_test "integration:workspace-a:store-graph";
   let store_graph_checked = Workspace.checked_store_graph build_a.store store_graph_hash in
   assert_equal "project checked store graph hash" (Kernel.hash_program build_a.Workspace.checked)
     (Kernel.hash_program store_graph_checked);
@@ -4209,6 +4223,7 @@ let () =
   in
   assert_equal "project store graph ledger invariant result" "Done \"Ada\""
     store_graph_ledger_invariants.Invariants.result;
+  trace_test "integration:workspace-a:graph-invariants";
   let store_graph_dot = Workspace.store_graph_dot build_a.store store_graph_hash in
   assert_true "project store graph dot header"
     (contains_substring store_graph_dot "digraph protoss");
@@ -4264,6 +4279,7 @@ let () =
        (List.length
           (Workspace.store_graph_capability_scopes_for build_a.store store_graph_hash
              store_graph_human_cap.Canonical_ir.graph_cap_ref)));
+  trace_test "integration:workspace-a:graph-queries";
   let store_graph_host_contract_json =
     Workspace.store_graph_host_contract build_a.store store_graph_hash
   in
@@ -4301,9 +4317,10 @@ let () =
        (Workspace.check_store_graph_host_contract build_a.store store_graph_hash
           (replace_once store_graph_host_contract_json "Human.ask" "Clock.read"));
      fail "drifted store graph host contract should be rejected"
-   with Kernel.Error msg ->
+  with Kernel.Error msg ->
      assert_true "drifted store graph host contract mismatch"
        (contains_substring msg "host contract mismatch"));
+  trace_test "integration:workspace-a:host-contract";
   assert_equal "project store graph def name" "appMain" store_graph_def.Canonical_ir.graph_def_name;
   assert_equal "project store graph def term ref" store_graph_app_main_ref
     store_graph_def.Canonical_ir.graph_def_term_ref;
@@ -4331,6 +4348,7 @@ let () =
     (String.trim (Store.read_file (capability_scope_file "askName")));
   assert_equal "project store pure capability scope" ""
     (String.trim (Store.read_file (capability_scope_file "appMain")));
+  trace_test "integration:workspace-a:pre-lock";
   let lock_path, lock_hash = Workspace.write_lock manifest_a in
   assert_true "project lock writes file" (Sys.file_exists lock_path);
   let lock_before = Store.read_file lock_path in
@@ -4350,6 +4368,8 @@ let () =
   assert_equal "project lock deterministic path" lock_path lock_path_again;
   assert_equal "project lock deterministic hash" lock_hash lock_hash_again;
   assert_equal "project lock deterministic content" lock_before (Store.read_file lock_path_again);
+  trace_test "integration:workspace-a:lock";
+  trace_test "integration:package-a";
   let package_a = Workspace.write_package manifest_a in
   assert_true "project package writes file" (Sys.file_exists package_a.Workspace.package_path);
   assert_equal "project package records build" build_a.build_id package_a.build_id;
@@ -4566,6 +4586,7 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "invalid package interface write leaves package store untouched"
     (package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss"));
+  trace_test "integration:consumer-package";
   let consumer_ws = make_workspace "workspace-consumer" 5 "z" in
   let consumer_manifest_path = Filename.concat consumer_ws "protoss.toml" in
   let consumer_manifest_base = Store.read_file consumer_manifest_path in
@@ -4928,6 +4949,7 @@ let () =
        (contains_substring msg "invalid content-addressed canonical graph p2:bad"
        && contains_substring msg "stored canonical graph hash mismatch"));
 
+  trace_test "integration:modules-diff";
   let module_ws = temp_dir "workspace-modules" in
   ensure_dir module_ws;
   ensure_dir (Filename.concat module_ws "src");
@@ -5016,6 +5038,7 @@ let () =
     ("name = \"todo-web-alpha-test\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
     ^ stdlib_path
     ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Local.storage\"]\n");
+  trace_test "integration:web";
   let contract = Web.app_check todo in
   assert_equal "web app model"
     "(Record (draft String) (items (List String)) (next Nat))"
@@ -5164,6 +5187,7 @@ let () =
    with Kernel.Error _ -> ());
 
   let patch_dir = find_up (Sys.getcwd ()) "patches/web" in
+  trace_test "integration:web-patches-ledger";
   let web_store = web_a.Web.build.Workspace.store in
   let before_web_patch = snapshot web_store in
   ignore (Patch.apply web_store (Filename.concat patch_dir "change_button_text.json"));
@@ -5426,6 +5450,7 @@ let () =
      fail "invalid resume suspension should be rejected"
    with Kernel.Error _ -> ());
 
+  trace_test "integration:runtime-store";
   (* -- Runtime Store Foundation -------------------------------------------- *)
   let rt_stdlib = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let rt_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
@@ -5502,7 +5527,8 @@ let () =
   assert_true "runtime reset recreates a clean runtime"
     (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
   assert_true "runtime reset keeps a single world"
-    (Array.length (Sys.readdir rt_worlds) = 1)
+    (Array.length (Sys.readdir rt_worlds) = 1);
+  trace_test "integration:done"
   ) else
     print_endline "integration tests skipped (set PROTOSS_RUN_INTEGRATION_TESTS=1)";
 

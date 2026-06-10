@@ -703,34 +703,115 @@ type prepared_build = {
   program_graph : string;
 }
 
+type prepared_core = {
+  core_checked : Kernel.checked;
+  core_build_id : string;
+  core_program_canonical : string;
+  core_program_graph : string;
+}
+
+let prepared_build_cache : (string, prepared_core) Hashtbl.t = Hashtbl.create 16
+
+let cache_field name value =
+  name ^ ":" ^ string_of_int (String.length value) ^ ":" ^ value
+
+let cache_list name values =
+  cache_field (name ^ ".count") (string_of_int (List.length values))
+  :: List.mapi (fun i value -> cache_field (name ^ "." ^ string_of_int i) value) values
+
+let cache_pairs name pairs =
+  cache_list name (List.map (fun (a, b) -> cache_field "k" a ^ cache_field "v" b) pairs)
+
+let prepare_build_cache_key (manifest : manifest) (units : unit_load list) =
+  let option_field name = function
+    | None -> [ cache_field (name ^ ".some") "false" ]
+    | Some value -> [ cache_field (name ^ ".some") "true"; cache_field name value ]
+  in
+  let unit_fields index unit =
+    [
+      cache_field ("unit." ^ string_of_int index ^ ".path") unit.path;
+      cache_field ("unit." ^ string_of_int index ^ ".source_hash") unit.source_hash;
+    ]
+    @ cache_list ("unit." ^ string_of_int index ^ ".imports") unit.imports
+    @ cache_list ("unit." ^ string_of_int index ^ ".capabilities") unit.capabilities
+    @ option_field ("unit." ^ string_of_int index ^ ".module") unit.module_name
+    @
+    (match unit.exports with
+    | None -> [ cache_field ("unit." ^ string_of_int index ^ ".exports.some") "false" ]
+    | Some exports ->
+        cache_field ("unit." ^ string_of_int index ^ ".exports.some") "true"
+        :: cache_list ("unit." ^ string_of_int index ^ ".exports") exports)
+    @ cache_list ("unit." ^ string_of_int index ^ ".public_symbols") unit.public_symbols
+    @ cache_list ("unit." ^ string_of_int index ^ ".all_symbols") unit.all_symbols
+  in
+  String.concat "\n"
+    ([
+       cache_field "cache.version" "prepare-build-v1";
+       cache_field "manifest.root" manifest.root;
+       cache_field "manifest.name" manifest.name;
+       cache_field "manifest.version" manifest.version;
+       cache_field "manifest.store_dir" manifest.store_dir;
+       cache_field "manifest.cache_dir" manifest.cache_dir;
+     ]
+    @ cache_list "manifest.entrypoints" manifest.entrypoints
+    @ option_field "manifest.stdlib" manifest.stdlib
+    @ cache_list "manifest.source_dirs" manifest.source_dirs
+    @ cache_list "manifest.capabilities" manifest.capabilities
+    @ cache_pairs "manifest.package_imports" manifest.package_imports
+    @ cache_pairs "manifest.package_interfaces" manifest.package_interfaces
+    @ cache_pairs "manifest.package_contracts" manifest.package_contracts
+    @ [ cache_field "units.count" (string_of_int (List.length units)) ]
+    @ List.concat (List.mapi unit_fields units))
+  |> Kernel.hash_string
+
+let program_of_units (manifest : manifest) (units : unit_load list) =
+  {
+    imports = [];
+    capabilities =
+      List.sort_uniq String.compare
+        (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
+    module_name = None;
+    exports = None;
+    type_aliases = List.concat (List.map (fun u -> u.type_aliases) units);
+    defs = List.concat (List.map (fun u -> u.defs) units);
+  }
+
 let prepare_build manifest =
   let stats = empty_stats () in
   let store = store_root manifest in
   let units = load_units manifest store stats in
-  check_unit_access manifest units;
-  let program =
-    {
-      imports = [];
-      capabilities =
-        List.sort_uniq String.compare
-          (manifest.capabilities @ List.concat (List.map (fun u -> u.capabilities) units));
-      module_name = None;
-      exports = None;
-      type_aliases = List.concat (List.map (fun u -> u.type_aliases) units);
-      defs = List.concat (List.map (fun u -> u.defs) units);
-    }
-  in
-  stats.typechecked <-
-    List.fold_left
-      (fun acc u -> if u.parsed_from_source then acc + List.length u.defs else acc)
-      0 units;
-  let checked =
-    try Kernel.check_program program with Kernel.Error msg -> fail msg
-  in
-  let program_canonical = Kernel.serialize_checked_program checked in
-  let program_graph = Kernel.checked_to_graph_json checked in
-  let build_id = Kernel.hash_string program_canonical in
-  { units; checked; stats; build_id; program_canonical; program_graph }
+  let cache_key = prepare_build_cache_key manifest units in
+  match Hashtbl.find_opt prepared_build_cache cache_key with
+  | Some core ->
+      {
+        units;
+        checked = core.core_checked;
+        stats;
+        build_id = core.core_build_id;
+        program_canonical = core.core_program_canonical;
+        program_graph = core.core_program_graph;
+      }
+  | None ->
+      check_unit_access manifest units;
+      let program = program_of_units manifest units in
+      stats.typechecked <-
+        List.fold_left
+          (fun acc u -> if u.parsed_from_source then acc + List.length u.defs else acc)
+          0 units;
+      let checked =
+        try Kernel.check_program program with Kernel.Error msg -> fail msg
+      in
+      let program_canonical = Kernel.serialize_checked_program checked in
+      let program_graph = Kernel.checked_to_graph_json checked in
+      let build_id = Kernel.hash_string program_canonical in
+      Hashtbl.replace prepared_build_cache cache_key
+        {
+          core_checked = checked;
+          core_build_id = build_id;
+          core_program_canonical = program_canonical;
+          core_program_graph = program_graph;
+        };
+      { units; checked; stats; build_id; program_canonical; program_graph }
 
 let prepared_graph_hash prepared =
   Kernel.checked_to_graph_content_hash prepared.checked

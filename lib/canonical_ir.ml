@@ -478,6 +478,10 @@ let graph_json_cache : (string, Json.t) Hashtbl.t = Hashtbl.create 8
 let parsed_graph_cache : (string, string list * Kernel.canonical_def list) Hashtbl.t =
   Hashtbl.create 8
 
+let checked_graph_cache : (string, Kernel.checked) Hashtbl.t = Hashtbl.create 8
+
+let graph_content_hash_cache : (string, string) Hashtbl.t = Hashtbl.create 8
+
 let parse_graph_json input =
   match Hashtbl.find_opt graph_json_cache input with
   | Some graph -> graph
@@ -556,22 +560,39 @@ let parse_graph input =
       parsed
 
 let graph_content_hash input =
-  let graph = parse_graph_json input in
-  let version = json_string_field "version" graph in
-  let caps, defs = parse_graph input in
-  let checked = Kernel.checked_of_canonical caps defs in
-  if not (String.equal version Kernel.canonical_graph_legacy_v1) then (
-    let expected = Kernel.checked_to_graph_json checked in
-    if not (String.equal input expected) then fail "canonical graph serialization mismatch");
-  json_string_field "graphHash" graph
+  match Hashtbl.find_opt graph_content_hash_cache input with
+  | Some hash -> hash
+  | None ->
+      let graph = parse_graph_json input in
+      let version = json_string_field "version" graph in
+      let checked =
+        match Hashtbl.find_opt checked_graph_cache input with
+        | Some checked -> checked
+        | None ->
+            let caps, defs = parse_graph input in
+            let checked = Kernel.checked_of_canonical caps defs in
+            Hashtbl.add checked_graph_cache input checked;
+            checked
+      in
+      if not (String.equal version Kernel.canonical_graph_legacy_v1) then (
+        let expected = Kernel.checked_to_graph_json checked in
+        if not (String.equal input expected) then fail "canonical graph serialization mismatch");
+      let hash = json_string_field "graphHash" graph in
+      Hashtbl.add graph_content_hash_cache input hash;
+      hash
 
 let graph_to_program input =
   let caps, defs = parse_graph input in
   Kernel.serialize_program caps defs
 
 let checked_of_graph input =
-  let caps, defs = parse_graph input in
-  Kernel.checked_of_canonical caps defs
+  match Hashtbl.find_opt checked_graph_cache input with
+  | Some checked -> checked
+  | None ->
+      let caps, defs = parse_graph input in
+      let checked = Kernel.checked_of_canonical caps defs in
+      Hashtbl.add checked_graph_cache input checked;
+      checked
 
 let migrate_graph input =
   let caps, defs = parse_graph input in
