@@ -2115,15 +2115,24 @@ let () =
     (Runtime.value_to_string closure_cache_out);
 
   let cache_dir = temp_dir "persistent-cache" in
+  let eval_key_b = Runtime.eval_key_for_def memo "b" in
+  assert_equal "eval key explicit shape"
+    (Kernel.hash_string
+       ("protoss.eval.v1\ndef-id=p2:def\nargs-hash=p2:args\nruntime-policy=policy"))
+    (Runtime.eval_key ~def_id:"p2:def" ~args_hash:"p2:args" ~runtime_policy:"policy");
+  assert_true "eval key uses content hash prefix"
+    (contains_substring eval_key_b "p2:");
   let _, _ = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let _, persistent_trace = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let hits, misses, entries = Runtime.persistent_cache_stats cache_dir in
   assert_true "persistent cache should have entries" (entries > 0);
   assert_true "persistent cache should record misses" (misses > 0);
   assert_true "persistent cache should record hits" (hits > 0);
-  assert_true "persistent cache trace should contain disk hit"
+  assert_true "persistent cache should contain eval key file"
+    (Sys.file_exists (Filename.concat cache_dir (eval_key_b ^ ".cache")));
+  assert_true "persistent cache trace should contain eval-key disk hit"
     (List.exists
-       (fun line -> String.length line >= 20 && String.sub line 0 20 = "cache hit persistent")
+       (fun line -> String.equal line ("cache hit eval " ^ eval_key_b))
        persistent_trace);
 
   let import_root = temp_dir "imports" in

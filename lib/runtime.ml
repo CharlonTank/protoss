@@ -4,6 +4,15 @@ let fail = Kernel.fail
 
 let runtime_version = "protoss-runtime-v2"
 
+let eval_cache_version = "protoss.eval.v1"
+
+let no_args_hash = Kernel.hash_string "protoss.eval.args.v1\n()"
+
+let eval_key ~def_id ~args_hash ~runtime_policy =
+  Kernel.hash_string
+    (eval_cache_version ^ "\ndef-id=" ^ def_id ^ "\nargs-hash=" ^ args_hash
+   ^ "\nruntime-policy=" ^ runtime_policy)
+
 type value =
   | VUnit
   | VBool of bool
@@ -952,6 +961,14 @@ and apply_value st fv av =
       eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
   | v, _ -> fail ("application of non-function runtime value: " ^ value_to_string v)
 
+and eval_runtime_policy_of_state st =
+  "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ st.cache_scope
+  ^ "\nstdlib-fast-paths=" ^ string_of_bool st.stdlib_fast_paths
+
+and eval_key_for_checked_def st (d : Kernel.checked_def) =
+  eval_key ~def_id:d.def_id ~args_hash:no_args_hash
+    ~runtime_policy:(eval_runtime_policy_of_state st)
+
 and eval_def st n =
   match Hashtbl.find_opt st.def_cache n with
   | Some v -> v
@@ -959,10 +976,19 @@ and eval_def st n =
       match def_by_ref st.checked n with
       | None -> fail ("unknown definition at runtime: " ^ n)
       | Some d ->
+          let key = eval_key_for_checked_def st d in
+          (match persistent_cache_get st key with
+          | Some v ->
+              trace st ("cache hit eval " ^ key);
+              Hashtbl.add st.def_cache n v;
+              v
+          | None ->
+              trace st ("cache miss eval " ^ key);
           let canonical = parse_serialized_def_memo d.canonical in
           let v = eval_with_cap_scope st d.capabilities (fun () -> eval_cterm st [] canonical.cbody) in
           Hashtbl.add st.def_cache n v;
-          v)
+              persistent_cache_put st key v;
+              v))
 
 (* The default cache scope is a hash of the whole program. [eval_entry] /
    [normalize_def] are frequently called many times on the *same* checked
@@ -979,6 +1005,20 @@ let program_cache_scope checked =
       let h = Kernel.hash_program checked in
       cache_scope_memo := Some (checked, h);
       h
+
+let eval_runtime_policy ?(stdlib_fast_paths = false) ?cache_scope checked =
+  let scope =
+    match cache_scope with Some scope -> scope | None -> program_cache_scope checked
+  in
+  "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ scope ^ "\nstdlib-fast-paths="
+  ^ string_of_bool stdlib_fast_paths
+
+let eval_key_for_def ?(stdlib_fast_paths = false) ?cache_scope checked name =
+  match def_by_ref checked name with
+  | None -> fail ("unknown definition for eval key: " ^ name)
+  | Some d ->
+      eval_key ~def_id:d.def_id ~args_hash:no_args_hash
+        ~runtime_policy:(eval_runtime_policy ~stdlib_fast_paths ?cache_scope checked)
 
 (* Normal forms are pure functions of the program, yet the default
    [eval_entry]/[normalize_def] path rebuilt empty caches on every call. Reuse

@@ -160,8 +160,11 @@ listees dans la section "Gates de validation".
 - [x] Prouver par test qu'un let non force n'evalue pas son RHS.
   Preuves: `Runtime.VThunk`/`force let` trace dans `lib/runtime.ml`,
   assertions "lazy let" dans `test/test_protoss.ml` et `README.md`.
-- [ ] Implementer `EvalKey = H("protoss.eval.v1", DefId, ArgsHash, RuntimePolicy)`
+- [x] Implementer `EvalKey = H("protoss.eval.v1", DefId, ArgsHash, RuntimePolicy)`
   pour les evaluations pures.
+  Preuves: `Runtime.eval_key`, `Runtime.eval_key_for_def`, cache persistant par
+  DefId dans `lib/runtime.ml`, assertions "eval key" dans `test/test_protoss.ml`
+  et `README.md`.
 - [x] Ajouter un cache d'evaluation pure persistent.
 - [ ] Implementer `EvalKey` avec `WorldRef` et `CapScope` pour processus.
 - [x] Ajouter une commande d'inspection des entrees de cache.
