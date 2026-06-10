@@ -215,8 +215,17 @@ assertions recursion, alpha-stabilite et normalisation dans `test/test_protoss.m
   reports static arity", "termination explanation reports Nat static size" et
   "termination explanation reports recursive variant static size" dans
   `test/test_protoss.ml`; `README.md`.
-- [ ] Supporter coinduction productive.
-- [ ] Supporter automates explicitement productifs.
+- [x] Supporter coinduction productive.
+  Preuves: types `TStream`/termes `ECoiter`, `streamHead`, `streamTail`,
+  `streamTake`, runtime `Runtime.VStream`, assertions "productive stream head
+  normalizes", "productive stream tail head normalizes", "productive stream
+  take normalizes", "productive stream appears in canonical program" et rejet
+  d'un `coiter` sans champ `state` dans `test/test_protoss.ml`; `README.md`.
+- [x] Supporter automates explicitement productifs.
+  Preuves: types `TAutomaton`/termes `EAutomaton`, `automatonRun`, runtime
+  `Runtime.VAutomaton`, assertion "productive automaton run normalizes" et
+  "productive automaton appears in canonical program" dans `test/test_protoss.ml`;
+  `README.md`.
 - [x] Ajouter des tests de preservation/progression approximatifs par fixtures.
   Preuves: `examples/preservation_progression*.protoss`,
   `test/test_protoss.ml` helper

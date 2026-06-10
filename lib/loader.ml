@@ -608,8 +608,10 @@ let rec type_refs = function
   | TUnit | TBool | TNat | TString -> []
   | TFun (a, b) -> type_refs a @ type_refs b
   | TRecord fields | TVariant fields -> List.concat_map (fun (_, t) -> type_refs t) fields
-  | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t) ->
+  | TList t | TView t | TAttr t | TStream t | TProcess (_, t) | TCmd (_, t)
+  | TSecretRef (_, t) ->
       type_refs t
+  | TAutomaton (state, output) -> type_refs state @ type_refs output
   | TVar _ -> []
   | TForall (_, t) -> type_refs t
   | TNamed (n, args) -> n :: List.concat_map type_refs args
@@ -642,6 +644,14 @@ let rec expr_type_refs = function
   | EFoldList (xs, z, step) -> expr_type_refs xs @ expr_type_refs z @ expr_type_refs step
   | ECaseList (xs, nil_body, _, _, cons_body) ->
       expr_type_refs xs @ expr_type_refs nil_body @ expr_type_refs cons_body
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      type_refs state_ty @ type_refs item_ty @ expr_type_refs seed @ expr_type_refs step
+  | EStreamHead stream | EStreamTail stream -> expr_type_refs stream
+  | EStreamTake (count, stream) -> expr_type_refs count @ expr_type_refs stream
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      type_refs state_ty @ type_refs output_ty @ expr_type_refs initial
+      @ expr_type_refs transition
+  | EAutomatonRun (count, automaton) -> expr_type_refs count @ expr_type_refs automaton
   | EText e | EColumn e | ERow e | EDone e -> expr_type_refs e
   | EImage (src, alt) | EButton (src, alt) | EInput (src, alt) | EListView (src, alt)
   | EWhenView (src, alt) | EAttr (src, alt) | EOn (src, alt) ->

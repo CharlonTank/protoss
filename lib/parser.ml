@@ -129,6 +129,9 @@ let rec parse_type = function
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (parse_type t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (parse_type t)
   | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (parse_type t)
+  | Sexp.List [ Sexp.Atom "Stream"; t ] -> TStream (parse_type t)
+  | Sexp.List [ Sexp.Atom "Automaton"; state; output ] ->
+      TAutomaton (parse_type state, parse_type output)
   | Sexp.List [ Sexp.Atom "Process"; t ] -> TProcess (None, parse_type t)
   | Sexp.List [ Sexp.Atom "Process"; Sexp.List (Sexp.Atom "capabilities" :: caps); t ] ->
       TProcess (Some (parse_capability_atoms "process capability" caps), parse_type t)
@@ -283,6 +286,20 @@ let rec parse_expr = function
       ECaseList (parse_expr xs, parse_expr nil_body, head, tail, parse_expr cons_body)
   | Sexp.List (Sexp.Atom "caseList" :: _) ->
       fail case_list_syntax
+  | Sexp.List [ Sexp.Atom "coiter"; state_ty; item_ty; seed; step ] ->
+      ECoiter (parse_type state_ty, parse_type item_ty, parse_expr seed, parse_expr step)
+  | Sexp.List [ Sexp.Atom "streamHead"; stream ] -> EStreamHead (parse_expr stream)
+  | Sexp.List [ Sexp.Atom "streamTail"; stream ] -> EStreamTail (parse_expr stream)
+  | Sexp.List [ Sexp.Atom "streamTake"; count; stream ] ->
+      EStreamTake (parse_expr count, parse_expr stream)
+  | Sexp.List [ Sexp.Atom "automaton"; state_ty; output_ty; initial; transition ] ->
+      EAutomaton
+        ( parse_type state_ty,
+          parse_type output_ty,
+          parse_expr initial,
+          parse_expr transition )
+  | Sexp.List [ Sexp.Atom "automatonRun"; count; automaton ] ->
+      EAutomatonRun (parse_expr count, parse_expr automaton)
   | Sexp.List [ Sexp.Atom "text"; e ] -> EText (parse_expr e)
   | Sexp.List [ Sexp.Atom "image"; src; alt ] ->
       EImage (parse_expr src, parse_expr alt)
@@ -495,6 +512,9 @@ let rec qualify_type local_types params = function
   | TList t -> TList (qualify_type local_types params t)
   | TView t -> TView (qualify_type local_types params t)
   | TAttr t -> TAttr (qualify_type local_types params t)
+  | TStream t -> TStream (qualify_type local_types params t)
+  | TAutomaton (state, output) ->
+      TAutomaton (qualify_type local_types params state, qualify_type local_types params output)
   | TProcess (caps, t) -> TProcess (caps, qualify_type local_types params t)
   | TCmd (caps, t) -> TCmd (caps, qualify_type local_types params t)
   | TSecretRef (scope, t) -> TSecretRef (scope, qualify_type local_types params t)
@@ -612,6 +632,30 @@ let rec qualify_expr local_defs local_types type_params bound = function
           head,
           tail,
           qualify_expr local_defs local_types type_params (head :: tail :: bound) cons_body )
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      ECoiter
+        ( qualify_type local_types type_params state_ty,
+          qualify_type local_types type_params item_ty,
+          qualify_expr local_defs local_types type_params bound seed,
+          qualify_expr local_defs local_types type_params bound step )
+  | EStreamHead stream ->
+      EStreamHead (qualify_expr local_defs local_types type_params bound stream)
+  | EStreamTail stream ->
+      EStreamTail (qualify_expr local_defs local_types type_params bound stream)
+  | EStreamTake (count, stream) ->
+      EStreamTake
+        ( qualify_expr local_defs local_types type_params bound count,
+          qualify_expr local_defs local_types type_params bound stream )
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      EAutomaton
+        ( qualify_type local_types type_params state_ty,
+          qualify_type local_types type_params output_ty,
+          qualify_expr local_defs local_types type_params bound initial,
+          qualify_expr local_defs local_types type_params bound transition )
+  | EAutomatonRun (count, automaton) ->
+      EAutomatonRun
+        ( qualify_expr local_defs local_types type_params bound count,
+          qualify_expr local_defs local_types type_params bound automaton )
   | EText e -> EText (qualify_expr local_defs local_types type_params bound e)
   | EImage (src, alt) ->
       EImage

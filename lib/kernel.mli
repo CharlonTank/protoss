@@ -190,6 +190,12 @@ type cterm =
   | CCons of Ast.typ * cterm * cterm
   | CFoldList of cterm * cterm * cterm
   | CCaseList of cterm * cterm * cterm
+  | CCoiter of Ast.typ * Ast.typ * cterm * cterm
+  | CStreamHead of cterm
+  | CStreamTail of cterm
+  | CStreamTake of cterm * cterm
+  | CAutomaton of Ast.typ * Ast.typ * cterm * cterm
+  | CAutomatonRun of cterm * cterm
   | CText of cterm
   | CImage of cterm * cterm
   | CButton of cterm * cterm

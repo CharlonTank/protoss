@@ -1725,6 +1725,43 @@ let () =
   expect_check_error
     "(defrec bad (-> Nat Nat) (nat n) (zero 0) (step acc (bad acc)))";
 
+  let productive_stream =
+    check
+      "(def nats (Stream Nat) \
+       (coiter Nat Nat 1 \
+       (lambda (n Nat) (record (head n) (state (succ n))))))\n\
+       (def first Nat (streamHead nats))\n\
+       (def second Nat (streamHead (streamTail nats)))\n\
+       (def firstThree (List Nat) (streamTake 3 nats))"
+  in
+  let first, _ = Runtime.normalize_def productive_stream "first" in
+  assert_equal "productive stream head normalizes" "1" (Runtime.value_to_string first);
+  let second, _ = Runtime.normalize_def productive_stream "second" in
+  assert_equal "productive stream tail head normalizes" "2"
+    (Runtime.value_to_string second);
+  let first_three, _ = Runtime.normalize_def productive_stream "firstThree" in
+  assert_equal "productive stream take normalizes" "[1, 2, 3]"
+    (Runtime.value_to_string first_three);
+  assert_true "productive stream appears in canonical program"
+    (contains_substring (Kernel.serialize_checked_program productive_stream) "(coiter");
+  expect_check_error
+    "(def bad (Stream Nat) \
+       (coiter Nat Nat 0 \
+       (lambda (n Nat) (record (head n) (next (succ n))))))";
+
+  let productive_automaton =
+    check
+      "(def counter (Automaton Nat Nat) \
+       (automaton Nat Nat 0 \
+       (lambda (state Nat) (record (output state) (state (succ state))))))\n\
+       (def outputs (List Nat) (automatonRun 4 counter))"
+  in
+  let outputs, _ = Runtime.normalize_def productive_automaton "outputs" in
+  assert_equal "productive automaton run normalizes" "[0, 1, 2, 3]"
+    (Runtime.value_to_string outputs);
+  assert_true "productive automaton appears in canonical program"
+    (contains_substring (Kernel.serialize_checked_program productive_automaton) "(automaton");
+
   let image_view =
     check
       "(def hero (View (Variant (Open Unit))) \

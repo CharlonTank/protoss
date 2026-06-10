@@ -34,6 +34,8 @@ type value =
   | VView of view
   | VAttribute of vattr
   | VClosure of typ * Kernel.cterm * value list * string list
+  | VStream of typ * typ * value * value
+  | VAutomaton of typ * typ * value * value
   | VBuiltinSucc
   | VProcessDone of value
   | VProcessRequest of suspended
@@ -125,6 +127,9 @@ let rec value_to_string = function
   | VAttribute a -> vattr_to_string a
   | VClosure (t, body, _, _) ->
       "<lambda:" ^ Kernel.type_to_canonical t ^ ":" ^ Kernel.cterm_to_string body ^ ">"
+  | VStream (_, item_ty, _, _) -> "<stream:" ^ Kernel.type_to_canonical item_ty ^ ">"
+  | VAutomaton (_, output_ty, _, _) ->
+      "<automaton:" ^ Kernel.type_to_canonical output_ty ^ ">"
   | VBuiltinSucc -> "<builtin:succ>"
   | VProcessDone v -> "Done " ^ value_to_string v
   | VProcessRequest s -> "Request " ^ Kernel.req_to_canonical s.req
@@ -174,6 +179,13 @@ let rec value_to_cache_key = function
       ^ " (env " ^ String.concat " " (List.map value_to_cache_key env)
       ^ ") (cap-scope " ^ String.concat " " (List.sort_uniq String.compare cap_scope)
       ^ "))"
+  | VStream (state_ty, item_ty, state, step) ->
+      "(Stream " ^ Kernel.type_to_canonical state_ty ^ " " ^ Kernel.type_to_canonical item_ty
+      ^ " " ^ value_to_cache_key state ^ " " ^ value_to_cache_key step ^ ")"
+  | VAutomaton (state_ty, output_ty, state, transition) ->
+      "(Automaton " ^ Kernel.type_to_canonical state_ty ^ " "
+      ^ Kernel.type_to_canonical output_ty ^ " " ^ value_to_cache_key state ^ " "
+      ^ value_to_cache_key transition ^ ")"
   | VBuiltinSucc -> "BuiltinSucc"
   | VProcessDone value -> "(Done " ^ value_to_cache_key value ^ ")"
   | VProcessRequest suspended -> "(Suspended " ^ suspended_to_cache_key suspended ^ ")"
@@ -250,6 +262,10 @@ let rec consume_cterm budget term =
         Option.bind
           (Option.bind (consume_cterm budget a) (fun budget -> consume_cterm budget b))
           (fun budget -> consume_cterm budget c)
+    | CCoiter (_, _, seed, step) | CAutomaton (_, _, seed, step)
+    | CStreamTake (seed, step) | CAutomatonRun (seed, step) ->
+        Option.bind (consume_cterm budget seed) (fun budget -> consume_cterm budget step)
+    | CStreamHead stream | CStreamTail stream -> consume_cterm budget stream
     | CFoldVariant (_, _, scrutinee, branches) ->
         Option.bind (consume_cterm budget scrutinee) (fun budget ->
             consume_list consume_cbranch budget branches)
@@ -275,6 +291,9 @@ let rec consume_cache_value budget value =
     | VClosure (_, body, env, _) ->
         Option.bind (consume_cterm budget body) (fun budget ->
             consume_list consume_cache_value budget env)
+    | VStream (_, _, state, step) | VAutomaton (_, _, state, step) ->
+        Option.bind (consume_cache_value budget state) (fun budget ->
+            consume_cache_value budget step)
     | VProcessRequest suspended -> consume_cache_suspended budget suspended
 
 and consume_cache_view budget = function
@@ -367,7 +386,8 @@ let rec cache_value_to_canonical = function
       | Some v -> Some ("(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " " ^ v ^ ")"))
   | VView _ -> None
   | VAttribute _ -> None
-  | VClosure _ | VBuiltinSucc | VProcessDone _ | VProcessRequest _ -> None
+  | VClosure _ | VStream _ | VAutomaton _ | VBuiltinSucc | VProcessDone _ | VProcessRequest _ ->
+      None
 
 and cache_values_to_canonical = function
   | [] -> Some []
@@ -722,6 +742,49 @@ let rec eval_cterm st env = function
       | VList (item_ty, head :: tail) ->
           eval_cterm st (head :: VList (item_ty, tail) :: env) cons_body
       | v -> fail ("caseList on non-List runtime value: " ^ value_to_string v))
+  | Kernel.CCoiter (state_ty, item_ty, seed, step) ->
+      VStream (state_ty, item_ty, eval_cterm st env seed, eval_cterm st env step)
+  | Kernel.CStreamHead stream -> (
+      match force_value_traced st (eval_cterm st env stream) with
+      | VStream (_, _, state, step) ->
+          let head, _ = stream_step st state step in
+          head
+      | v -> fail ("streamHead on non-Stream runtime value: " ^ value_to_string v))
+  | Kernel.CStreamTail stream -> (
+      match force_value_traced st (eval_cterm st env stream) with
+      | VStream (state_ty, item_ty, state, step) ->
+          let _, next_state = stream_step st state step in
+          VStream (state_ty, item_ty, next_state, step)
+      | v -> fail ("streamTail on non-Stream runtime value: " ^ value_to_string v))
+  | Kernel.CStreamTake (count, stream) -> (
+      match (force_value_traced st (eval_cterm st env count), force_value_traced st (eval_cterm st env stream)) with
+      | VNat n, VStream (_, item_ty, state, step) ->
+          let rec loop remaining state acc =
+            if remaining <= 0 then VList (item_ty, List.rev acc)
+            else
+              let head, next_state = stream_step st state step in
+              loop (remaining - 1) next_state (head :: acc)
+          in
+          loop n state []
+      | VNat _, v -> fail ("streamTake on non-Stream runtime value: " ^ value_to_string v)
+      | v, _ -> fail ("streamTake count on non-Nat runtime value: " ^ value_to_string v))
+  | Kernel.CAutomaton (state_ty, output_ty, initial, transition) ->
+      VAutomaton (state_ty, output_ty, eval_cterm st env initial, eval_cterm st env transition)
+  | Kernel.CAutomatonRun (count, automaton) -> (
+      match
+        ( force_value_traced st (eval_cterm st env count),
+          force_value_traced st (eval_cterm st env automaton) )
+      with
+      | VNat n, VAutomaton (_, output_ty, state, transition) ->
+          let rec loop remaining state acc =
+            if remaining <= 0 then VList (output_ty, List.rev acc)
+            else
+              let output, next_state = automaton_step st state transition in
+              loop (remaining - 1) next_state (output :: acc)
+          in
+          loop n state []
+      | VNat _, v -> fail ("automatonRun on non-Automaton runtime value: " ^ value_to_string v)
+      | v, _ -> fail ("automatonRun count on non-Nat runtime value: " ^ value_to_string v))
   | Kernel.CText e -> (
       match eval_cterm st env e with
       | VString s -> VView (VText s)
@@ -792,6 +855,22 @@ and expect_view = function
 and expect_attr = function
   | VAttribute a -> a
   | v -> fail ("expected Attr runtime value, got " ^ value_to_string v)
+
+and stream_step st state step =
+  match force_value_traced st (eval_app st step state) with
+  | VRecord fields ->
+      let head = record_field "head" (VRecord fields) in
+      let next_state = record_field "state" (VRecord fields) in
+      (head, next_state)
+  | value -> fail ("coiter step returned non-record runtime value: " ^ value_to_string value)
+
+and automaton_step st state transition =
+  match force_value_traced st (eval_app st transition state) with
+  | VRecord fields ->
+      let output = record_field "output" (VRecord fields) in
+      let next_state = record_field "state" (VRecord fields) in
+      (output, next_state)
+  | value -> fail ("automaton transition returned non-record runtime value: " ^ value_to_string value)
 
 (* Hashing every application's function/argument values to build a cache key
    costs far more than re-evaluating most applications: the serialized closure
@@ -1138,6 +1217,13 @@ let rec value_to_canonical = function
       "(Closure " ^ Kernel.type_to_canonical typ ^ " " ^ Kernel.cterm_to_string body ^ " (env "
       ^ String.concat " " (List.map value_to_canonical env) ^ ") (cap-scope "
       ^ String.concat " " (List.sort_uniq String.compare cap_scope) ^ "))"
+  | VStream (state_ty, item_ty, state, step) ->
+      "(Stream " ^ Kernel.type_to_canonical state_ty ^ " " ^ Kernel.type_to_canonical item_ty
+      ^ " " ^ value_to_canonical state ^ " " ^ value_to_canonical step ^ ")"
+  | VAutomaton (state_ty, output_ty, state, transition) ->
+      "(Automaton " ^ Kernel.type_to_canonical state_ty ^ " "
+      ^ Kernel.type_to_canonical output_ty ^ " " ^ value_to_canonical state ^ " "
+      ^ value_to_canonical transition ^ ")"
   | VBuiltinSucc -> "BuiltinSucc"
   | VProcessDone v -> "(Done " ^ value_to_canonical v ^ ")"
   | VProcessRequest s -> "(Suspended " ^ suspended_payload_to_canonical s ^ ")"
@@ -1229,6 +1315,18 @@ let rec value_of_canonical_sexp = function
               | Sexp.Atom cap -> cap
               | x -> fail ("invalid closure cap-scope atom: " ^ Sexp.to_string x))
             caps )
+  | Sexp.List [ Sexp.Atom "Stream"; state_ty; item_ty; state; step ] ->
+      VStream
+        ( Kernel.type_of_canonical_sexp state_ty,
+          Kernel.type_of_canonical_sexp item_ty,
+          value_of_canonical_sexp state,
+          value_of_canonical_sexp step )
+  | Sexp.List [ Sexp.Atom "Automaton"; state_ty; output_ty; state; transition ] ->
+      VAutomaton
+        ( Kernel.type_of_canonical_sexp state_ty,
+          Kernel.type_of_canonical_sexp output_ty,
+          value_of_canonical_sexp state,
+          value_of_canonical_sexp transition )
   | Sexp.Atom "BuiltinSucc" -> VBuiltinSucc
   | Sexp.List [ Sexp.Atom "Done"; v ] -> VProcessDone (value_of_canonical_sexp v)
   | x -> fail ("invalid runtime value: " ^ Sexp.to_string x)

@@ -175,6 +175,18 @@ let rec value_to_json = function
   | Runtime.VAttribute attr ->
       json_obj [ json_field "tag" (json_string "Attribute"); json_field "attribute" (attr_to_json attr) ]
   | Runtime.VClosure _ -> json_obj [ json_field "tag" (json_string "Closure") ]
+  | Runtime.VStream (_, item_ty, _, _) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Stream");
+          json_field "itemType" (type_to_json item_ty);
+        ]
+  | Runtime.VAutomaton (_, output_ty, _, _) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Automaton");
+          json_field "outputType" (type_to_json output_ty);
+        ]
   | Runtime.VBuiltinSucc -> json_obj [ json_field "tag" (json_string "BuiltinSucc") ]
   | Runtime.VProcessDone v ->
       json_obj [ json_field "tag" (json_string "Done"); json_field "value" (value_to_json v) ]

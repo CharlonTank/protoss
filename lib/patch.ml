@@ -556,7 +556,9 @@ let rec contains_process_type = function
   | TProcess _ -> true
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
-  | TList t | TView t | TAttr t | TCmd (_, t) | TSecretRef (_, t) -> contains_process_type t
+  | TList t | TView t | TAttr t | TStream t | TCmd (_, t) | TSecretRef (_, t) ->
+      contains_process_type t
+  | TAutomaton (state, output) -> contains_process_type state || contains_process_type output
   | TForall (_, t) -> contains_process_type t
   | TVar _ -> false
   | TNamed _ -> false
@@ -723,6 +725,28 @@ let rec rewrite_name_expr source replacement bound = function
           head,
           tail,
           rewrite_name_expr source replacement (head :: tail :: bound) cons_body )
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      ECoiter
+        ( state_ty,
+          item_ty,
+          rewrite_name_expr source replacement bound seed,
+          rewrite_name_expr source replacement bound step )
+  | EStreamHead stream -> EStreamHead (rewrite_name_expr source replacement bound stream)
+  | EStreamTail stream -> EStreamTail (rewrite_name_expr source replacement bound stream)
+  | EStreamTake (count, stream) ->
+      EStreamTake
+        ( rewrite_name_expr source replacement bound count,
+          rewrite_name_expr source replacement bound stream )
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      EAutomaton
+        ( state_ty,
+          output_ty,
+          rewrite_name_expr source replacement bound initial,
+          rewrite_name_expr source replacement bound transition )
+  | EAutomatonRun (count, automaton) ->
+      EAutomatonRun
+        ( rewrite_name_expr source replacement bound count,
+          rewrite_name_expr source replacement bound automaton )
   | EText expr -> EText (rewrite_name_expr source replacement bound expr)
   | EImage (a, b) ->
       EImage (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
@@ -891,6 +915,36 @@ let rec replace_first_expr target replacement expr =
           else
             let cons_body, changed = replace_first_expr target replacement cons_body in
             (ECaseList (target_expr, nil_body, head, tail, cons_body), changed)
+    | ECoiter (state_ty, item_ty, seed, step) ->
+        let seed, changed = replace_first_expr target replacement seed in
+        if changed then (ECoiter (state_ty, item_ty, seed, step), true)
+        else
+          let step, changed = replace_first_expr target replacement step in
+          (ECoiter (state_ty, item_ty, seed, step), changed)
+    | EStreamHead stream ->
+        let stream, changed = replace_first_expr target replacement stream in
+        (EStreamHead stream, changed)
+    | EStreamTail stream ->
+        let stream, changed = replace_first_expr target replacement stream in
+        (EStreamTail stream, changed)
+    | EStreamTake (count, stream) ->
+        let count, changed = replace_first_expr target replacement count in
+        if changed then (EStreamTake (count, stream), true)
+        else
+          let stream, changed = replace_first_expr target replacement stream in
+          (EStreamTake (count, stream), changed)
+    | EAutomaton (state_ty, output_ty, initial, transition) ->
+        let initial, changed = replace_first_expr target replacement initial in
+        if changed then (EAutomaton (state_ty, output_ty, initial, transition), true)
+        else
+          let transition, changed = replace_first_expr target replacement transition in
+          (EAutomaton (state_ty, output_ty, initial, transition), changed)
+    | EAutomatonRun (count, automaton) ->
+        let count, changed = replace_first_expr target replacement count in
+        if changed then (EAutomatonRun (count, automaton), true)
+        else
+          let automaton, changed = replace_first_expr target replacement automaton in
+          (EAutomatonRun (count, automaton), changed)
     | EText body ->
         let body, changed = replace_first_expr target replacement body in
         (EText body, changed)

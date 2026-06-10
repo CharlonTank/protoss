@@ -87,6 +87,10 @@ let rec type_of_graph_json obj =
   | "List" -> Ast.TList (type_of_graph_json (json_field "item" obj))
   | "View" -> Ast.TView (type_of_graph_json (json_field "message" obj))
   | "Attr" -> Ast.TAttr (type_of_graph_json (json_field "message" obj))
+  | "Stream" -> Ast.TStream (type_of_graph_json (json_field "item" obj))
+  | "Automaton" ->
+      Ast.TAutomaton
+        (type_of_graph_json (json_field "state" obj), type_of_graph_json (json_field "output" obj))
   | "Process" ->
       let capabilities =
         match Json.field "capabilities" obj with
@@ -227,6 +231,27 @@ let rec term_of_graph_json obj =
         ( term_of_graph_json (json_field "list" obj),
           term_of_graph_json (json_field "nil" obj),
           term_of_graph_json (json_field "cons" obj) )
+  | "Coiter" ->
+      Kernel.CCoiter
+        ( type_of_graph_json (json_field "stateType" obj),
+          type_of_graph_json (json_field "itemType" obj),
+          term_of_graph_json (json_field "seed" obj),
+          term_of_graph_json (json_field "step" obj) )
+  | "StreamHead" -> Kernel.CStreamHead (term_of_graph_json (json_field "stream" obj))
+  | "StreamTail" -> Kernel.CStreamTail (term_of_graph_json (json_field "stream" obj))
+  | "StreamTake" ->
+      Kernel.CStreamTake
+        (term_of_graph_json (json_field "count" obj), term_of_graph_json (json_field "stream" obj))
+  | "Automaton" ->
+      Kernel.CAutomaton
+        ( type_of_graph_json (json_field "stateType" obj),
+          type_of_graph_json (json_field "outputType" obj),
+          term_of_graph_json (json_field "initial" obj),
+          term_of_graph_json (json_field "transition" obj) )
+  | "AutomatonRun" ->
+      Kernel.CAutomatonRun
+        ( term_of_graph_json (json_field "count" obj),
+          term_of_graph_json (json_field "automaton" obj) )
   | "Text" -> Kernel.CText (term_of_graph_json (json_field "value" obj))
   | "Image" ->
       Kernel.CImage (term_of_graph_json (json_field "src" obj), term_of_graph_json (json_field "alt" obj))

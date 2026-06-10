@@ -81,6 +81,9 @@ let rec type_to_canonical = function
   | TList t -> "(List " ^ type_to_canonical t ^ ")"
   | TView t -> "(View " ^ type_to_canonical t ^ ")"
   | TAttr t -> "(Attr " ^ type_to_canonical t ^ ")"
+  | TStream t -> "(Stream " ^ type_to_canonical t ^ ")"
+  | TAutomaton (state, output) ->
+      "(Automaton " ^ type_to_canonical state ^ " " ^ type_to_canonical output ^ ")"
   | TProcess (caps, t) ->
       "(Process" ^ process_capabilities_to_canonical caps ^ " " ^ type_to_canonical t ^ ")"
   | TCmd (caps, t) ->
@@ -276,6 +279,8 @@ let builtin_type_names =
     "String";
     "List";
     "View";
+    "Stream";
+    "Automaton";
     "Process";
     "Cmd";
     "Record";
@@ -338,7 +343,9 @@ let rec direct_self_refs alias guarded = function
   | TFun (a, b) -> direct_self_refs alias false a @ direct_self_refs alias false b
   | TRecord fields -> List.concat_map (fun (_, t) -> direct_self_refs alias guarded t) fields
   | TVariant cases -> List.concat_map (fun (_, t) -> direct_self_refs alias true t) cases
-  | TList t -> direct_self_refs alias guarded t
+  | TList t | TStream t -> direct_self_refs alias guarded t
+  | TAutomaton (state, output) ->
+      direct_self_refs alias false state @ direct_self_refs alias false output
   | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t) ->
       direct_self_refs alias false t
   | TForall (_, body) -> direct_self_refs alias guarded body
@@ -383,6 +390,11 @@ let rec expand_type recursive_names aliases vars stack = function
   | TList t -> TList (expand_type recursive_names aliases vars stack t)
   | TView t -> TView (expand_type recursive_names aliases vars stack t)
   | TAttr t -> TAttr (expand_type recursive_names aliases vars stack t)
+  | TStream t -> TStream (expand_type recursive_names aliases vars stack t)
+  | TAutomaton (state, output) ->
+      TAutomaton
+        ( expand_type recursive_names aliases vars stack state,
+          expand_type recursive_names aliases vars stack output )
   | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, expand_type recursive_names aliases vars stack t)
   | TCmd (caps, t) -> TCmd (normalize_process_capabilities caps, expand_type recursive_names aliases vars stack t)
   | TSecretRef (scope, t) -> TSecretRef (scope, expand_type recursive_names aliases vars stack t)
@@ -492,6 +504,30 @@ let rec expand_expr_types recursive_names aliases vars = function
           head,
           tail,
           expand_expr_types recursive_names aliases vars cons_body )
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      ECoiter
+        ( expand_type recursive_names aliases vars [] state_ty,
+          expand_type recursive_names aliases vars [] item_ty,
+          expand_expr_types recursive_names aliases vars seed,
+          expand_expr_types recursive_names aliases vars step )
+  | EStreamHead stream ->
+      EStreamHead (expand_expr_types recursive_names aliases vars stream)
+  | EStreamTail stream ->
+      EStreamTail (expand_expr_types recursive_names aliases vars stream)
+  | EStreamTake (count, stream) ->
+      EStreamTake
+        ( expand_expr_types recursive_names aliases vars count,
+          expand_expr_types recursive_names aliases vars stream )
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      EAutomaton
+        ( expand_type recursive_names aliases vars [] state_ty,
+          expand_type recursive_names aliases vars [] output_ty,
+          expand_expr_types recursive_names aliases vars initial,
+          expand_expr_types recursive_names aliases vars transition )
+  | EAutomatonRun (count, automaton) ->
+      EAutomatonRun
+        ( expand_expr_types recursive_names aliases vars count,
+          expand_expr_types recursive_names aliases vars automaton )
   | EText e -> EText (expand_expr_types recursive_names aliases vars e)
   | EImage (src, alt) ->
       EImage (expand_expr_types recursive_names aliases vars src, expand_expr_types recursive_names aliases vars alt)
@@ -619,6 +655,12 @@ let collect_deps defs =
     | EFoldList (xs, z, step) -> expr bound (expr bound (expr bound acc xs) z) step
     | ECaseList (xs, nil_body, head, tail, cons_body) ->
         expr (head :: tail :: bound) (expr bound (expr bound acc xs) nil_body) cons_body
+    | ECoiter (_, _, seed, step) -> expr bound (expr bound acc seed) step
+    | EStreamHead stream | EStreamTail stream -> expr bound acc stream
+    | EStreamTake (count, stream) -> expr bound (expr bound acc count) stream
+    | EAutomaton (_, _, initial, transition) ->
+        expr bound (expr bound acc initial) transition
+    | EAutomatonRun (count, automaton) -> expr bound (expr bound acc count) automaton
     | EText e | EColumn e | ERow e -> expr bound acc e
     | EButton (label, msg) | EInput (label, msg) | EImage (label, msg)
     | EListView (label, msg) | EWhenView (label, msg) | EAttr (label, msg) | EOn (label, msg) ->
@@ -747,6 +789,12 @@ let rec expr_names = function
   | EFoldList (xs, z, step) -> expr_names xs @ expr_names z @ expr_names step
   | ECaseList (xs, nil_body, head, tail, cons_body) ->
       expr_names xs @ expr_names nil_body @ [ head; tail ] @ expr_names cons_body
+  | ECoiter (_, _, seed, step) -> expr_names seed @ expr_names step
+  | EStreamHead stream | EStreamTail stream -> expr_names stream
+  | EStreamTake (count, stream) -> expr_names count @ expr_names stream
+  | EAutomaton (_, _, initial, transition) ->
+      expr_names initial @ expr_names transition
+  | EAutomatonRun (count, automaton) -> expr_names count @ expr_names automaton
   | EText e | EColumn e | ERow e | EDone e -> expr_names e
   | EImage (a, b) | EButton (a, b) | EInput (a, b) | EListView (a, b)
   | EWhenView (a, b) | EAttr (a, b) | EOn (a, b) ->
@@ -804,6 +852,8 @@ let rec subst_type args = function
   | TList t -> TList (subst_type args t)
   | TView t -> TView (subst_type args t)
   | TAttr t -> TAttr (subst_type args t)
+  | TStream t -> TStream (subst_type args t)
+  | TAutomaton (state, output) -> TAutomaton (subst_type args state, subst_type args output)
   | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, subst_type args t)
   | TCmd (caps, t) -> TCmd (normalize_process_capabilities caps, subst_type args t)
   | TSecretRef (scope, t) -> TSecretRef (scope, subst_type args t)
@@ -838,6 +888,9 @@ let rec subst_named_type_params vars = function
   | TList t -> TList (subst_named_type_params vars t)
   | TView t -> TView (subst_named_type_params vars t)
   | TAttr t -> TAttr (subst_named_type_params vars t)
+  | TStream t -> TStream (subst_named_type_params vars t)
+  | TAutomaton (state, output) ->
+      TAutomaton (subst_named_type_params vars state, subst_named_type_params vars output)
   | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, subst_named_type_params vars t)
   | TCmd (caps, t) -> TCmd (normalize_process_capabilities caps, subst_named_type_params vars t)
   | TSecretRef (scope, t) -> TSecretRef (scope, subst_named_type_params vars t)
@@ -1025,7 +1078,9 @@ let rec contains_process_type = function
   | TProcess _ -> true
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
-  | TList t | TView t | TAttr t | TCmd (_, t) | TSecretRef (_, t) -> contains_process_type t
+  | TList t | TView t | TAttr t | TStream t | TCmd (_, t) | TSecretRef (_, t) ->
+      contains_process_type t
+  | TAutomaton (state, output) -> contains_process_type state || contains_process_type output
   | TForall (_, t) -> contains_process_type t
   | TNamed _ -> false
   | TVar _ | TUnit | TBool | TNat | TString -> false
@@ -1078,6 +1133,12 @@ let bind_recur_item ctx name typ =
           }
   in
   { ctx with locals = (name, typ) :: ctx.locals; fold_scope = scope }
+
+let stream_step_type state_ty item_ty =
+  TFun (state_ty, TRecord [ ("head", item_ty); ("state", state_ty) ])
+
+let automaton_transition_type state_ty output_ty =
+  TFun (state_ty, TRecord [ ("output", output_ty); ("state", state_ty) ])
 
 let rec infer ctx = function
   | EUnit -> TUnit
@@ -1224,6 +1285,34 @@ let rec infer ctx = function
           require_type result_ty (infer branch_ctx cons_body) "caseList branches";
           result_ty
       | t -> fail ("caseList target must be List, got " ^ string_of_typ t))
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      require_type state_ty (infer ctx seed) "coiter seed";
+      require_type (stream_step_type state_ty item_ty) (infer ctx step) "coiter step";
+      TStream item_ty
+  | EStreamHead stream -> (
+      match infer ctx stream with
+      | TStream item_ty -> item_ty
+      | t -> fail ("streamHead target must be Stream, got " ^ string_of_typ t))
+  | EStreamTail stream -> (
+      match infer ctx stream with
+      | TStream item_ty -> TStream item_ty
+      | t -> fail ("streamTail target must be Stream, got " ^ string_of_typ t))
+  | EStreamTake (count, stream) -> (
+      require_type TNat (infer ctx count) "streamTake count";
+      match infer ctx stream with
+      | TStream item_ty -> TList item_ty
+      | t -> fail ("streamTake target must be Stream, got " ^ string_of_typ t))
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      require_type state_ty (infer ctx initial) "automaton initial";
+      require_type
+        (automaton_transition_type state_ty output_ty)
+        (infer ctx transition) "automaton transition";
+      TAutomaton (state_ty, output_ty)
+  | EAutomatonRun (count, automaton) -> (
+      require_type TNat (infer ctx count) "automatonRun count";
+      match infer ctx automaton with
+      | TAutomaton (_, output_ty) -> TList output_ty
+      | t -> fail ("automatonRun target must be Automaton, got " ^ string_of_typ t))
   | EText e ->
       require_type TString (infer ctx e) "text";
       TView TUnit
@@ -1526,6 +1615,38 @@ let rec infer_elab ctx expr =
           let _, cons_body = check_elab branch_ctx result_ty cons_body in
           (result_ty, ECaseList (xs, nil_body, head, tail, cons_body))
       | t -> fail ("caseList target must be List, got " ^ string_of_typ t))
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      let _, seed = check_elab ctx state_ty seed in
+      let _, step = check_elab ctx (stream_step_type state_ty item_ty) step in
+      (TStream item_ty, ECoiter (state_ty, item_ty, seed, step))
+  | EStreamHead stream -> (
+      let stream_ty, stream = infer_elab ctx stream in
+      match stream_ty with
+      | TStream item_ty -> (item_ty, EStreamHead stream)
+      | t -> fail ("streamHead target must be Stream, got " ^ string_of_typ t))
+  | EStreamTail stream -> (
+      let stream_ty, stream = infer_elab ctx stream in
+      match stream_ty with
+      | TStream item_ty -> (TStream item_ty, EStreamTail stream)
+      | t -> fail ("streamTail target must be Stream, got " ^ string_of_typ t))
+  | EStreamTake (count, stream) -> (
+      let _, count = check_elab ctx TNat count in
+      let stream_ty, stream = infer_elab ctx stream in
+      match stream_ty with
+      | TStream item_ty -> (TList item_ty, EStreamTake (count, stream))
+      | t -> fail ("streamTake target must be Stream, got " ^ string_of_typ t))
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      let _, initial = check_elab ctx state_ty initial in
+      let _, transition =
+        check_elab ctx (automaton_transition_type state_ty output_ty) transition
+      in
+      (TAutomaton (state_ty, output_ty), EAutomaton (state_ty, output_ty, initial, transition))
+  | EAutomatonRun (count, automaton) -> (
+      let _, count = check_elab ctx TNat count in
+      let automaton_ty, automaton = infer_elab ctx automaton in
+      match automaton_ty with
+      | TAutomaton (_, output_ty) -> (TList output_ty, EAutomatonRun (count, automaton))
+      | t -> fail ("automatonRun target must be Automaton, got " ^ string_of_typ t))
   | EText e ->
       let _, e = check_elab ctx TString e in
       (TView TUnit, EText e)
@@ -1867,6 +1988,16 @@ and poly_app_elab ctx expected expr =
                 match actual with TView a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected View"))
             | TAttr p -> (
                 match actual with TAttr a -> unify p a | _ -> fail ("cannot infer " ^ name ^ ": expected Attr"))
+            | TStream p -> (
+                match actual with
+                | TStream a -> unify p a
+                | _ -> fail ("cannot infer " ^ name ^ ": expected Stream"))
+            | TAutomaton (p_state, p_output) -> (
+                match actual with
+                | TAutomaton (a_state, a_output) ->
+                    unify p_state a_state;
+                    unify p_output a_output
+                | _ -> fail ("cannot infer " ^ name ^ ": expected Automaton"))
             | TProcess (pattern_caps, p) -> (
                 match actual with
                 | TProcess (actual_caps, a) ->
@@ -2040,6 +2171,12 @@ type cterm =
   | CCons of typ * cterm * cterm
   | CFoldList of cterm * cterm * cterm
   | CCaseList of cterm * cterm * cterm
+  | CCoiter of typ * typ * cterm * cterm
+  | CStreamHead of cterm
+  | CStreamTail of cterm
+  | CStreamTake of cterm * cterm
+  | CAutomaton of typ * typ * cterm * cterm
+  | CAutomatonRun of cterm * cterm
   | CText of cterm
   | CImage of cterm * cterm
   | CButton of cterm * cterm
@@ -2105,6 +2242,17 @@ let rec canonical_expr env = function
         ( canonical_expr env xs,
           canonical_expr env nil_body,
           canonical_expr (head :: tail :: env) cons_body )
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      CCoiter (state_ty, item_ty, canonical_expr env seed, canonical_expr env step)
+  | EStreamHead stream -> CStreamHead (canonical_expr env stream)
+  | EStreamTail stream -> CStreamTail (canonical_expr env stream)
+  | EStreamTake (count, stream) ->
+      CStreamTake (canonical_expr env count, canonical_expr env stream)
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      CAutomaton
+        (state_ty, output_ty, canonical_expr env initial, canonical_expr env transition)
+  | EAutomatonRun (count, automaton) ->
+      CAutomatonRun (canonical_expr env count, canonical_expr env automaton)
   | EText e -> CText (canonical_expr env e)
   | EImage (src, alt) -> CImage (canonical_expr env src, canonical_expr env alt)
   | EButton (label, msg) -> CButton (canonical_expr env label, canonical_expr env msg)
@@ -2159,9 +2307,14 @@ let rec cterm_direct_capabilities = function
   | CFoldNat (n, zero, step) | CFoldList (n, zero, step) ->
       cterm_direct_capabilities n @ cterm_direct_capabilities zero
       @ cterm_direct_capabilities step
+  | CCoiter (_, _, seed, step) | CAutomaton (_, _, seed, step) ->
+      cterm_direct_capabilities seed @ cterm_direct_capabilities step
+  | CStreamTake (count, stream) | CAutomatonRun (count, stream) ->
+      cterm_direct_capabilities count @ cterm_direct_capabilities stream
   | CCaseList (xs, nil_body, cons_body) ->
       cterm_direct_capabilities xs @ cterm_direct_capabilities nil_body
       @ cterm_direct_capabilities cons_body
+  | CStreamHead stream | CStreamTail stream -> cterm_direct_capabilities stream
   | CFoldVariant (_, _, scrut, branches) ->
       cterm_direct_capabilities scrut @ List.concat_map cbranch_direct_capabilities branches
   | CCons (_, head, tail) -> cterm_direct_capabilities head @ cterm_direct_capabilities tail
@@ -2188,8 +2341,13 @@ let rec cterm_global_refs = function
   | CCase (e, branches) -> cterm_global_refs e @ List.concat_map cbranch_global_refs branches
   | CFoldNat (n, zero, step) | CFoldList (n, zero, step) ->
       cterm_global_refs n @ cterm_global_refs zero @ cterm_global_refs step
+  | CCoiter (_, _, seed, step) | CAutomaton (_, _, seed, step) ->
+      cterm_global_refs seed @ cterm_global_refs step
+  | CStreamTake (count, stream) | CAutomatonRun (count, stream) ->
+      cterm_global_refs count @ cterm_global_refs stream
   | CCaseList (xs, nil_body, cons_body) ->
       cterm_global_refs xs @ cterm_global_refs nil_body @ cterm_global_refs cons_body
+  | CStreamHead stream | CStreamTail stream -> cterm_global_refs stream
   | CFoldVariant (_, _, scrut, branches) ->
       cterm_global_refs scrut @ List.concat_map cbranch_global_refs branches
   | CCons (_, head, tail) -> cterm_global_refs head @ cterm_global_refs tail
@@ -2245,6 +2403,18 @@ let rec cterm_to_string = function
   | CCaseList (xs, nil_body, cons_body) ->
       "(caseList " ^ cterm_to_string xs ^ " (Nil " ^ cterm_to_string nil_body
       ^ ") (Cons " ^ cterm_to_string cons_body ^ "))"
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      "(coiter " ^ type_to_canonical state_ty ^ " " ^ type_to_canonical item_ty ^ " "
+      ^ cterm_to_string seed ^ " " ^ cterm_to_string step ^ ")"
+  | CStreamHead stream -> "(streamHead " ^ cterm_to_string stream ^ ")"
+  | CStreamTail stream -> "(streamTail " ^ cterm_to_string stream ^ ")"
+  | CStreamTake (count, stream) ->
+      "(streamTake " ^ cterm_to_string count ^ " " ^ cterm_to_string stream ^ ")"
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      "(automaton " ^ type_to_canonical state_ty ^ " " ^ type_to_canonical output_ty
+      ^ " " ^ cterm_to_string initial ^ " " ^ cterm_to_string transition ^ ")"
+  | CAutomatonRun (count, automaton) ->
+      "(automatonRun " ^ cterm_to_string count ^ " " ^ cterm_to_string automaton ^ ")"
   | CText e -> "(text " ^ cterm_to_string e ^ ")"
   | CImage (src, alt) -> "(image " ^ cterm_to_string src ^ " " ^ cterm_to_string alt ^ ")"
   | CButton (label, msg) -> "(button " ^ cterm_to_string label ^ " " ^ cterm_to_string msg ^ ")"
@@ -2287,7 +2457,8 @@ let executable_grammar_text =
       "declaration ::= (defcap Name (capabilities Capability*) type expr)";
       "declaration ::= (defpolycap Name (params TypeName*) (capabilities Capability*) type expr)";
       "declaration ::= (defrec Name type-params? type recursion-body)";
-      "type ::= Unit | Bool | Nat | String | (-> type type) | (List type) | (Process type)";
+      "type ::= Unit | Bool | Nat | String | (-> type type) | (List type) | (Stream type)";
+      "type ::= (Automaton state-type output-type) | (Process type)";
       "type ::= (Process (capabilities Capability*) type)";
       "type ::= (Cmd type) | (Cmd (capabilities Capability*) type)";
       "type ::= (Record field*) | (Variant variant-case*) | (Named Name type*) | TypeName";
@@ -2297,6 +2468,10 @@ let executable_grammar_text =
       "expr ::= (case expr branch*) | (foldNat expr expr expr) | (foldList expr expr expr)";
       "expr ::= (foldVariant type type expr branch*) | (strict expr) | recur";
       "expr ::= (Nil type) | (Cons type expr expr) | (caseList expr expr Name Name expr)";
+      "expr ::= (coiter state-type output-type seed step)";
+      "expr ::= (streamHead expr) | (streamTail expr) | (streamTake Nat expr)";
+      "expr ::= (automaton state-type output-type initial transition)";
+      "expr ::= (automatonRun Nat expr)";
       "expr ::= (text expr) | (image expr expr) | (button expr expr) | (input expr expr)";
       "expr ::= (column expr) | (row expr) | (list expr expr) | (when expr expr)";
       "expr ::= (node expr expr expr) | (attr expr expr) | (on expr expr)";
@@ -2374,6 +2549,24 @@ let rec cterm_to_canonical_v2 def_id_of = function
       "(caseList " ^ cterm_to_canonical_v2 def_id_of xs ^ " (Nil "
       ^ cterm_to_canonical_v2 def_id_of nil_body ^ ") (Cons "
       ^ cterm_to_canonical_v2 def_id_of cons_body ^ "))"
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      "(coiter " ^ type_to_canonical state_ty ^ " " ^ type_to_canonical item_ty ^ " "
+      ^ cterm_to_canonical_v2 def_id_of seed ^ " "
+      ^ cterm_to_canonical_v2 def_id_of step ^ ")"
+  | CStreamHead stream ->
+      "(streamHead " ^ cterm_to_canonical_v2 def_id_of stream ^ ")"
+  | CStreamTail stream ->
+      "(streamTail " ^ cterm_to_canonical_v2 def_id_of stream ^ ")"
+  | CStreamTake (count, stream) ->
+      "(streamTake " ^ cterm_to_canonical_v2 def_id_of count ^ " "
+      ^ cterm_to_canonical_v2 def_id_of stream ^ ")"
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      "(automaton " ^ type_to_canonical state_ty ^ " " ^ type_to_canonical output_ty
+      ^ " " ^ cterm_to_canonical_v2 def_id_of initial ^ " "
+      ^ cterm_to_canonical_v2 def_id_of transition ^ ")"
+  | CAutomatonRun (count, automaton) ->
+      "(automatonRun " ^ cterm_to_canonical_v2 def_id_of count ^ " "
+      ^ cterm_to_canonical_v2 def_id_of automaton ^ ")"
   | CText e -> "(text " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
   | CImage (src, alt) ->
       "(image " ^ cterm_to_canonical_v2 def_id_of src ^ " "
@@ -2503,6 +2696,15 @@ let rec type_to_graph_json = function
       json_obj [ json_field "tag" (json_string "View"); json_field "message" (type_to_graph_json t) ]
   | TAttr t ->
       json_obj [ json_field "tag" (json_string "Attr"); json_field "message" (type_to_graph_json t) ]
+  | TStream t ->
+      json_obj [ json_field "tag" (json_string "Stream"); json_field "item" (type_to_graph_json t) ]
+  | TAutomaton (state, output) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Automaton");
+          json_field "state" (type_to_graph_json state);
+          json_field "output" (type_to_graph_json output);
+        ]
   | TProcess (caps, t) ->
       json_obj
         ([ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
@@ -2726,6 +2928,42 @@ let rec cterm_to_graph_json_via recurse def_id_of = function
           json_field "nil" (recurse nil_body);
           json_field "cons" (recurse cons_body);
         ]
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Coiter");
+          json_field "stateType" (type_to_graph_json state_ty);
+          json_field "itemType" (type_to_graph_json item_ty);
+          json_field "seed" (recurse seed);
+          json_field "step" (recurse step);
+        ]
+  | CStreamHead stream ->
+      json_obj [ json_field "tag" (json_string "StreamHead"); json_field "stream" (recurse stream) ]
+  | CStreamTail stream ->
+      json_obj [ json_field "tag" (json_string "StreamTail"); json_field "stream" (recurse stream) ]
+  | CStreamTake (count, stream) ->
+      json_obj
+        [
+          json_field "tag" (json_string "StreamTake");
+          json_field "count" (recurse count);
+          json_field "stream" (recurse stream);
+        ]
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Automaton");
+          json_field "stateType" (type_to_graph_json state_ty);
+          json_field "outputType" (type_to_graph_json output_ty);
+          json_field "initial" (recurse initial);
+          json_field "transition" (recurse transition);
+        ]
+  | CAutomatonRun (count, automaton) ->
+      json_obj
+        [
+          json_field "tag" (json_string "AutomatonRun");
+          json_field "count" (recurse count);
+          json_field "automaton" (recurse automaton);
+        ]
   | CText e ->
       json_obj [ json_field "tag" (json_string "Text"); json_field "value" (recurse e) ]
   | CImage (src, alt) ->
@@ -2834,6 +3072,8 @@ let type_node_tag = function
   | TList _ -> "List"
   | TView _ -> "View"
   | TAttr _ -> "Attr"
+  | TStream _ -> "Stream"
+  | TAutomaton _ -> "Automaton"
   | TProcess _ -> "Process"
   | TCmd _ -> "Cmd"
   | TSecretRef _ -> "SecretRef"
@@ -2865,6 +3105,12 @@ let cterm_node_tag = function
   | CCons _ -> "Cons"
   | CFoldList _ -> "FoldList"
   | CCaseList _ -> "CaseList"
+  | CCoiter _ -> "Coiter"
+  | CStreamHead _ -> "StreamHead"
+  | CStreamTail _ -> "StreamTail"
+  | CStreamTake _ -> "StreamTake"
+  | CAutomaton _ -> "Automaton"
+  | CAutomatonRun _ -> "AutomatonRun"
   | CText _ -> "Text"
   | CImage _ -> "Image"
   | CButton _ -> "Button"
@@ -2887,8 +3133,10 @@ let type_node_edges_via type_id = function
   | TUnit | TBool | TNat | TString | TVar _ -> []
   | TFun (a, b) -> [ type_id a; type_id b ]
   | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_id t)
-  | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t) ->
+  | TList t | TView t | TAttr t | TStream t | TProcess (_, t) | TCmd (_, t)
+  | TSecretRef (_, t) ->
       [ type_id t ]
+  | TAutomaton (state, output) -> [ type_id state; type_id output ]
   | TForall (_, body) -> [ type_id body ]
   | TNamed (_, args) -> List.map type_id args
 
@@ -2919,6 +3167,13 @@ let cterm_node_edges_via ~term_id ~type_id = function
   | CFoldList (list, zero, step) -> [ term_id list; term_id zero; term_id step ]
   | CCaseList (list, nil_body, cons_body) ->
       [ term_id list; term_id nil_body; term_id cons_body ]
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      [ type_id state_ty; type_id item_ty; term_id seed; term_id step ]
+  | CStreamHead stream | CStreamTail stream -> [ term_id stream ]
+  | CStreamTake (count, stream) -> [ term_id count; term_id stream ]
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      [ type_id state_ty; type_id output_ty; term_id initial; term_id transition ]
+  | CAutomatonRun (count, automaton) -> [ term_id count; term_id automaton ]
   | CText value | CColumn value | CRow value | CDone value -> [ term_id value ]
   | CImage (src, alt) | CButton (src, alt) | CInput (src, alt)
   | CListView (src, alt) | CWhenView (src, alt) | CAttr (src, alt) | COn (src, alt) ->
@@ -3023,9 +3278,13 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
         add_type a;
         add_type b
     | TRecord fields | TVariant fields -> List.iter (fun (_, t) -> add_type t) fields
-    | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t)
+    | TList t | TView t | TAttr t | TStream t | TProcess (_, t) | TCmd (_, t)
+    | TSecretRef (_, t)
     | TForall (_, t) ->
         add_type t
+    | TAutomaton (state, output) ->
+        add_type state;
+        add_type output
     | TNamed (_, args) -> List.iter add_type args
   in
   let rec add_term term =
@@ -3088,6 +3347,23 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
         add_term list;
         add_term nil_body;
         add_term cons_body
+    | CCoiter (state_ty, item_ty, seed, step) ->
+        add_type state_ty;
+        add_type item_ty;
+        add_term seed;
+        add_term step
+    | CStreamHead stream | CStreamTail stream -> add_term stream
+    | CStreamTake (count, stream) ->
+        add_term count;
+        add_term stream
+    | CAutomaton (state_ty, output_ty, initial, transition) ->
+        add_type state_ty;
+        add_type output_ty;
+        add_term initial;
+        add_term transition
+    | CAutomatonRun (count, automaton) ->
+        add_term count;
+        add_term automaton
     | CText value | CColumn value | CRow value | CDone value -> add_term value
     | CBind (process, typ, body) ->
         add_term process;
@@ -3197,6 +3473,9 @@ let rec type_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "View"; t ] -> TView (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "Attr"; t ] -> TAttr (type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Stream"; t ] -> TStream (type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Automaton"; state; output ] ->
+      TAutomaton (type_of_canonical_sexp state, type_of_canonical_sexp output)
   | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom i ] -> TVar (int_of_string i)
   | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom arity; body ] ->
       TForall (int_of_string arity, type_of_canonical_sexp body)
@@ -3295,6 +3574,26 @@ let rec cterm_of_canonical_sexp = function
         ( cterm_of_canonical_sexp xs,
           cterm_of_canonical_sexp nil_body,
           cterm_of_canonical_sexp cons_body )
+  | Sexp.List [ Sexp.Atom "coiter"; state_ty; item_ty; seed; step ] ->
+      CCoiter
+        ( type_of_canonical_sexp state_ty,
+          type_of_canonical_sexp item_ty,
+          cterm_of_canonical_sexp seed,
+          cterm_of_canonical_sexp step )
+  | Sexp.List [ Sexp.Atom "streamHead"; stream ] ->
+      CStreamHead (cterm_of_canonical_sexp stream)
+  | Sexp.List [ Sexp.Atom "streamTail"; stream ] ->
+      CStreamTail (cterm_of_canonical_sexp stream)
+  | Sexp.List [ Sexp.Atom "streamTake"; count; stream ] ->
+      CStreamTake (cterm_of_canonical_sexp count, cterm_of_canonical_sexp stream)
+  | Sexp.List [ Sexp.Atom "automaton"; state_ty; output_ty; initial; transition ] ->
+      CAutomaton
+        ( type_of_canonical_sexp state_ty,
+          type_of_canonical_sexp output_ty,
+          cterm_of_canonical_sexp initial,
+          cterm_of_canonical_sexp transition )
+  | Sexp.List [ Sexp.Atom "automatonRun"; count; automaton ] ->
+      CAutomatonRun (cterm_of_canonical_sexp count, cterm_of_canonical_sexp automaton)
   | Sexp.List [ Sexp.Atom "text"; e ] -> CText (cterm_of_canonical_sexp e)
   | Sexp.List [ Sexp.Atom "image"; src; alt ] ->
       CImage (cterm_of_canonical_sexp src, cterm_of_canonical_sexp alt)
@@ -3483,6 +3782,16 @@ let canonical_surface_expr defs term =
             head,
             tail,
             expr (depth + 1) (head :: tail :: env) cons_body )
+    | CCoiter (state_ty, item_ty, seed, step) ->
+        ECoiter (state_ty, item_ty, expr depth env seed, expr depth env step)
+    | CStreamHead stream -> EStreamHead (expr depth env stream)
+    | CStreamTail stream -> EStreamTail (expr depth env stream)
+    | CStreamTake (count, stream) -> EStreamTake (expr depth env count, expr depth env stream)
+    | CAutomaton (state_ty, output_ty, initial, transition) ->
+        EAutomaton
+          (state_ty, output_ty, expr depth env initial, expr depth env transition)
+    | CAutomatonRun (count, automaton) ->
+        EAutomatonRun (expr depth env count, expr depth env automaton)
     | CText value -> EText (expr depth env value)
     | CImage (src, alt) -> EImage (expr depth env src, expr depth env alt)
     | CButton (label, msg) -> EButton (expr depth env label, expr depth env msg)
@@ -4084,6 +4393,11 @@ let rec termination_counts_term = function
         (List.fold_left
            (fun acc term -> termination_add acc (termination_counts_term term))
            termination_zero [ items; zero; step ])
+  | CCoiter (_, _, seed, step) | CAutomaton (_, _, seed, step) ->
+      termination_add (termination_counts_term seed) (termination_counts_term step)
+  | CStreamHead stream | CStreamTail stream -> termination_counts_term stream
+  | CStreamTake (count, stream) | CAutomatonRun (count, stream) ->
+      termination_add (termination_counts_term count) (termination_counts_term stream)
   | CCaseList (items, nil_body, cons_body) ->
       List.fold_left
         (fun acc term -> termination_add acc (termination_counts_term term))
@@ -4110,9 +4424,11 @@ let rec type_node_count = function
   | TFun (a, b) -> 1 + type_node_count a + type_node_count b
   | TRecord fields | TVariant fields ->
       1 + List.fold_left (fun acc (_, t) -> acc + type_node_count t) 0 fields
-  | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t)
+  | TList t | TView t | TAttr t | TStream t | TProcess (_, t) | TCmd (_, t)
+  | TSecretRef (_, t)
   | TForall (_, t) ->
       1 + type_node_count t
+  | TAutomaton (state, output) -> 1 + type_node_count state + type_node_count output
   | TNamed (_, args) ->
       1 + List.fold_left (fun acc t -> acc + type_node_count t) 0 args
 
@@ -4124,6 +4440,8 @@ let rec curried_argument_types = function
 let rec type_static_measure = function
   | TNat -> Some "Nat.value"
   | TList _ -> Some "List.length"
+  | TStream _ -> Some "Stream.productive"
+  | TAutomaton _ -> Some "Automaton.productive"
   | TVariant _ -> Some "Variant.height"
   | TNamed (name, _) -> Some (name ^ ".height")
   | TRecord fields ->
@@ -4207,6 +4525,17 @@ let rec shift amount cutoff = function
   | CCaseList (xs, nil_body, cons_body) ->
       CCaseList
         (shift amount cutoff xs, shift amount cutoff nil_body, shift amount (cutoff + 2) cons_body)
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      CCoiter (state_ty, item_ty, shift amount cutoff seed, shift amount cutoff step)
+  | CStreamHead stream -> CStreamHead (shift amount cutoff stream)
+  | CStreamTail stream -> CStreamTail (shift amount cutoff stream)
+  | CStreamTake (count, stream) ->
+      CStreamTake (shift amount cutoff count, shift amount cutoff stream)
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      CAutomaton
+        (state_ty, output_ty, shift amount cutoff initial, shift amount cutoff transition)
+  | CAutomatonRun (count, automaton) ->
+      CAutomatonRun (shift amount cutoff count, shift amount cutoff automaton)
   | CText e -> CText (shift amount cutoff e)
   | CImage (src, alt) -> CImage (shift amount cutoff src, shift amount cutoff alt)
   | CButton (label, msg) -> CButton (shift amount cutoff label, shift amount cutoff msg)
@@ -4263,6 +4592,17 @@ let rec subst index replacement = function
         ( subst index replacement xs,
           subst index replacement nil_body,
           subst (index + 2) (shift 2 0 replacement) cons_body )
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      CCoiter (state_ty, item_ty, subst index replacement seed, subst index replacement step)
+  | CStreamHead stream -> CStreamHead (subst index replacement stream)
+  | CStreamTail stream -> CStreamTail (subst index replacement stream)
+  | CStreamTake (count, stream) ->
+      CStreamTake (subst index replacement count, subst index replacement stream)
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      CAutomaton
+        (state_ty, output_ty, subst index replacement initial, subst index replacement transition)
+  | CAutomatonRun (count, automaton) ->
+      CAutomatonRun (subst index replacement count, subst index replacement automaton)
   | CText e -> CText (subst index replacement e)
   | CImage (src, alt) -> CImage (subst index replacement src, subst index replacement alt)
   | CButton (label, msg) -> CButton (subst index replacement label, subst index replacement msg)
@@ -4330,6 +4670,24 @@ let rec subst_type_in_cterm args = function
         ( subst_type_in_cterm args xs,
           subst_type_in_cterm args nil_body,
           subst_type_in_cterm args cons_body )
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      CCoiter
+        ( subst_type args state_ty,
+          subst_type args item_ty,
+          subst_type_in_cterm args seed,
+          subst_type_in_cterm args step )
+  | CStreamHead stream -> CStreamHead (subst_type_in_cterm args stream)
+  | CStreamTail stream -> CStreamTail (subst_type_in_cterm args stream)
+  | CStreamTake (count, stream) ->
+      CStreamTake (subst_type_in_cterm args count, subst_type_in_cterm args stream)
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      CAutomaton
+        ( subst_type args state_ty,
+          subst_type args output_ty,
+          subst_type_in_cterm args initial,
+          subst_type_in_cterm args transition )
+  | CAutomatonRun (count, automaton) ->
+      CAutomatonRun (subst_type_in_cterm args count, subst_type_in_cterm args automaton)
   | CText e -> CText (subst_type_in_cterm args e)
   | CImage (src, alt) -> CImage (subst_type_in_cterm args src, subst_type_in_cterm args alt)
   | CButton (label, msg) -> CButton (subst_type_in_cterm args label, subst_type_in_cterm args msg)
@@ -4465,6 +4823,15 @@ let rec normalize_cterm checked = function
             CFoldList (rewrite_recur xs, rewrite_recur zero, rewrite_recur step)
         | CCaseList (xs, nil_body, cons_body) ->
             CCaseList (rewrite_recur xs, rewrite_recur nil_body, rewrite_recur cons_body)
+        | CCoiter (state_ty, item_ty, seed, step) ->
+            CCoiter (state_ty, item_ty, rewrite_recur seed, rewrite_recur step)
+        | CStreamHead stream -> CStreamHead (rewrite_recur stream)
+        | CStreamTail stream -> CStreamTail (rewrite_recur stream)
+        | CStreamTake (count, stream) -> CStreamTake (rewrite_recur count, rewrite_recur stream)
+        | CAutomaton (state_ty, output_ty, initial, transition) ->
+            CAutomaton (state_ty, output_ty, rewrite_recur initial, rewrite_recur transition)
+        | CAutomatonRun (count, automaton) ->
+            CAutomatonRun (rewrite_recur count, rewrite_recur automaton)
         | CText e -> CText (rewrite_recur e)
         | CImage (src, alt) -> CImage (rewrite_recur src, rewrite_recur alt)
         | CButton (label, msg) -> CButton (rewrite_recur label, rewrite_recur msg)
@@ -4510,6 +4877,71 @@ let rec normalize_cterm checked = function
             ( xs,
               normalize_cterm checked nil_body,
               normalize_cterm checked cons_body ))
+  | CCoiter (state_ty, item_ty, seed, step) ->
+      CCoiter (state_ty, item_ty, normalize_cterm checked seed, normalize_cterm checked step)
+  | CStreamHead stream -> (
+      match normalize_cterm checked stream with
+      | CCoiter (state_ty, item_ty, state, step) -> (
+          match normalize_cterm checked (CApp (step, state)) with
+          | CRecord fields -> (
+              match assoc_opt "head" fields with
+              | Some head -> normalize_cterm checked head
+              | None -> CStreamHead (CCoiter (state_ty, item_ty, state, step)))
+          | _ as stream -> CStreamHead stream)
+      | stream -> CStreamHead stream)
+  | CStreamTail stream -> (
+      match normalize_cterm checked stream with
+      | CCoiter (state_ty, item_ty, state, step) -> (
+          match normalize_cterm checked (CApp (step, state)) with
+          | CRecord fields -> (
+              match assoc_opt "state" fields with
+              | Some next_state -> CCoiter (state_ty, item_ty, normalize_cterm checked next_state, step)
+              | None -> CStreamTail (CCoiter (state_ty, item_ty, state, step)))
+          | _ as stream -> CStreamTail stream)
+      | stream -> CStreamTail stream)
+  | CStreamTake (count, stream) -> (
+      match (normalize_cterm checked count, normalize_cterm checked stream) with
+      | CNat n, CCoiter (state_ty, item_ty, state, step) ->
+          let rec loop remaining state acc =
+            if remaining <= 0 then
+              List.fold_left (fun tail head -> CCons (item_ty, head, tail)) (CNil item_ty) acc
+            else
+              match normalize_cterm checked (CApp (step, state)) with
+              | CRecord fields -> (
+                  match (assoc_opt "head" fields, assoc_opt "state" fields) with
+                  | Some head, Some next_state ->
+                      loop (remaining - 1) (normalize_cterm checked next_state)
+                        (normalize_cterm checked head :: acc)
+                  | _ -> CStreamTake (CNat remaining, CCoiter (state_ty, item_ty, state, step)))
+              | _ -> CStreamTake (CNat remaining, CCoiter (state_ty, item_ty, state, step))
+          in
+          loop n state []
+      | count, stream -> CStreamTake (count, stream))
+  | CAutomaton (state_ty, output_ty, initial, transition) ->
+      CAutomaton
+        (state_ty, output_ty, normalize_cterm checked initial, normalize_cterm checked transition)
+  | CAutomatonRun (count, automaton) -> (
+      match (normalize_cterm checked count, normalize_cterm checked automaton) with
+      | CNat n, CAutomaton (state_ty, output_ty, state, transition) ->
+          let rec loop remaining state acc =
+            if remaining <= 0 then
+              List.fold_left (fun tail output -> CCons (output_ty, output, tail)) (CNil output_ty) acc
+            else
+              match normalize_cterm checked (CApp (transition, state)) with
+              | CRecord fields -> (
+                  match (assoc_opt "output" fields, assoc_opt "state" fields) with
+                  | Some output, Some next_state ->
+                      loop (remaining - 1) (normalize_cterm checked next_state)
+                        (normalize_cterm checked output :: acc)
+                  | _ ->
+                      CAutomatonRun
+                        (CNat remaining, CAutomaton (state_ty, output_ty, state, transition)))
+              | _ ->
+                  CAutomatonRun
+                    (CNat remaining, CAutomaton (state_ty, output_ty, state, transition))
+          in
+          loop n state []
+      | count, automaton -> CAutomatonRun (count, automaton))
   | CText e -> CText (normalize_cterm checked e)
   | CImage (src, alt) ->
       CImage (normalize_cterm checked src, normalize_cterm checked alt)

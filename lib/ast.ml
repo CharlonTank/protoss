@@ -9,6 +9,8 @@ type typ =
   | TList of typ
   | TView of typ
   | TAttr of typ
+  | TStream of typ
+  | TAutomaton of typ * typ
   | TProcess of string list option * typ
   | TCmd of string list option * typ
   | TSecretRef of string * typ
@@ -53,6 +55,12 @@ type expr =
   | EConsInfer of expr * expr
   | EFoldList of expr * expr * expr
   | ECaseList of expr * expr * string * string * expr
+  | ECoiter of typ * typ * expr * expr
+  | EStreamHead of expr
+  | EStreamTail of expr
+  | EStreamTake of expr * expr
+  | EAutomaton of typ * typ * expr * expr
+  | EAutomatonRun of expr * expr
   | EText of expr
   | EImage of expr * expr
   | EButton of expr * expr
@@ -120,6 +128,8 @@ let rec equal_typ a b =
   | TUnit, TUnit | TBool, TBool | TNat, TNat | TString, TString -> true
   | TFun (a1, b1), TFun (a2, b2) -> equal_typ a1 a2 && equal_typ b1 b2
   | TList a, TList b -> equal_typ a b
+  | TStream a, TStream b -> equal_typ a b
+  | TAutomaton (sa, oa), TAutomaton (sb, ob) -> equal_typ sa sb && equal_typ oa ob
   | TView TUnit, TView _ | TView _, TView TUnit -> true
   | TView a, TView b -> equal_typ a b
   | TAttr TUnit, TAttr _ | TAttr _, TAttr TUnit -> true
@@ -184,6 +194,10 @@ let rec string_of_typ_with_params params = function
   | TList t -> "(List " ^ string_of_typ_with_params params t ^ ")"
   | TView t -> "(View " ^ string_of_typ_with_params params t ^ ")"
   | TAttr t -> "(Attr " ^ string_of_typ_with_params params t ^ ")"
+  | TStream t -> "(Stream " ^ string_of_typ_with_params params t ^ ")"
+  | TAutomaton (state, output) ->
+      "(Automaton " ^ string_of_typ_with_params params state ^ " "
+      ^ string_of_typ_with_params params output ^ ")"
   | TProcess (None, t) -> "(Process " ^ string_of_typ_with_params params t ^ ")"
   | TProcess (Some caps, t) ->
       "(Process (capabilities"
@@ -300,6 +314,24 @@ let rec string_of_expr_with_params params = function
       "(caseList " ^ string_of_expr_with_params params xs ^ " (Nil "
       ^ string_of_expr_with_params params nil_body ^ ") (Cons " ^ head ^ " " ^ tail ^ " "
       ^ string_of_expr_with_params params cons_body ^ "))"
+  | ECoiter (state_ty, item_ty, seed, step) ->
+      "(coiter " ^ string_of_typ_with_params params state_ty ^ " "
+      ^ string_of_typ_with_params params item_ty ^ " "
+      ^ string_of_expr_with_params params seed ^ " "
+      ^ string_of_expr_with_params params step ^ ")"
+  | EStreamHead stream -> "(streamHead " ^ string_of_expr_with_params params stream ^ ")"
+  | EStreamTail stream -> "(streamTail " ^ string_of_expr_with_params params stream ^ ")"
+  | EStreamTake (count, stream) ->
+      "(streamTake " ^ string_of_expr_with_params params count ^ " "
+      ^ string_of_expr_with_params params stream ^ ")"
+  | EAutomaton (state_ty, output_ty, initial, transition) ->
+      "(automaton " ^ string_of_typ_with_params params state_ty ^ " "
+      ^ string_of_typ_with_params params output_ty ^ " "
+      ^ string_of_expr_with_params params initial ^ " "
+      ^ string_of_expr_with_params params transition ^ ")"
+  | EAutomatonRun (count, automaton) ->
+      "(automatonRun " ^ string_of_expr_with_params params count ^ " "
+      ^ string_of_expr_with_params params automaton ^ ")"
   | EText e -> "(text " ^ string_of_expr_with_params params e ^ ")"
   | EImage (src, alt) ->
       "(image " ^ string_of_expr_with_params params src ^ " "
