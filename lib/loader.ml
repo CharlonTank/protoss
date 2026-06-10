@@ -555,6 +555,12 @@ let normalize_path base path =
 
 let dirname path = Filename.dirname path
 
+let has_suffix suffix s =
+  let ls = String.length s and lf = String.length suffix in
+  ls >= lf && String.sub s (ls - lf) lf = suffix
+
+let is_canonical_text_path path = has_suffix ".ptc" path
+
 type loaded = {
   program : program;
   locations : source_location list;
@@ -719,11 +725,22 @@ let rec load_file_with_locations ?(stack = []) path =
     all_symbols = sort_uniq (imported.all_symbols @ local);
   }
 
-let load_file ?stack path = (load_file_with_locations ?stack path).program
+let check_canonical_text_file path =
+  let path = normalize_path (Sys.getcwd ()) path in
+  try
+    let caps, defs = Kernel.parse_serialized_program (read_file path) in
+    Kernel.checked_of_canonical caps defs
+  with Kernel.Error msg -> fail (locate path msg)
+
+let load_file ?stack path =
+  if is_canonical_text_path path then (check_canonical_text_file path).Kernel.program
+  else (load_file_with_locations ?stack path).program
 
 let parse_file path = load_file path
 
 let check_file path =
-  let loaded = load_file_with_locations path in
-  try Kernel.check_program loaded.program with
-  | Kernel.Error msg -> fail (locate_kernel_error loaded.locations path msg)
+  if is_canonical_text_path path then check_canonical_text_file path
+  else
+    let loaded = load_file_with_locations path in
+    try Kernel.check_program loaded.program with
+    | Kernel.Error msg -> fail (locate_kernel_error loaded.locations path msg)

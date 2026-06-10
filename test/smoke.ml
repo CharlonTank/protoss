@@ -77,6 +77,13 @@ let () =
   assert_equal "deterministic hash" (Kernel.hash_program norm) (Kernel.hash_program norm);
   assert_true "different hash"
     (Kernel.hash_program norm <> Kernel.hash_program (check "(def three Nat (succ 2))"));
+  let ptc_dir = temp_dir "ptc" in
+  Store.ensure_dir ptc_dir;
+  let ptc_file = Filename.concat ptc_dir "main.ptc" in
+  write_file ptc_file (Kernel.serialize_checked_program norm ^ "\n");
+  let ptc_checked = Loader.check_file ptc_file in
+  assert_equal ".ptc canonical text round-trip hash" (Kernel.hash_program norm)
+    (Kernel.hash_program ptc_checked);
 
   let memo =
     check

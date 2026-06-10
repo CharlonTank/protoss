@@ -56,12 +56,13 @@ listees dans la section "Gates de validation".
 - [x] Produire `program.canon` comme texte canonique interne.
 - [x] Produire `program.graph.json` et des objets `graphs/<hash>.graph.json`.
 - [x] Supporter `.pt` comme syntaxe humaine officielle Protoss/H.
-- [ ] Supporter `.ptc` comme texte canonique officiel Protoss/C.
+- [x] Supporter `.ptc` comme texte canonique officiel Protoss/C.
 - [ ] Supporter `.ptb` comme binaire canonique officiel Protoss/B.
 - [ ] Fournir `protoss convert --to pt|ptc|ptb`.
 - [ ] Garantir `hash(parse(.pt)) == hash(parse(.ptc)) == hash(.ptb)`.
 - [x] Ajouter une fixture equivalente `.pt`.
-- [ ] Ajouter des fixtures equivalentes `.ptc` et `.ptb`.
+- [x] Ajouter une fixture equivalente `.ptc`.
+- [ ] Ajouter une fixture equivalente `.ptb`.
 - [ ] Rejeter toute vue dont le hash diverge du canon.
 - [ ] Documenter la version du format canonique binaire.
 
@@ -105,10 +106,10 @@ listees dans la section "Gates de validation".
 - [x] Rejeter les champs inconnus dans le JSON canonique.
 - [x] Migrer explicitement les graphes vers le format courant.
 - [ ] Specifier le format Protoss/C officiel avec variables De Bruijn visibles.
-- [ ] Emettre et parser Protoss/C comme format public `.ptc`.
+- [x] Emettre et parser Protoss/C comme format public `.ptc`.
 - [ ] Interdire tout nom local semantique dans `.ptc`.
 - [ ] Trier canoniquement tous les champs dans `.ptc`.
-- [ ] Ajouter des tests golden `.ptc`.
+- [x] Ajouter des tests golden `.ptc`.
 
 ## 5. Noyau semantique total
 

@@ -311,10 +311,17 @@ let () =
   let elm_like_equiv_path = find_up (Sys.getcwd ()) "examples/elm_like_equiv.protoss" in
   let basic_protoss_path = find_up (Sys.getcwd ()) "examples/basic.protoss" in
   let basic_pt_path = find_up (Sys.getcwd ()) "examples/basic.pt" in
+  let basic_ptc_path = find_up (Sys.getcwd ()) "examples/basic.ptc" in
   let basic_protoss = Loader.check_file basic_protoss_path in
   let basic_pt = Loader.check_file basic_pt_path in
   assert_equal ".pt source hashes as .protoss source" (Kernel.hash_program basic_protoss)
     (Kernel.hash_program basic_pt);
+  let basic_ptc = Loader.check_file basic_ptc_path in
+  assert_equal ".ptc source hashes as .protoss source" (Kernel.hash_program basic_protoss)
+    (Kernel.hash_program basic_ptc);
+  assert_equal ".ptc fixture matches canonical serialization"
+    (Kernel.serialize_checked_program basic_protoss)
+    (String.trim (Store.read_file basic_ptc_path));
   let elm_like = Loader.check_file elm_like_path in
   let elm_like_equiv = Loader.check_file elm_like_equiv_path in
   assert_equal "Elm-like surface hashes as S-expression surface"
