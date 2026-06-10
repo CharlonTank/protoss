@@ -995,6 +995,39 @@ let read_world_refs store =
   | None | Some "" -> []
   | Some refs -> split_words refs |> sort_uniq
 
+let relative_to_root manifest path =
+  let root = realpath_or manifest.root in
+  let path = realpath_or path in
+  let root_prefix = if has_suffix "/" root then root else root ^ "/" in
+  if has_prefix root_prefix path then
+    String.sub path (String.length root_prefix) (String.length path - String.length root_prefix)
+  else path
+
+let is_harness_file path = has_suffix ".pth" path
+
+let rec collect_harness_files dir =
+  if not (Sys.file_exists dir) then []
+  else if Sys.is_directory dir then
+    Sys.readdir dir |> Array.to_list |> List.sort String.compare
+    |> List.concat_map (fun f -> collect_harness_files (Filename.concat dir f))
+  else if is_harness_file dir then [ realpath_or dir ]
+  else []
+
+let harness_item manifest path =
+  let content = read_file path in
+  lock_item "harness"
+    [
+      lock_item "path" [ lock_string (relative_to_root manifest path) ];
+      lock_item "hash" [ Kernel.hash_string content ];
+      lock_item "bytes" [ string_of_int (String.length content) ];
+    ]
+
+let harness_items manifest =
+  collect_harness_files (Filename.concat manifest.root "harness")
+  |> List.map (harness_item manifest)
+
+let harnesses_item manifest = lock_item "harnesses" (harness_items manifest)
+
 let universe_type_item (alias : type_alias) =
   lock_item "type"
     [
@@ -1041,7 +1074,7 @@ let universe_root_content manifest prepared world_refs =
       lock_item "packages" package_deps;
       lock_item "defs" def_items;
       lock_item "types" type_items;
-      lock_item "harnesses" [];
+      harnesses_item manifest;
       lock_string_list "policies" manifest.policies;
       lock_string_list "world-refs" world_refs;
     ]
@@ -1330,6 +1363,14 @@ let package_field name items =
   | Some item -> item
   | None -> fail ("package missing field: " ^ name)
 
+let expect_package_field context name expected items =
+  let actual = package_field name items |> Sexp.to_string in
+  if not (String.equal actual expected) then
+    fail (context ^ " " ^ name ^ " mismatch: expected " ^ expected ^ ", got " ^ actual)
+
+let expect_harnesses_field context manifest items =
+  expect_package_field context "harnesses" (harnesses_item manifest) items
+
 let package_atom_field name items =
   match package_field name items with
   | Sexp.List [ Sexp.Atom _; Sexp.Atom value ] -> value
@@ -1353,14 +1394,6 @@ let package_list_field name items =
   match package_field name items with
   | Sexp.List (Sexp.Atom _ :: values) -> values
   | item -> fail ("invalid package list field " ^ name ^ ": " ^ Sexp.to_string item)
-
-let relative_to_root manifest path =
-  let root = realpath_or manifest.root in
-  let path = realpath_or path in
-  let root_prefix = if has_suffix "/" root then root else root ^ "/" in
-  if has_prefix root_prefix path then
-    String.sub path (String.length root_prefix) (String.length path - String.length root_prefix)
-  else path
 
 let import_with_relative_path manifest base import =
   let path, hash = import_path_and_hash import in
@@ -1791,6 +1824,7 @@ let read_package_import manifest import =
   expect_atom "host-contract-hash" (prepared_host_contract_hash prepared);
   expect_atom "universe-root" (universe_root imported prepared (read_world_refs (store_root imported)));
   expect_atom "interface-hash" current_interface_hash;
+  expect_harnesses_field ("imported package " ^ imported.name) imported items;
   let current_interface = package_interface_from_items package_ref items in
   let current_contract_hash = package_interface_contract_hash current_interface in
   let info =
@@ -1854,6 +1888,7 @@ let lock_content manifest prepared =
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
       "  " ^ lock_string_list "policies" manifest.policies;
+      "  " ^ harnesses_item manifest;
       "  " ^ lock_pair_list "package-aliases" manifest.package_aliases;
       "  " ^ lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
@@ -2046,6 +2081,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
       "  " ^ lock_string_list "policies" manifest.policies;
+      "  " ^ harnesses_item manifest;
       "  " ^ lock_pair_list "package-aliases" manifest.package_aliases;
       "  " ^ lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
@@ -2157,6 +2193,7 @@ let package_import_cache_fingerprints manifest =
            [
              cache_field "import.name" imported.name;
              cache_field "import.source" source_key;
+             cache_field "import.harnesses" (Kernel.hash_string (harnesses_item imported));
              cache_field "import.package_ref" package_ref;
              cache_field "import.package_hash" (Kernel.hash_string package_content);
              cache_field "import.lock_hash" (Kernel.hash_string (read_file lock_file));
@@ -2175,6 +2212,7 @@ let package_check_cache_key manifest source_key import_keys package_ref content 
           cache_field "manifest.name" manifest.name;
           cache_field "manifest.version" manifest.version;
           cache_field "manifest.source" source_key;
+          cache_field "manifest.harnesses" (Kernel.hash_string (harnesses_item manifest));
           cache_field "package.ref" package_ref;
           cache_field "package.hash" (Kernel.hash_string content);
           cache_field "lock.hash" (Kernel.hash_string lock_content);
@@ -2248,6 +2286,7 @@ let check_package manifest =
   expect_atom "universe-root" expected_universe_root;
   let interface_hash = package_interface_hash manifest prepared in
   expect_atom "interface-hash" interface_hash;
+  expect_harnesses_field "package" manifest items;
   validate_package_interface_constraints manifest interface_hash;
   let interface = package_interface_from_items ~project:manifest.root package_ref items in
   let interface_json = package_interface_json_of_interface interface in

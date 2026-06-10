@@ -5260,6 +5260,12 @@ let () =
     (Sys.file_exists layout.layout_harness_path
     && contains_substring (Store.read_file layout.layout_harness_path) "harnesses=0");
   let ws_a = make_workspace "workspace-a" 2 "x" in
+  let harness_dir = Filename.concat ws_a "harness" in
+  ensure_dir harness_dir;
+  let package_harness_path = Filename.concat harness_dir "smoke.pth" in
+  let package_harness_content = "protoss-harness-v1\nkind=example\nname=smoke\n" in
+  write_file package_harness_path package_harness_content;
+  let package_harness_ref = Kernel.hash_string package_harness_content in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";
   Workspace.check_project manifest_a;
@@ -5280,8 +5286,10 @@ let () =
     (contains_substring universe_root_content "(defs ");
   assert_true "project universe root records types"
     (contains_substring universe_root_content "(types ");
-  assert_true "project universe root records harness slot"
-    (contains_substring universe_root_content "(harnesses)");
+  assert_true "project universe root records harness files"
+    (contains_substring universe_root_content "(harnesses (harness "
+    && contains_substring universe_root_content "harness/smoke.pth"
+    && contains_substring universe_root_content package_harness_ref);
   assert_true "project universe root records policies"
     (contains_substring universe_root_content "(policies \"NoNetworkExceptDeclared\")");
   assert_true "project store list" (String.contains (Workspace.list_store build_a.store) 'a');
@@ -5591,6 +5599,10 @@ let () =
     (contains_substring package_content "(interface-hash p2:");
   assert_true "project package records policies"
     (contains_substring package_content "(policies \"NoNetworkExceptDeclared\")");
+  assert_true "project package records harnesses"
+    (contains_substring package_content "(harnesses (harness "
+    && contains_substring package_content "harness/smoke.pth"
+    && contains_substring package_content package_harness_ref);
   assert_true "project package records public interface"
     (contains_substring package_content "(interface ");
   let interface_hash = sexp_atom_field "interface-hash" package_content in
@@ -5626,6 +5638,16 @@ let () =
     package_checked.interface_path;
   assert_equal "project package check interface contract" package_a.interface_contract_hash
     package_checked.interface_contract_hash;
+  write_file package_harness_path (package_harness_content ^ "changed=true\n");
+  (try
+     ignore (Workspace.check_package manifest_a);
+     fail "package check should reject harness drift"
+   with Workspace.Error msg ->
+     assert_true "project package check rejects harness drift"
+       (contains_substring msg "lockfile out of date"
+       || contains_substring msg "package descriptor out of date"
+       || contains_substring msg "harnesses mismatch"));
+  write_file package_harness_path package_harness_content;
   let package_interface_text = Workspace.package_interface_text manifest_a in
   trace_test "integration:package-a:interface-text";
   assert_true "project package interface prints ref"

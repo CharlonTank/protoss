@@ -343,7 +343,7 @@ scope refs, package negative capabilities, SecretRef, secrets scelles et SecretL
 
 Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
 `examples/modules/*.protoss`, `examples/workspace`, commandes `protoss project
-...`, assertions imports, packages, lock/interface et drift dans
+...`, assertions imports, packages, harnesses, lock/interface et drift dans
 `test/test_protoss.ml`.
 
 - [x] Supporter `(module Name)` et `(export symbol ...)`.
@@ -367,7 +367,11 @@ Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
   validation de policy dans `Workspace.package_import_manifest`, champs
   `package-policy-aliases` des locks/packages, assertions
   "package policy alias ..." dans `test/test_protoss.ml` et `README.md`.
-- [ ] Inclure harnesses dans les packages.
+- [x] Inclure harnesses dans les packages.
+  Preuves: `Workspace.collect_harness_files`, `Workspace.harnesses_item`, champ
+  `(harnesses ...)` des locks/packages, assertions "project universe root
+  records harness files", "project package records harnesses" et "project
+  package check rejects harness drift" dans `test/test_protoss.ml`, `README.md`.
 - [x] Inclure policies dans les packages.
   Preuves: champ manifest `policies`, entrees `(policies ...)` dans lock et
   package, assertions "project package records policies" dans

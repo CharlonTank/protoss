@@ -11,7 +11,7 @@ Elm-like, with/without type/lambda inference, with/without aliases) **must produ
 canonical graph and hash**. Preserving that property is the central design constraint — treat any
 change that makes equivalent sources hash differently, or that introduces non-determinism, as a bug.
 Workspace builds also write a deterministic `UniverseRoot` (`universe.root` plus
-`universe.root.content`) over package metadata, defs, types, harness slots, policies, and world refs;
+`universe.root.content`) over package metadata, defs, types, harness file refs, policies, and world refs;
 audit, locked build, lock, and package flows must reject stale `universe-root` state.
 Policy names are executable, not just descriptor text: for example
 `NoNetworkExceptDeclared` requires `Http.*` and `Server.*` capabilities to be present in manifest
