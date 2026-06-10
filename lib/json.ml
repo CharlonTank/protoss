@@ -135,35 +135,78 @@ let string = function String s -> Some s | _ -> None
 
 let array = function Array xs -> Some xs | _ -> None
 
+(* Most strings (hashes, def names, kinds) need no escaping, so scan first and
+   memcpy the whole string when clean instead of feeding the buffer char by
+   char — escaping showed up in profiles of store-heavy flows. *)
+let escape_into buf s =
+  let len = String.length s in
+  let clean = ref true in
+  (try
+     for i = 0 to len - 1 do
+       let c = String.unsafe_get s i in
+       if c = '"' || c = '\\' || Char.code c < 0x20 then (
+         clean := false;
+         raise Exit)
+     done
+   with Exit -> ());
+  if !clean then Buffer.add_string buf s
+  else
+    String.iter
+      (fun c ->
+        match c with
+        | '"' -> Buffer.add_string buf "\\\""
+        | '\\' -> Buffer.add_string buf "\\\\"
+        | '\n' -> Buffer.add_string buf "\\n"
+        | '\r' -> Buffer.add_string buf "\\r"
+        | '\t' -> Buffer.add_string buf "\\t"
+        | '\b' -> Buffer.add_string buf "\\b"
+        | '\012' -> Buffer.add_string buf "\\f"
+        | c when Char.code c < 0x20 ->
+            Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.code c))
+        | c -> Buffer.add_char buf c)
+      s
+
 let escape s =
   let buf = Buffer.create (String.length s + 2) in
-  String.iter
-    (fun c ->
-      match c with
-      | '"' -> Buffer.add_string buf "\\\""
-      | '\\' -> Buffer.add_string buf "\\\\"
-      | '\n' -> Buffer.add_string buf "\\n"
-      | '\r' -> Buffer.add_string buf "\\r"
-      | '\t' -> Buffer.add_string buf "\\t"
-      | '\b' -> Buffer.add_string buf "\\b"
-      | '\012' -> Buffer.add_string buf "\\f"
-      | c when Char.code c < 0x20 -> Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.code c))
-      | c -> Buffer.add_char buf c)
-    s;
+  escape_into buf s;
   Buffer.contents buf
 
 (* Canonical, deterministic encoder: object keys are emitted in sorted order so
    the same logical value always serializes to identical bytes regardless of how
-   it was constructed. Used for content-addressed runtime objects. *)
-let rec to_string = function
-  | Null -> "null"
-  | Bool b -> if b then "true" else "false"
-  | Num n -> string_of_int n
-  | String s -> "\"" ^ escape s ^ "\""
-  | Array xs -> "[" ^ String.concat "," (List.map to_string xs) ^ "]"
+   it was constructed. Used for content-addressed runtime objects. Writes into a
+   single buffer end to end — building nested values as intermediate strings
+   re-copied every enclosing level and dominated allocation on large graphs. *)
+let rec write_value buf = function
+  | Null -> Buffer.add_string buf "null"
+  | Bool b -> Buffer.add_string buf (if b then "true" else "false")
+  | Num n -> Buffer.add_string buf (string_of_int n)
+  | String s ->
+      Buffer.add_char buf '"';
+      escape_into buf s;
+      Buffer.add_char buf '"'
+  | Array xs ->
+      Buffer.add_char buf '[';
+      List.iteri
+        (fun i x ->
+          if i > 0 then Buffer.add_char buf ',';
+          write_value buf x)
+        xs;
+      Buffer.add_char buf ']'
   | Object fields ->
       let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) fields in
-      "{"
-      ^ String.concat ","
-          (List.map (fun (k, v) -> "\"" ^ escape k ^ "\":" ^ to_string v) sorted)
-      ^ "}"
+      Buffer.add_char buf '{';
+      List.iteri
+        (fun i (k, v) ->
+          if i > 0 then Buffer.add_char buf ',';
+          Buffer.add_char buf '"';
+          escape_into buf k;
+          Buffer.add_char buf '"';
+          Buffer.add_char buf ':';
+          write_value buf v)
+        sorted;
+      Buffer.add_char buf '}'
+
+let to_string v =
+  let buf = Buffer.create 256 in
+  write_value buf v;
+  Buffer.contents buf

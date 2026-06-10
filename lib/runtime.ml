@@ -363,7 +363,7 @@ let read_cache_stats dir =
          (0, 0)
 
 let write_cache_stats dir hits misses =
-  Store.ensure_dir dir;
+  Store.ensure_dir_cached dir;
   Store.write_file_atomic (cache_stats_path dir)
     ("hits=" ^ string_of_int hits ^ "\nmisses=" ^ string_of_int misses ^ "\n")
 
@@ -390,7 +390,7 @@ let persistent_cache_get st key =
 let persistent_cache_put st key value =
   match (st.cache_dir, cache_value_to_canonical value) with
   | Some dir, Some payload ->
-      Store.ensure_dir dir;
+      Store.ensure_dir_cached dir;
       Store.write_file_atomic (cache_file dir key) (payload ^ "\n")
   | _ -> ()
 

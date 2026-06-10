@@ -151,7 +151,7 @@ let compress h w =
    whole message into a padded buffer showed up as memmove + GC pressure in
    profiles. Only the final padded block goes through a 64/128-byte scratch
    buffer. The digest stays bit-for-bit standard SHA-256. *)
-let digest content =
+let digest_pure content =
   let len = String.length content in
   let h = [| 0x6a09e667; 0xbb67ae85; 0x3c6ef372; 0xa54ff53a;
              0x510e527f; 0x9b05688c; 0x1f83d9ab; 0x5be0cd19 |]
@@ -181,6 +181,20 @@ let digest content =
   let buf = Buffer.create 64 in
   Array.iter (fun x -> Buffer.add_string buf (Printf.sprintf "%08x" x)) h;
   Buffer.contents buf
+
+(* Hardware SHA-256 (CommonCrypto on macOS — ARMv8 crypto / SHA-NI) when the
+   platform provides it; the pure-OCaml implementation above otherwise. Both
+   produce bit-identical standard SHA-256, asserted by the core test vectors.
+   CC_SHA256 takes a 32-bit length, so oversized inputs use the pure path. *)
+external c_sha256_available : unit -> bool = "protoss_sha256_available" [@@noalloc]
+
+external c_sha256_hex : string -> string = "protoss_sha256_hex"
+
+let hardware_sha256 = c_sha256_available ()
+
+let digest content =
+  if hardware_sha256 && String.length content < 0xFFFF_FF00 then c_sha256_hex content
+  else digest_pure content
 
 let hash content = hash_prefix ^ digest content
 

@@ -57,12 +57,15 @@ let sanitize_id s =
     s;
   Buffer.contents b
 
-let ensure_dir = Store.ensure_dir
+let ensure_dir = Store.ensure_dir_cached
 
 let read_file path =
   try Store.read_file path with Store.Error msg -> fail msg | Sys_error msg -> fail msg
 
-let write_file path content = Store.write_file_atomic path content
+(* Workspace artifacts are deterministic, so rebuilding into an existing store
+   leaves most of them byte-identical; comparing first skips the write entirely
+   (nothing in the project model depends on mtimes). *)
+let write_file path content = Store.write_file_atomic_if_changed path content
 
 let remove_file path = if Sys.file_exists path then Sys.remove path
 
@@ -470,21 +473,36 @@ let parse_cached_unit store path hash =
         }
   | _ -> None
 
+(* Parsing a unit is a pure function of its source text, so results are shared
+   process-wide by content hash: copied or relocated trees re-present the same
+   sources (typically the prelude) under new paths, where the per-path store
+   metadata cannot help. Only [path] differs per call; callers count stats
+   exactly as for a fresh parse, so the observable incremental contract is
+   unchanged. Parse errors are not cached (the raise happens first). *)
+let parsed_unit_cache : (string, unit_load) Hashtbl.t = Hashtbl.create 64
+
 let parse_source_unit path source hash =
-  let parsed = Parser.parse_string source in
-  {
-    path;
-    source_hash = hash;
-    imports = parsed.imports;
-    capabilities = parsed.capabilities;
-    module_name = parsed.module_name;
-    exports = parsed.exports;
-    type_aliases = parsed.type_aliases;
-    defs = parsed.defs;
-    public_symbols = public_symbols_of_program parsed;
-    all_symbols = local_symbols_of_program parsed;
-    parsed_from_source = true;
-  }
+  match Hashtbl.find_opt parsed_unit_cache hash with
+  | Some cached -> { cached with path }
+  | None ->
+      let parsed = Parser.parse_string source in
+      let unit =
+        {
+          path;
+          source_hash = hash;
+          imports = parsed.imports;
+          capabilities = parsed.capabilities;
+          module_name = parsed.module_name;
+          exports = parsed.exports;
+          type_aliases = parsed.type_aliases;
+          defs = parsed.defs;
+          public_symbols = public_symbols_of_program parsed;
+          all_symbols = local_symbols_of_program parsed;
+          parsed_from_source = true;
+        }
+      in
+      Hashtbl.replace parsed_unit_cache hash unit;
+      unit
 
 let unit_defs_source unit =
   let forms = List.map string_of_type_alias unit.type_aliases @ List.map string_of_def unit.defs in
@@ -660,7 +678,7 @@ let write_project_def store cache_dir checked stats program_hash cd =
   ignore (Store.write_def store cd.def cd.canonical normal);
   write_file (type_path store name) (string_of_typ cd.def.typ ^ "\n");
   write_file (deps_path store name) (String.concat "\n" deps ^ "\n");
-  Store.ensure_dir (capability_scopes_dir store);
+  Store.ensure_dir_cached (capability_scopes_dir store);
   write_file (capability_scope_path store name) (String.concat "\n" cd.capabilities ^ "\n");
   write_file (normal_path store name) (normal ^ "\n");
   write_file (defid_path store name) (cd.def_id ^ "\n")

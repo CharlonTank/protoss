@@ -12,7 +12,7 @@ let json_field name value = json_string name ^ ": " ^ value
 
 let json_obj fields = "{ " ^ String.concat ", " fields ^ " }"
 
-let ensure_dir = Store.ensure_dir
+let ensure_dir = Store.ensure_dir_cached
 
 let write_file = Store.write_file_atomic
 

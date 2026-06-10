@@ -3,7 +3,7 @@
    Purely a time/memory trade-off; no observable behavior change. *)
 let () =
   Gc.set
-    { (Gc.get ()) with Gc.minor_heap_size = 8 * 1024 * 1024; Gc.space_overhead = 200 }
+    { (Gc.get ()) with Gc.minor_heap_size = 32 * 1024 * 1024; Gc.space_overhead = 400 }
 
 let usage () =
   prerr_endline

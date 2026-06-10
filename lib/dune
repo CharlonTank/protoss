@@ -1,3 +1,6 @@
 (library
  (name protoss)
- (libraries unix))
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names protoss_sha256_stubs)))

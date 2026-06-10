@@ -5,7 +5,7 @@ open Protoss
    Purely a time/memory trade-off; no observable behavior change. *)
 let () =
   Gc.set
-    { (Gc.get ()) with Gc.minor_heap_size = 8 * 1024 * 1024; Gc.space_overhead = 200 }
+    { (Gc.get ()) with Gc.minor_heap_size = 32 * 1024 * 1024; Gc.space_overhead = 400 }
 
 let fail msg = raise (Failure msg)
 
@@ -119,6 +119,16 @@ let () =
   assert_equal "sha256 padding boundary 128"
     "6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e"
     (Hashcons.digest (String.make 128 'a'));
+  (* The dispatching digest (hardware-accelerated where available) must be
+     bit-identical to the portable pure-OCaml implementation. Sweep every
+     length across the first few padding boundaries so a platform-specific
+     digest bug cannot slip in silently. *)
+  for n = 0 to 300 do
+    let s = String.init n (fun i -> Char.chr ((i * 7 + n) land 0xff)) in
+    assert_equal
+      (Printf.sprintf "sha256 dispatch agrees with pure (len %d)" n)
+      (Hashcons.digest_pure s) (Hashcons.digest s)
+  done;
   let utf8_sample = "A" ^ "\195\169" ^ "\240\157\132\158" in
   assert_equal "string primitive utf8 length" "3" (string_of_int (String_prim.length utf8_sample));
   assert_equal "string primitive utf8 slice" "\195\169" (String_prim.slice utf8_sample 1 1);
@@ -232,8 +242,13 @@ let ledger_suspension req cap_scope =
     Runtime.request_id suspended,
     Runtime.continuation_id suspended )
 
+(* Tries an APFS copy-on-write clone first (one syscall for a whole tree, no
+   data I/O — workspace tests copy ~1.5k-file stores a dozen times); falls back
+   to the portable recursive copy, re-trying the clone per subtree so partially
+   existing destinations still benefit. *)
 let rec copy_tree src dst =
-  if Sys.is_directory src then (
+  if Store.try_clone src dst then ()
+  else if Sys.is_directory src then (
     ensure_dir dst;
     Sys.readdir src |> Array.iter (fun f -> copy_tree (Filename.concat src f) (Filename.concat dst f)))
   else write_file dst (Store.read_file src)

@@ -4,24 +4,11 @@ let hash = Hashcons.hash
 
 let initial_world = hash "world:initial"
 
-let rec ensure_dir path =
-  if path <> "" && not (Sys.file_exists path) then (
-    let parent = Filename.dirname path in
-    if parent <> path then ensure_dir parent;
-    Unix.mkdir path 0o755)
+(* Shared with the store so directory ensuring benefits from the same
+   process-local cache (and stays consistent with its vanished-dir retry). *)
+let ensure_dir = Store.ensure_dir_cached
 
-let write_file_atomic path content =
-  ensure_dir (Filename.dirname path);
-  let tmp = path ^ ".tmp." ^ string_of_int (Unix.getpid ()) in
-  let oc = open_out tmp in
-  try
-    output_string oc content;
-    close_out oc;
-    Sys.rename tmp path
-  with exn ->
-    close_out_noerr oc;
-    if Sys.file_exists tmp then Sys.remove tmp;
-    raise exn
+let write_file_atomic = Store.write_file_atomic
 
 let request_payload = function
   | AskHuman prompt -> "AskHuman:" ^ prompt

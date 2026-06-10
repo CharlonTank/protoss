@@ -129,8 +129,8 @@ let runtime_json_content g genesis_ref =
 (* -- filesystem helpers ----------------------------------------------------- *)
 
 let ensure_layout rt =
-  Store.ensure_dir rt;
-  List.iter (fun d -> Store.ensure_dir (Filename.concat rt d)) subdirs
+  Store.ensure_dir_cached rt;
+  List.iter (fun d -> Store.ensure_dir_cached (Filename.concat rt d)) subdirs
 
 let rec rm_rf path =
   if Sys.file_exists path then

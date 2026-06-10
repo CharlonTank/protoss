@@ -626,7 +626,7 @@ let write_patch_audit store_root patch_path previous_ref checked_patch =
   let content = patch_audit_content previous_ref patch_source checked_patch in
   let patch_ref = Patch_audit.audit_ref_of_content content in
   let dir = patch_audits_dir store_root in
-  Store.ensure_dir dir;
+  Store.ensure_dir_cached dir;
   Store.write_file_atomic (patch_audit_path store_root patch_ref) (content ^ "\n");
   Store.write_file_atomic (patch_latest_path store_root) (patch_ref ^ "\n");
   patch_ref
@@ -692,7 +692,7 @@ let host_contract_hash contract_json =
 let write_host_contract store_root graph_json =
   let contract_json = Canonical_ir.graph_host_contract graph_json in
   let contract_hash = host_contract_hash contract_json in
-  Store.ensure_dir (host_contracts_dir store_root);
+  Store.ensure_dir_cached (host_contracts_dir store_root);
   Store.write_file_atomic (host_contract_path store_root) contract_json;
   Store.write_file_atomic (host_contract_object_path store_root contract_hash) contract_json;
   Store.write_file_atomic (host_contract_current_path store_root) (contract_hash ^ "\n")
@@ -718,7 +718,7 @@ let delete_capability_scope store_root name =
   if Sys.file_exists path then Sys.remove path
 
 let write_capability_scope store_root (cd : Kernel.checked_def) =
-  Store.ensure_dir (capability_scopes_dir store_root);
+  Store.ensure_dir_cached (capability_scopes_dir store_root);
   Store.write_file_atomic (capability_scope_path store_root cd.def.name)
     (String.concat "\n" cd.capabilities ^ "\n")
 
