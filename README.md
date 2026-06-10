@@ -74,6 +74,8 @@ dune exec protoss -- diff --json before.store after.store
 dune exec protoss -- patch from-diff before.store after.store > patch.json
 dune exec protoss -- compare examples/basic.pt examples/basic.ptc
 dune exec protoss -- compare --project examples/web/todo_app examples/web/todo_app
+dune exec protoss -- capabilities examples/ask_human.protoss
+dune exec protoss -- capabilities --project examples/web/todo_app
 
 dune exec protoss -- ledger inspect <WorldRefOrEventRef>
 dune exec protoss -- ledger replay <WorldRef>

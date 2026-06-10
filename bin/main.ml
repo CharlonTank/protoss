@@ -12,6 +12,7 @@ let usage () =
      \       protoss canon <file> | protoss canon --ptb <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
      \       protoss convert --to pt|ptc|ptb <file>\n\
      \       protoss compare <file-a> <file-b> | protoss compare --graph <graph-a.json> <graph-b.json> | protoss compare --project <project-a> <project-b>\n\
+     \       protoss capabilities <file> | protoss capabilities --project <project>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -196,6 +197,30 @@ let command_compare = function
         (Protoss.Workspace.build ~write:false manifest).Protoss.Workspace.build_id
       in
       finish_compare (project_hash left) (project_hash right)
+  | _ -> usage ()
+
+let capability_audit_text checked =
+  let program_caps = List.sort_uniq String.compare checked.Protoss.Kernel.program.capabilities in
+  let def_lines =
+    checked.defs
+    |> List.map (fun (d : Protoss.Kernel.checked_def) ->
+           let caps = List.sort_uniq String.compare d.capabilities in
+           d.def.name ^ " cap-scope-ref=" ^ Protoss.Kernel.capability_scope_ref caps
+           ^ " caps=[" ^ String.concat "," caps ^ "]")
+  in
+  "program-hash=" ^ Protoss.Kernel.hash_program checked ^ "\nprogram-caps=["
+  ^ String.concat "," program_caps ^ "]\ndefs=\n" ^ String.concat "\n" def_lines
+  ^ if def_lines = [] then "" else "\n"
+
+let command_capabilities = function
+  | [ file ] -> print_string (capability_audit_text (parse_and_check file))
+  | [ "--project"; project ] ->
+      let manifest =
+        Protoss.Workspace.parse_manifest
+          (Protoss.Workspace.project_root project)
+      in
+      let build = Protoss.Workspace.build ~write:false manifest in
+      print_string (capability_audit_text build.Protoss.Workspace.checked)
   | _ -> usage ()
 
 let canonical_program checked =
@@ -1183,6 +1208,7 @@ let () =
           command_hash_store_graph project_or_store graph_hash
       | [ "hash"; file ] -> command_hash file
       | "compare" :: args -> command_compare args
+      | "capabilities" :: args -> command_capabilities args
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--ptb"; file ] -> command_canon_ptb file
       | [ "canon"; "--graph"; file ] -> command_canon_graph file

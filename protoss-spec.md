@@ -189,7 +189,7 @@ listees dans la section "Gates de validation".
 - [ ] Partitionner caches et evaluation par `CapScope`.
 - [ ] Ajouter policies de package autour des capabilities.
 - [ ] Ajouter tests de fuite de secret.
-- [ ] Exposer une commande d'audit des capabilities par root.
+- [x] Exposer une commande d'audit des capabilities par root.
 
 ## 10. Modules, imports et packages
 
