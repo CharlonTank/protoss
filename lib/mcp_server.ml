@@ -171,8 +171,13 @@ let tools =
              (string_array_property "Harness .pth files that must pass before commit");
          ]
          [ "store"; "patchPath"; "harnesses" ]);
-    tool "protoss.runHarness" "Run harness" "Run the attached harness set for a store."
-      (object_schema [ Kernel.json_field "store" (string_property "Store path") ] [ "store" ]);
+    tool "protoss.runHarness" "Run harness" "Run a .pth harness for a project or store."
+      (object_schema
+         [
+           Kernel.json_field "store" (string_property "Project or store path");
+           Kernel.json_field "harnessPath" (string_property "Harness .pth file");
+         ]
+         [ "store"; "harnessPath" ]);
     tool "protoss.explain" "Explain definition"
       "Explain a graph definition, including type/term nodes and dependency edges."
       (object_schema
@@ -307,16 +312,14 @@ let apply_patch args =
     (arg_string args "store") (arg_string args "patchPath")
 
 let run_harness args =
-  let store = arg_string args "store" in
-  Kernel.json_obj
-    [
-      Kernel.json_field "format" (Kernel.json_string "protoss-mcp-harness-v1");
-      Kernel.json_field "store" (Kernel.json_string store);
-      Kernel.json_field "passed" (Kernel.json_bool true);
-      Kernel.json_field "harnesses" (Kernel.json_array (fun x -> x) []);
-      Kernel.json_field "status" (Kernel.json_string "empty-harness-set");
-    ]
-  ^ "\n"
+  let store = Workspace.store_of_arg (arg_string args "store") in
+  let harness_path = arg_string args "harnessPath" in
+  let graph_path = Filename.concat store "program.graph.json" in
+  if not (Sys.file_exists graph_path) then fail ("missing current program graph: " ^ graph_path);
+  Harness.run_json
+    (Canonical_ir.checked_of_graph (Store.read_file graph_path))
+    ~source:harness_path
+    (Store.read_file harness_path)
 
 let diff args =
   let store_a = Workspace.store_of_arg (arg_string args "storeA") in

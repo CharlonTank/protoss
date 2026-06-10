@@ -1325,6 +1325,36 @@ let () =
     (json_string_field "format" mcp_query_structured);
   assert_equal "mcp query structured query" "definitions"
     (json_string_field "query" mcp_query_structured);
+  let mcp_harness_root = temp_dir "mcp-harness" in
+  ensure_dir (Filename.concat mcp_harness_root "src");
+  ensure_dir (Filename.concat mcp_harness_root "harness");
+  write_file (Filename.concat mcp_harness_root "protoss.toml")
+    "name = \"mcp-harness\"\n\
+     version = \"0.1.0\"\n\
+     entrypoints = [\"src/main.protoss\"]\n\
+     stdlib = \"none\"\n\
+     source_dirs = [\"src\"]\n\
+     store_dir = \".protoss/store\"\n\
+     cache_dir = \".protoss/cache\"\n";
+  write_file (Filename.concat mcp_harness_root "src/main.protoss") "(def two Nat 2)\n";
+  let mcp_harness_path = Filename.concat mcp_harness_root "harness/smoke.pth" in
+  write_file mcp_harness_path "harness two_ok = unit two == 2\n";
+  let mcp_harness_manifest = Workspace.parse_manifest mcp_harness_root in
+  ignore (Workspace.build mcp_harness_manifest);
+  let mcp_harness =
+    mcp_response
+      ("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"protoss.runHarness\",\"arguments\":{\"store\":"
+      ^ Ast.quote (Workspace.store_root mcp_harness_manifest)
+      ^ ",\"harnessPath\":" ^ Ast.quote mcp_harness_path ^ "}}}")
+  in
+  let mcp_harness_result = json_field "result" mcp_harness in
+  assert_true "mcp runHarness result is not error"
+    (not (json_bool_field "isError" mcp_harness_result));
+  let mcp_harness_structured = json_field "structuredContent" mcp_harness_result in
+  assert_equal "mcp runHarness structured format" Harness.format
+    (json_string_field "format" mcp_harness_structured);
+  assert_equal "mcp runHarness structured status" "pass"
+    (json_string_field "status" mcp_harness_structured);
   let duplicate_ref_checked = check "(def a Nat 1)\n(def b Nat 1)\n(def c Nat b)" in
   let duplicate_ref_graph_json = Canonical_ir.serialize_graph duplicate_ref_checked in
   let duplicate_ref_roundtrip =

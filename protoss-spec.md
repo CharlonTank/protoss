@@ -840,8 +840,17 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 - [ ] Toutes les cases ci-dessus sont cochees.
 - [ ] Chaque case cochee pointe vers test, fixture, doc ou commande probante.
 - [ ] Les formats `.pt`, `.ptc`, `.ptb` sont implementes et round-trippes.
-- [ ] Le serveur MCP est utilisable par un client MCP standard.
-- [ ] Les harnesses sont canoniques, hashes et obligatoires pour patches risqués.
+- [x] Le serveur MCP est utilisable par un client MCP standard.
+  Preuves: `Mcp_server.handle_message`, `Mcp_server.tools`, protocole
+  `2025-11-25`, assertions "mcp initialize protocol", "mcp exposes ..." et
+  "mcp runHarness structured status" dans `test/test_protoss.ml`, docs MCP
+  officielles lifecycle/tools.
+- [x] Les harnesses sont canoniques, hashes et obligatoires pour patches risqués.
+  Preuves: `Harness.canonical_bytes`, `Harness.graph_json`,
+  `Agent_protocol.validate_harnesses`, option CLI
+  `protoss agent commit --harness`, assertions "harness file ref is canonical", "project harness
+  graph hash", "agent commit rejects missing harness" et "agent commit rejects
+  failing harness" dans `test/test_protoss.ml`, `README.md`.
 - [x] Le ledger monde supporte branches et merges.
   Preuves: `Ledger.branches`, `Ledger.merge`, `protoss ledger merge` et
   assertions "ledger merged" dans `test/test_protoss.ml`.
