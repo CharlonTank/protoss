@@ -1699,6 +1699,27 @@ and poly_app_elab ctx expected expr =
                     ("cannot infer " ^ name ^ ": expected " ^ string_of_typ pattern ^ ", got "
                    ^ string_of_typ actual)
           in
+          let infer_type_opt expr =
+            try Some (fst (infer_elab ctx expr)) with Error _ -> None
+          in
+          let unify_inferred pattern expr =
+            match infer_type_opt expr with
+            | Some actual -> unify pattern actual
+            | None -> ()
+          in
+          let rec collect_expected_constraints pattern arg =
+            match (unfold_type ctx pattern, arg) with
+            | TList item_ty, ENil explicit_item_ty -> unify item_ty explicit_item_ty
+            | TList _, ENilInfer -> ()
+            | TList item_ty, ECons (explicit_item_ty, head, tail) ->
+                unify item_ty explicit_item_ty;
+                collect_expected_constraints item_ty head;
+                collect_expected_constraints (TList item_ty) tail
+            | TList item_ty, EConsInfer (head, tail) ->
+                collect_expected_constraints item_ty head;
+                collect_expected_constraints (TList item_ty) tail
+            | _ -> unify_inferred pattern arg
+          in
           let rec take_params typ remaining acc =
             match remaining with
             | [] -> (List.rev acc, typ)
@@ -1709,6 +1730,7 @@ and poly_app_elab ctx expected expr =
           in
           let params, result = take_params (type_body g.global_typ) args [] in
           (match expected with Some expected -> unify result expected | None -> ());
+          List.iter2 collect_expected_constraints params args;
           List.iter2
             (fun param arg ->
               try

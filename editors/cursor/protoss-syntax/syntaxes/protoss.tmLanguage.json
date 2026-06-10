@@ -19,6 +19,9 @@
       "include": "#sexpDefinition"
     },
     {
+      "include": "#builtins"
+    },
+    {
       "include": "#keywords"
     },
     {
@@ -162,6 +165,14 @@
         {
           "name": "keyword.operator.expression.protoss",
           "match": "\\b(?:lambda|foldNat|foldList|foldVariant|caseList|match|record|variant|get|inst|done|bind|request|recur|text|image|button|input|column|row|list|when)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.protoss",
+          "match": "\\b(?:succ|foldNat|foldList|foldVariant|caseList|recur|text|image|button|input|column|row|list|when|node|attr|on|done|bind)\\b"
         }
       ]
     },

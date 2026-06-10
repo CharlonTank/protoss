@@ -1,0 +1,32 @@
+(variant Maybe (params A)
+  (None Unit)
+  (Some A))
+
+(record Box
+  (value (Maybe Nat)))
+
+(def mkSome (-> Nat (Maybe Nat))
+  (lambda (n Nat)
+    (variant Some n)))
+
+(def boxed Box
+  (record
+    (value (variant Some 1))))
+
+(def selected (Maybe Nat)
+  (case true
+    (true (variant Some 2))
+    (false (variant None unit))))
+
+(def folded (Maybe Nat)
+  (foldNat 1
+    (variant None unit)
+    (lambda (acc (Maybe Nat))
+      (variant Some 3))))
+
+(def listed (List (Maybe Nat))
+  (Cons
+    (variant Some 4)
+    (Cons
+      (variant None unit)
+      Nil)))

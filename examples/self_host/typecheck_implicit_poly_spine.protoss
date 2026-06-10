@@ -1,0 +1,42 @@
+(defpoly choose (params A)
+  (-> A (-> A A))
+  (lambda (x A)
+    (lambda (y A) x)))
+
+(defpoly keepFirstList (params A)
+  (-> (List A) (-> (List A) (List A)))
+  (lambda (xs (List A))
+    (lambda (ys (List A)) xs)))
+
+(defpoly keepFirstListAfterNat (params A)
+  (-> (List A) (-> Nat (List A)))
+  (lambda (xs (List A))
+    (lambda (n Nat) xs)))
+
+(def picked Nat
+  ((choose 1) 2))
+
+(def words (List String)
+  (Cons "a" (Cons "b" Nil)))
+
+(def nums (List Nat)
+  (Cons 1 Nil))
+
+(def keptEmpty (List Nat)
+  ((keepFirstList nums) Nil))
+
+(def keptPrefixEmpty (List Nat)
+  ((keepFirstListAfterNat Nil) 0))
+
+(defpoly map (params A B)
+  (-> (List A) (-> (-> A B) (List B)))
+  (lambda (xs (List A))
+    (lambda (f (-> A B))
+      (foldList xs (Nil B)
+        (lambda (x A)
+          (lambda (acc (List B))
+            (Cons (f x) acc)))))))
+
+(def sameWords (List String)
+  ((map words)
+    (lambda (word String) word)))

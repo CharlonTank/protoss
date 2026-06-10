@@ -2,7 +2,7 @@
   "name": "protoss-syntax",
   "displayName": "Protoss Syntax",
   "description": "Syntax highlighting for Protoss .protoss files in Cursor and VS Code.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "protoss",
   "license": "MIT",
   "main": "./extension.js",

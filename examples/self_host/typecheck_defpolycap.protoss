@@ -1,0 +1,5 @@
+(defpolycap pure (params A) (capabilities) (-> A A)
+  (lambda (x A) x))
+
+(def main Nat
+  ((inst pure Nat) 3))

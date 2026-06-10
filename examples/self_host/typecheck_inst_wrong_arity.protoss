@@ -1,0 +1,5 @@
+(defpoly id (params A) (-> A A)
+  (lambda (x A) x))
+
+(def bad Nat
+  ((inst id Nat String) 1))

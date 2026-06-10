@@ -8,6 +8,7 @@ const WORD_RE = /[A-Za-z_][A-Za-z0-9_.]*/;
 // Primitives intégrées au kernel (aucune définition .protoss). Cmd/Ctrl+Click
 // les renvoie vers les signatures documentées dans builtins.protoss.
 const BUILTINS = new Set([
+  "succ",
   "text",
   "image",
   "button",
@@ -21,6 +22,11 @@ const BUILTINS = new Set([
   "on",
   "done",
   "bind",
+  "foldNat",
+  "foldList",
+  "foldVariant",
+  "caseList",
+  "recur",
   "AskHuman",
   "HttpGet",
   "LoadLocal",

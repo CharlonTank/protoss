@@ -1,0 +1,2 @@
+(def main (List Nat)
+  (Nil Nat))

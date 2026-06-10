@@ -1,0 +1,3 @@
+(def bad Nat
+  (let (flag true)
+    (succ flag)))

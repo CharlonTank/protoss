@@ -1,0 +1,5 @@
+(capabilities Human.ask)
+
+(defcap bad (capabilities Human.ask) Nat
+  (let (p (Human.ask "Name?"))
+    0))

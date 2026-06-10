@@ -1,0 +1,2 @@
+(defpoly bad (params A) (-> A A)
+  (lambda (x A) 1))

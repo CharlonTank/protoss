@@ -1,0 +1,12 @@
+(defpoly id (params A) (-> A A)
+  (lambda (x A) x))
+
+(defpoly singleton (params A) (-> A (List A))
+  (lambda (x A)
+    (Cons A x (Nil A))))
+
+(def main Nat
+  ((inst id Nat) 4))
+
+(def words (List String)
+  ((inst singleton String) "ok"))

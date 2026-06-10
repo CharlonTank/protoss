@@ -1,0 +1,7 @@
+(defpoly keepFirstListAfterNat (params A)
+  (-> (List A) (-> Nat (List A)))
+  (lambda (xs (List A))
+    (lambda (n Nat) xs)))
+
+(def keptPrefixCons (List Nat)
+  ((keepFirstListAfterNat (Cons 1 Nil)) 0))

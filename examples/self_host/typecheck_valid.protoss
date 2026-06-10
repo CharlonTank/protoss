@@ -1,0 +1,3 @@
+(def one Nat 1)
+(def truth Bool true)
+(def main Nat one)

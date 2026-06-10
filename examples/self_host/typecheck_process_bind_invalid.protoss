@@ -1,0 +1,6 @@
+(capabilities Human.ask)
+
+(def bad (Process String)
+  (bind (Human.ask "Name?")
+    (lambda (answer String)
+      answer)))

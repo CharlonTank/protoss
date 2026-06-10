@@ -1,0 +1,20 @@
+(defpoly choose (params A)
+  (-> A (-> A A))
+  (lambda (x A)
+    (lambda (y A) x)))
+
+(defpoly keepFirstList (params A)
+  (-> (List A) (-> (List A) (List A)))
+  (lambda (xs (List A))
+    (lambda (ys (List A)) xs)))
+
+(defpoly keepFirstListAfterNat (params A)
+  (-> (List A) (-> Nat (List A)))
+  (lambda (xs (List A))
+    (lambda (n Nat) xs)))
+
+(def nums (List Nat)
+  (Cons 1 Nil))
+
+(def badList (List Nat)
+  ((keepFirstList nums) (Cons true Nil)))

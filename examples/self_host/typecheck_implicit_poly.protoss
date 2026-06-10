@@ -1,0 +1,19 @@
+(defpoly id (params A)
+  (-> A A)
+  (lambda (x A) x))
+
+(defpoly wrap (params A)
+  (-> A (List A))
+  (lambda (x A)
+    (Cons x Nil)))
+
+(def f (-> Nat Nat) id)
+
+(def n Nat
+  (id 4))
+
+(def s String
+  (id "ok"))
+
+(def xs (List Nat)
+  (wrap 1))

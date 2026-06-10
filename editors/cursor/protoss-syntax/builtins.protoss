@@ -10,6 +10,21 @@
 -- n'importe quelle `List (View msg)`.
 
 
+-- Kernel pur ----------------------------------------------------------------
+
+succ : Nat -> Nat
+
+foldNat : Nat -> a -> (a -> a) -> a
+
+foldList : List a -> b -> (a -> b -> b) -> b
+
+foldVariant : variant -> result -> value -> result
+
+caseList : List a -> b -> (a -> List a -> b) -> b
+
+recur : a -> b
+
+
 -- Vue (View msg) ------------------------------------------------------------
 -- Les 8 constructeurs de l'UI déclarative, façon elm-ui.
 

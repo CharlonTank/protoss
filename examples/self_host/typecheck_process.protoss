@@ -1,0 +1,19 @@
+(capabilities Human.ask Clock.read)
+
+(def ready (Process String)
+  (done "ready"))
+
+(def askName (Process String)
+  (Human.ask "Name?"))
+
+(def askThenDone (Process String)
+  (bind askName
+    (lambda (answer String)
+      (done answer))))
+
+(def askViaLet (Process String)
+  (let (p (Human.ask "Name?"))
+    p))
+
+(def readTime (Process String)
+  (Clock.read))

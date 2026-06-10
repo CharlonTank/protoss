@@ -18,6 +18,7 @@ let usage () =
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
      \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
+     \       protoss self typecheck <file> [--json] | type-of <file> --entry <name> | compare-typecheck <file>\n\
      \       protoss self fmt [--check] <file>\n\
      \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check [interface.json]|--json]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
@@ -779,6 +780,17 @@ let command_explain = function
         | "WEB007" -> "view returns a View whose message type does not match update."
         | "PATCH_DEPS" -> "Patch deps must exactly match canonical definition dependencies."
         | "CAPABILITY" -> "Effects require explicit capabilities in the project or source."
+        | "SELF_TC001" -> "Self-hosted typechecker: unknown variable."
+        | "SELF_TC002" -> "Self-hosted typechecker: expected and actual types differ."
+        | "SELF_TC003" -> "Self-hosted typechecker: application target is not a function."
+        | "SELF_TC004" -> "Self-hosted typechecker: construct is outside the supported subset."
+        | "SELF_TC005" -> "Self-hosted typechecker: case branch types differ."
+        | "SELF_TC006" -> "Self-hosted typechecker: record field is missing or unknown."
+        | "SELF_TC007" -> "Self-hosted typechecker: variant constructor or payload is invalid."
+        | "SELF_TC008" -> "Self-hosted typechecker: text parsing failed."
+        | "SELF_TC009" -> "Self-hosted typechecker: case expression is not exhaustive."
+        | "SELF_TC010" -> "Self-hosted typechecker: shared static frontend rejected the declarations."
+        | "SELF_TC011" -> "Self-hosted typechecker: polymorphic instantiation is invalid."
         | _ -> "Unknown error code."
       in
       print_endline msg
@@ -876,6 +888,134 @@ let command_self_static json file =
     | other -> print_endline (Protoss.Runtime.value_to_string other))
   else print_endline (self_string "Protoss.selfStaticText" file)
 
+let json_field name json = Protoss.Json.field name json
+
+let json_string_field name json =
+  match json_field name json with
+  | Some value -> (
+      match Protoss.Json.string value with Some s -> s | None -> "")
+  | None -> ""
+
+let self_typecheck_json file = self_string "Protoss.tcTextJson" file
+
+let self_typecheck_value file = Protoss.Json.parse (self_typecheck_json file)
+
+let command_self_typecheck json file =
+  let text = self_typecheck_json file in
+  if json then (
+    print_endline text;
+    match json_string_field "status" (Protoss.Json.parse text) with
+    | "error" -> exit 1
+    | _ -> ())
+  else
+    let value = Protoss.Json.parse text in
+    match json_string_field "status" value with
+    | "ok" -> print_endline "Self typecheck OK"
+    | "error" ->
+        let msg =
+          match json_field "error" value with
+          | Some err ->
+              let code = json_string_field "code" err in
+              let message = json_string_field "message" err in
+              if String.equal code "" then message else code ^ ": " ^ message
+          | None -> text
+        in
+        print_error "self typecheck error" msg
+    | _ -> print_endline text
+
+let command_self_type_of file entry =
+  let value = self_typecheck_value file in
+  match json_string_field "status" value with
+  | "error" -> print_error "self typecheck error" (self_typecheck_json file)
+  | _ -> (
+      match
+        match json_field "definitions" value with
+        | Some definitions -> Protoss.Json.array definitions
+        | None -> None
+      with
+      | None -> print_error "self type-of error" "missing definitions in self report"
+      | Some defs -> (
+          let rec find = function
+            | [] -> None
+            | def :: rest ->
+                if String.equal (json_string_field "name" def) entry then
+                  Some (json_string_field "type" def)
+                else find rest
+          in
+          match find defs with
+          | Some typ when not (String.equal typ "") -> print_endline typ
+          | _ -> print_error "self type-of error" ("unknown entry: " ^ entry)))
+
+let json_string_array_field name json =
+  match json_field name json with
+  | Some value -> (
+      match Protoss.Json.array value with
+      | Some xs ->
+          List.filter_map
+            (fun item ->
+              match Protoss.Json.string item with Some s -> Some s | None -> None)
+            xs
+      | None -> [])
+  | None -> []
+
+let json_definition_pairs json =
+  let defs =
+    match json_field "definitions" json with
+    | Some value -> ( match Protoss.Json.array value with Some xs -> xs | None -> [] )
+    | None -> []
+  in
+  defs
+  |> List.filter_map (fun def ->
+         let name = json_string_field "name" def in
+         let typ = json_string_field "type" def in
+         if String.equal name "" then None else Some (name, typ))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+let ocaml_declared_definition_pairs file =
+  let program = Protoss.Parser.parse_string (read_source file) in
+  program.defs
+  |> List.filter (fun (def : Protoss.Ast.def) ->
+         def.type_params = [] && Option.is_none def.declared_capabilities)
+  |> List.map (fun (def : Protoss.Ast.def) -> (def.name, Protoss.Ast.string_of_typ def.typ))
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+let render_definition_pairs pairs =
+  pairs
+  |> List.map (fun (name, typ) -> name ^ ":" ^ typ)
+  |> String.concat ","
+
+let command_self_compare_typecheck file =
+  let ocaml_ok =
+    try
+      ignore (parse_and_check file);
+      true
+    with _ -> false
+  in
+  let value = self_typecheck_value file in
+  let self_ok = String.equal (json_string_field "status" value) "ok" in
+  if not (Bool.equal ocaml_ok self_ok) then (
+    prerr_endline
+      ("self compare-typecheck mismatch: ocaml="
+      ^ string_of_bool ocaml_ok ^ " self=" ^ string_of_bool self_ok);
+    exit 1)
+  else if ocaml_ok then
+    let unsupported = json_string_array_field "unsupported" value in
+    if unsupported <> [] then
+      print_endline
+        ("Self typecheck parity OK (unsupported: "
+        ^ String.concat "," unsupported ^ ")")
+    else
+      let ocaml_defs = ocaml_declared_definition_pairs file in
+      let self_defs = json_definition_pairs value in
+      if ocaml_defs = self_defs then print_endline "Self typecheck parity OK"
+      else (
+        prerr_endline
+          ("self compare-typecheck definitions mismatch: ocaml="
+          ^ render_definition_pairs ocaml_defs ^ " self="
+          ^ render_definition_pairs self_defs);
+        exit 1)
+  else print_endline "Self typecheck parity OK"
+
 let command_self = function
   | [ "parse"; file ] -> print_endline (self_string "Protoss.selfParseJson" file)
   | [ "fmt"; "--check"; file ] -> command_self_fmt true file
@@ -887,6 +1027,11 @@ let command_self = function
   | [ "static"; file; "--json" ] | [ "static"; "--json"; file ] ->
       command_self_static true file
   | [ "static"; file ] -> command_self_static false file
+  | [ "typecheck"; file; "--json" ] | [ "typecheck"; "--json"; file ] ->
+      command_self_typecheck true file
+  | [ "typecheck"; file ] -> command_self_typecheck false file
+  | [ "type-of"; file; "--entry"; entry ] -> command_self_type_of file entry
+  | [ "compare-typecheck"; file ] -> command_self_compare_typecheck file
   | _ -> usage ()
 
 let command_bench = function

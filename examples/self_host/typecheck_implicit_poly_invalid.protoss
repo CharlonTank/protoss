@@ -1,0 +1,7 @@
+(defpoly same (params A)
+  (-> A (-> A A))
+  (lambda (x A)
+    (lambda (y A) x)))
+
+(def bad Nat
+  (same 1 true))

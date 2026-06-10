@@ -1,0 +1,2 @@
+(defcap bad (capabilities) Bool
+  1)

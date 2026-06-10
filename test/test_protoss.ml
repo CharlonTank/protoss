@@ -1642,6 +1642,32 @@ let () =
   let bumped, _ = Runtime.normalize_def poly_map_implicit "bumped" in
   assert_equal "defpoly List.map implicit normalization" "[2, 3]"
     (Runtime.value_to_string bumped);
+  let poly_spine_contextual =
+    check
+      "(defpoly countPair (params A) \
+       (-> (List A) (-> (List A) Nat)) \
+       (lambda (xs (List A)) (lambda (ys (List A)) 0)))\n\
+       (def countedSpine Nat ((countPair (Cons 1 Nil)) Nil))"
+  in
+  let poly_spine_contextual_explicit =
+    check
+      "(defpoly countPair (params A) \
+       (-> (List A) (-> (List A) Nat)) \
+       (lambda (xs (List A)) (lambda (ys (List A)) 0)))\n\
+       (def countedSpine Nat \
+       (((inst countPair Nat) (Cons Nat 1 (Nil Nat))) (Nil Nat)))"
+  in
+  assert_equal "defpoly partial spine infers Cons head list item"
+    (Kernel.hash_program poly_spine_contextual_explicit)
+    (Kernel.hash_program poly_spine_contextual);
+  let counted_spine, _ = Runtime.normalize_def poly_spine_contextual "countedSpine" in
+  assert_equal "defpoly partial spine normalizes" "0"
+    (Runtime.value_to_string counted_spine);
+  expect_check_error
+    "(defpoly countPair (params A) \
+       (-> (List A) (-> (List A) Nat)) \
+       (lambda (xs (List A)) (lambda (ys (List A)) 0)))\n\
+     (def bad Nat ((countPair (Cons 1 Nil)) (Cons true Nil)))";
   expect_check_error
     "(defpoly empty (params A) (List A) (Nil A))\n\
      (def bad Nat (let (x empty) 0))";
@@ -5551,6 +5577,401 @@ let () =
     "(record T (a Nat)) (record T (b Nat))" "\"duplicateTypes\":[\"T\"]" false;
   parity "__par_dupfield" "Protoss.selfResolveJson"
     "(record T (a Nat)) (record T (b Nat))" "\"duplicateTypes\":[\"T\"]" false;
+  register "__tc_valid" "String"
+    ("Protoss.tcTextJson " ^ Ast.quote "(def x Nat 1)")
+    (fun got ->
+      assert_true "self typecheck valid reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck valid reports type"
+        (contains_substring got "\"type\":\"Nat\""));
+  register "__tc_invalid" "String"
+    ("Protoss.tcTextJson " ^ Ast.quote "(def bad Bool 1)")
+    (fun got ->
+      assert_true "self typecheck invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\""));
+  let deep_tc_source =
+    "(def main Nat (let (x (succ 1)) (let (y (succ x)) y))) "
+    ^ "(def incLater (-> Nat Nat) (lambda (n Nat) (let (m (succ n)) m))) "
+    ^ "(def nestedArg Nat (succ (succ 1))) "
+    ^ "(def items (List Nat) (Cons Nat (succ 1) (Cons Nat 2 (Nil Nat)))) "
+    ^ "(def folded Nat (foldList items 0 (lambda (x Nat) (lambda (acc Nat) (succ acc))))) "
+    ^ "(def chosen Nat (case true (true (let (z 1) (succ z))) (false 0)))"
+  in
+  register "__tc_deep" "String"
+    ("Protoss.tcTextJson " ^ Ast.quote deep_tc_source)
+    (fun got ->
+      assert_true "self typecheck deep reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck deep reports function type"
+        (contains_substring got "\"name\":\"incLater\"");
+      assert_true "self typecheck deep checks nested app arg"
+        (contains_substring got "\"name\":\"nestedArg\"");
+      assert_true "self typecheck deep has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register "__tc_nested_arg_invalid" "String"
+    ("Protoss.tcTextJson "
+    ^ Ast.quote "(def bad Nat (succ (let (flag true) flag)))")
+    (fun got ->
+      assert_true "self typecheck nested app arg reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck nested app arg reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck nested app arg expected Nat"
+        (contains_substring got "\"expected\":\"Nat\"");
+      assert_true "self typecheck nested app arg actual Bool"
+        (contains_substring got "\"actual\":\"Bool\""));
+  register "__tc_record_field_nested" "String"
+    ("Protoss.tcTextJson "
+    ^ Ast.quote
+        "(record Person (age Nat)) (def main Person (record (age (succ 35))))")
+    (fun got ->
+      assert_true "self typecheck nested record field reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck nested record field has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register "__tc_record_field_nested_invalid" "String"
+    ("Protoss.tcTextJson "
+    ^ Ast.quote
+        "(record Person (age Nat)) (def main Person (record (age (let (flag true) flag))))")
+    (fun got ->
+      assert_true "self typecheck nested record field reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck nested record field reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck nested record field actual Bool"
+        (contains_substring got "\"actual\":\"Bool\""));
+  register "__tc_case_branch_nested_invalid" "String"
+    ("Protoss.tcTextJson "
+    ^ Ast.quote
+        "(def bad Nat (case true (true (let (flag true) flag)) (false 0)))")
+    (fun got ->
+      assert_true "self typecheck nested Bool case branch reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck nested Bool case branch reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck nested Bool case branch expected Nat"
+        (contains_substring got "\"expected\":\"Nat\"");
+      assert_true "self typecheck nested Bool case branch actual Bool"
+        (contains_substring got "\"actual\":\"Bool\"");
+    );
+  let register_self_tc_file name file verify =
+    register name "String"
+      ("Protoss.tcTextJson " ^ Ast.quote (read_all (repo file)))
+      verify
+  in
+  register_self_tc_file "__tc_file_variants"
+    "examples/self_host/typecheck_variants.protoss"
+    (fun got ->
+      assert_true "self typecheck variant case reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck variant case reports selected"
+        (contains_substring got "\"name\":\"selected\"");
+      assert_true "self typecheck variant case has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_variant_invalid"
+    "examples/self_host/typecheck_variant_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck variant case invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck variant case invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\""));
+  register_self_tc_file "__tc_file_variant_missing"
+    "examples/self_host/typecheck_variant_missing_branch.protoss"
+    (fun got ->
+      assert_true "self typecheck variant case missing branch reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck variant case missing branch reports code"
+        (contains_substring got "\"code\":\"SELF_TC009\"");
+      assert_true "self typecheck variant case missing branch reports message"
+        (contains_substring got "variant case missing branch"));
+  register_self_tc_file "__tc_file_variant_unknown"
+    "examples/self_host/typecheck_variant_unknown_branch.protoss"
+    (fun got ->
+      assert_true "self typecheck variant case unknown branch reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck variant case unknown branch reports code"
+        (contains_substring got "\"code\":\"SELF_TC009\"");
+      assert_true "self typecheck variant case unknown branch reports message"
+        (contains_substring got "variant case unknown branch"));
+  register_self_tc_file "__tc_file_fold_variant"
+    "examples/self_host/typecheck_fold_variant.protoss"
+    (fun got ->
+      assert_true "self typecheck foldVariant reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck foldVariant reports main"
+        (contains_substring got "\"name\":\"main\"");
+      assert_true "self typecheck foldVariant has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_fold_variant_invalid"
+    "examples/self_host/typecheck_fold_variant_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck foldVariant invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck foldVariant invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\""));
+  register_self_tc_file "__tc_file_fold_variant_unknown"
+    "examples/self_host/typecheck_fold_variant_unknown_branch.protoss"
+    (fun got ->
+      assert_true "self typecheck foldVariant unknown branch reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck foldVariant unknown branch reports code"
+        (contains_substring got "\"code\":\"SELF_TC009\"");
+      assert_true "self typecheck foldVariant unknown branch reports message"
+        (contains_substring got "variant case unknown branch"));
+  register_self_tc_file "__tc_file_fold_variant_target_invalid"
+    "examples/self_host/typecheck_fold_variant_target_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck foldVariant target reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck foldVariant target reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck foldVariant target reports message"
+        (contains_substring got "foldVariant target must be Variant"));
+  register_self_tc_file "__tc_file_process"
+    "examples/self_host/typecheck_process.protoss"
+    (fun got ->
+      assert_true "self typecheck process reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck process reports bind definition"
+        (contains_substring got "\"name\":\"askThenDone\"");
+      assert_true "self typecheck process reports let definition"
+        (contains_substring got "\"name\":\"askViaLet\"");
+      assert_true "self typecheck process has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_process_bind_invalid"
+    "examples/self_host/typecheck_process_bind_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck process invalid bind reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck process invalid bind reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck process invalid bind reports expected process"
+        (contains_substring got "\"expected\":\"(Process String)\""));
+  register_self_tc_file "__tc_file_process_annotation_invalid"
+    "examples/self_host/typecheck_process_annotation_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck process annotation reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck process annotation reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck process annotation reports expected process Nat"
+        (contains_substring got "\"expected\":\"(Process Nat)\""));
+  register_self_tc_file "__tc_file_process_let_pure_invalid"
+    "examples/self_host/typecheck_process_let_pure_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck process pure let reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck process pure let reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck process pure let reports message"
+        (contains_substring got "Process used as pure value in let p"));
+  register_self_tc_file "__tc_file_defcap"
+    "examples/self_host/typecheck_defcap.protoss"
+    (fun got ->
+      assert_true "self typecheck defcap reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck defcap reports scoped definition"
+        (contains_substring got "\"name\":\"askAgain\"");
+      assert_true "self typecheck defcap has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_defcap_invalid"
+    "examples/self_host/typecheck_defcap_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck defcap invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck defcap invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\""));
+  register_self_tc_file "__tc_file_defcap_capability_invalid"
+    "examples/self_host/typecheck_defcap_capability_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck defcap capability reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck defcap capability reports static error"
+        (contains_substring got "\"code\":\"SELF_TC010\"");
+      assert_true "self typecheck defcap capability reports missing declaration"
+        (contains_substring got "missing capability declaration"));
+  register_self_tc_file "__tc_file_inst"
+    "examples/self_host/typecheck_inst.protoss"
+    (fun got ->
+      assert_true "self typecheck inst reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck inst reports monomorphic main"
+        (contains_substring got "\"name\":\"main\"");
+      assert_true "self typecheck inst substitutes nested list type"
+        (contains_substring got "\"type\":\"(List String)\"");
+      assert_true "self typecheck inst has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly"
+    "examples/self_host/typecheck_implicit_poly.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly reports contextual function"
+        (contains_substring got "\"name\":\"f\"");
+      assert_true "self typecheck implicit poly reports Nat application"
+        (contains_substring got "\"name\":\"n\"");
+      assert_true "self typecheck implicit poly reports List result"
+        (contains_substring got "\"type\":\"(List Nat)\"");
+      assert_true "self typecheck implicit poly has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_contextual_direct"
+    "examples/self_host/typecheck_implicit_poly_contextual_args_direct.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly contextual direct reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly contextual direct reports counted"
+        (contains_substring got "\"name\":\"countedDirect\"");
+      assert_true "self typecheck implicit poly contextual direct has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_contextual_nil"
+    "examples/self_host/typecheck_implicit_poly_contextual_args_nil.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly contextual Nil reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly contextual Nil reports counted"
+        (contains_substring got "\"name\":\"countedNil\"");
+      assert_true "self typecheck implicit poly contextual Nil has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_invalid"
+    "examples/self_host/typecheck_implicit_poly_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck implicit poly invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck implicit poly invalid reports Bool actual"
+        (contains_substring got "\"actual\":\"Bool\""));
+  register_self_tc_file "__tc_file_implicit_poly_spine"
+    "examples/self_host/typecheck_implicit_poly_spine.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly spine reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly spine reports picked"
+        (contains_substring got "\"name\":\"picked\"");
+      assert_true "self typecheck implicit poly spine checks expected suffix Nil"
+        (contains_substring got "\"name\":\"keptEmpty\"");
+      assert_true "self typecheck implicit poly spine checks expected prefix Nil"
+        (contains_substring got "\"name\":\"keptPrefixEmpty\"");
+      assert_true "self typecheck implicit poly spine reports mapped list"
+        (contains_substring got "\"name\":\"sameWords\"");
+      assert_true "self typecheck implicit poly spine has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_spine_prefix_cons"
+    "examples/self_host/typecheck_implicit_poly_spine_prefix_cons.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly spine prefix Cons reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly spine prefix Cons reports definition"
+        (contains_substring got "\"name\":\"keptPrefixCons\"");
+      assert_true "self typecheck implicit poly spine prefix Cons has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_spine_contextual_args"
+    "examples/self_host/typecheck_implicit_poly_spine_contextual_args.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly spine contextual args reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly spine contextual args reports definition"
+        (contains_substring got "\"name\":\"countedSpine\"");
+      assert_true "self typecheck implicit poly spine contextual args has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_spine_contextual_typed_tail"
+    "examples/self_host/typecheck_implicit_poly_spine_contextual_typed_tail.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly spine contextual typed tail reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck implicit poly spine contextual typed tail reports definition"
+        (contains_substring got "\"name\":\"countedTypedTail\"");
+      assert_true
+        "self typecheck implicit poly spine contextual typed tail has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_implicit_poly_spine_invalid"
+    "examples/self_host/typecheck_implicit_poly_spine_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly spine invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck implicit poly spine invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck implicit poly spine invalid reports definition"
+        (contains_substring got "\"definition\":\"badList\"");
+      assert_true "self typecheck implicit poly spine invalid reports Bool actual"
+        (contains_substring got "\"actual\":\"Bool\""));
+  register_self_tc_file "__tc_file_implicit_poly_spine_prefix_invalid"
+    "examples/self_host/typecheck_implicit_poly_spine_prefix_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck implicit poly spine prefix invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck implicit poly spine prefix invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck implicit poly spine prefix invalid reports definition"
+        (contains_substring got "\"definition\":\"badPrefixList\""));
+  register_self_tc_file "__tc_file_inst_wrong_arity"
+    "examples/self_host/typecheck_inst_wrong_arity.protoss"
+    (fun got ->
+      assert_true "self typecheck inst wrong arity reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck inst wrong arity reports inst code"
+        (contains_substring got "\"code\":\"SELF_TC011\"");
+      assert_true "self typecheck inst wrong arity reports message"
+        (contains_substring got "wrong number of type arguments"));
+  register_self_tc_file "__tc_file_defpoly_invalid"
+    "examples/self_host/typecheck_defpoly_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck defpoly invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck defpoly invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck defpoly invalid reports body actual"
+        (contains_substring got "\"actual\":\"Nat\""));
+  register_self_tc_file "__tc_file_defpolycap"
+    "examples/self_host/typecheck_defpolycap.protoss"
+    (fun got ->
+      assert_true "self typecheck defpolycap reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck defpolycap reports main"
+        (contains_substring got "\"name\":\"main\"");
+      assert_true "self typecheck defpolycap has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_inferred_variants"
+    "examples/self_host/typecheck_inferred_variants.protoss"
+    (fun got ->
+      assert_true "self typecheck inferred variants reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck inferred variants checks parameterized record"
+        (contains_substring got "\"name\":\"boxed\"");
+      assert_true "self typecheck inferred variants checks expected list"
+        (contains_substring got "\"type\":\"(List (Maybe Nat))\"");
+      assert_true "self typecheck inferred variants has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_inferred_variant_unknown"
+    "examples/self_host/typecheck_inferred_variant_unknown.protoss"
+    (fun got ->
+      assert_true "self typecheck inferred variant unknown reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck inferred variant unknown reports code"
+        (contains_substring got "\"code\":\"SELF_TC007\"");
+      assert_true "self typecheck inferred variant unknown reports constructor"
+        (contains_substring got "unknown variant constructor: Nope"));
+  register_self_tc_file "__tc_file_inferred_variant_payload_invalid"
+    "examples/self_host/typecheck_inferred_variant_payload_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck inferred variant payload reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck inferred variant payload reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck inferred variant payload reports Bool"
+        (contains_substring got "\"actual\":\"Bool\""));
+  register "__tc_nested_invalid" "String"
+    ("Protoss.tcTextJson "
+    ^ Ast.quote "(def bad Nat (let (flag true) (succ flag)))")
+    (fun got ->
+      assert_true "self typecheck nested invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck nested invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck nested invalid reports Bool actual"
+        (contains_substring got "\"actual\":\"Bool\""));
   (* duplicate record field: the self-hosted frontend rejects it (parse-level
      diagnostic), mirroring the OCaml frontend. *)
   register "__par_dupfield2" "String"

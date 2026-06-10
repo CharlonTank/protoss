@@ -1,0 +1,11 @@
+(variant MaybeNat
+  (None Unit)
+  (Some Nat))
+
+(def main MaybeNat
+  (variant MaybeNat Some 1))
+
+(def selected Nat
+  (case main
+    (None 0)
+    (Some x (succ x))))

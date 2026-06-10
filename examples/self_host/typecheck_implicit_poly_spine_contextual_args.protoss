@@ -1,0 +1,7 @@
+(defpoly countPair (params A)
+  (-> (List A) (-> (List A) Nat))
+  (lambda (xs (List A))
+    (lambda (ys (List A)) 0)))
+
+(def countedSpine Nat
+  ((countPair (Cons 1 Nil)) Nil))

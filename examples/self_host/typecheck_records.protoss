@@ -1,0 +1,8 @@
+(record Person
+  (name String)
+  (age Nat))
+
+(def main Person
+  (record
+    (name "Ada")
+    (age (succ 35))))

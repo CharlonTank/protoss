@@ -1,0 +1,26 @@
+(def main Nat
+  (let (x (succ 1))
+    (let (y (succ x))
+      y)))
+
+(def incLater (-> Nat Nat)
+  (lambda (n Nat)
+    (let (m (succ n))
+      m)))
+
+(def nestedArg Nat
+  (succ (succ 1)))
+
+(def items (List Nat)
+  (Cons Nat (succ 1) (Cons Nat 2 (Nil Nat))))
+
+(def folded Nat
+  (foldList items 0
+    (lambda (x Nat)
+      (lambda (acc Nat)
+        (succ acc)))))
+
+(def chosen Nat
+  (case true
+    (true (let (z 1) (succ z)))
+    (false 0)))

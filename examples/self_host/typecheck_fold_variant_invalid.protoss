@@ -1,0 +1,11 @@
+(variant MaybeNat
+  (None Unit)
+  (Some Nat))
+
+(def value MaybeNat
+  (variant MaybeNat Some 1))
+
+(def bad Nat
+  (foldVariant MaybeNat Nat value
+    (None 0)
+    (Some x true)))

@@ -1,0 +1,10 @@
+(variant MaybeNat
+  (None Unit)
+  (Some Nat))
+
+(def value MaybeNat
+  (variant MaybeNat Some 1))
+
+(def bad Nat
+  (case value
+    (Some x x)))

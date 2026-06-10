@@ -1,0 +1,6 @@
+(variant Maybe (params A)
+  (None Unit)
+  (Some A))
+
+(def bad (Maybe Nat)
+  (variant Some true))
