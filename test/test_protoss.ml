@@ -3232,6 +3232,15 @@ let () =
   let pv, _ = Runtime.eval_entry process "askName" in
   assert_true "process should suspend"
     (match pv with Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true | _ -> false);
+  let human_process =
+    check "capabilities Human.ask\naskName : Process String\naskName = Human.ask \"Name?\"\n"
+  in
+  let human_pv, _ = Runtime.eval_entry human_process "askName" in
+  assert_true "human capabilities declaration should allow process request"
+    (match human_pv with
+    | Runtime.VProcessRequest { Runtime.req = Ast.AskHuman "Name?"; _ } -> true
+    | _ -> false);
+  expect_check_error "askName : Process String\naskName = Human.ask \"Name?\"\n";
   let defcap_process =
     check
       "(capabilities Human.ask)\n\
