@@ -23,6 +23,8 @@ name/version or advertised policy before resolving to the locked package hash.
 `Kernel.executable_grammar_text` when adding core forms.
 `Store.put_object` interns through `PROTOSS_GLOBAL_STORE` or `$HOME/.protoss/global-store` and
 hardlinks project objects to that global payload when possible; preserve content-addressed writes.
+Patch audits carry `previous-root`/`root-ref` and write native `store/provenance` root-state plus
+patch-provenance records; latest patch verification must keep program hash and root state aligned.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

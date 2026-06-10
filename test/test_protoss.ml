@@ -4051,6 +4051,18 @@ let () =
     Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
   in
   let patch_latest_path store = Filename.concat (Filename.concat store "patches") "latest" in
+  let patch_provenance_dir store = Filename.concat store "provenance" in
+  let patch_root_path store ref =
+    Filename.concat (Filename.concat (patch_provenance_dir store) "roots") (ref ^ ".root")
+  in
+  let patch_latest_root_path store = Filename.concat (patch_provenance_dir store) "latest-root" in
+  let patch_latest_provenance_path store =
+    Filename.concat (patch_provenance_dir store) "latest-patch"
+  in
+  let patch_provenance_path store ref =
+    Filename.concat (Filename.concat (patch_provenance_dir store) "patches")
+      (ref ^ ".provenance")
+  in
   let patch_ok_ref = Patch.apply store patch_ok in
   assert_true "valid patch writes object" (count_objects store > 0);
   let patch_gc_clean = Store.gc store in
@@ -4072,6 +4084,9 @@ let () =
     (contains_substring patch_ok_audit "protoss-patch-audit-v1");
   assert_true "patch audit records source hash" (contains_substring patch_ok_audit "source-hash=p2:");
   assert_true "patch audit records program hash" (contains_substring patch_ok_audit "program-hash=p2:");
+  assert_true "patch audit records root ref" (contains_substring patch_ok_audit "root-ref=p2:");
+  assert_true "first patch audit has no previous root"
+    (contains_substring patch_ok_audit "previous-root=none");
   assert_true "patch audit records operation"
     (contains_substring patch_ok_audit "op=1 kind=AddDef name=two target=two");
   assert_true "first patch audit has no previous ref"
@@ -4079,8 +4094,21 @@ let () =
   let verified_patch_ok = Patch.verify_audit store in
   assert_equal "patch audit verify latest ref" patch_ok_ref verified_patch_ok.Patch.audit_ref;
   assert_equal "patch audit verify ops" "1" (string_of_int verified_patch_ok.Patch.ops);
+  assert_true "patch audit verify root ref"
+    (contains_substring verified_patch_ok.Patch.root_ref "p2:");
+  assert_equal "patch audit verify first previous root" "none"
+    (match verified_patch_ok.Patch.previous_root with Some root -> root | None -> "none");
   assert_true "patch audit verify source hash"
     (contains_substring verified_patch_ok.Patch.source_hash "p2:");
+  assert_true "patch root state file exists"
+    (Sys.file_exists (patch_root_path store verified_patch_ok.Patch.root_ref));
+  assert_equal "patch latest root pointer" verified_patch_ok.Patch.root_ref
+    (String.trim (Store.read_file (patch_latest_root_path store)));
+  let patch_provenance_ref = String.trim (Store.read_file (patch_latest_provenance_path store)) in
+  let patch_provenance = Store.read_file (patch_provenance_path store patch_provenance_ref) in
+  assert_true "patch provenance links audit and root"
+    (contains_substring patch_provenance ("patch-ref=" ^ patch_ok_ref)
+    && contains_substring patch_provenance ("root-ref=" ^ verified_patch_ok.Patch.root_ref));
   let verified_latest_patch_ok = Patch.verify_latest_matches_store store in
   assert_equal "patch audit latest matches store" patch_ok_ref
     verified_latest_patch_ok.Patch.audit_ref;
@@ -4100,10 +4128,22 @@ let () =
   let chain_audit = Store.read_file (patch_audit_path store chain_ref) in
   assert_true "second patch audit links previous"
     (contains_substring chain_audit ("previous-ref=" ^ patch_ok_ref));
+  assert_true "second patch audit links previous root"
+    (contains_substring chain_audit ("previous-root=" ^ verified_patch_ok.Patch.root_ref));
   assert_equal "patch audit latest pointer moves" chain_ref
     (String.trim (Store.read_file (patch_latest_path store)));
   assert_equal "patch audit chain latest matches store" chain_ref
     (Patch.verify_latest_matches_store store).Patch.audit_ref;
+  let stale_root_pointer_store = temp_dir "patch-audit-stale-root" in
+  let stale_root_ref = Patch.apply stale_root_pointer_store patch_ok in
+  ignore stale_root_ref;
+  Store.write_file_atomic (patch_latest_root_path stale_root_pointer_store) "p2:bad-root\n";
+  (try
+     ignore (Patch.inspect_audit stale_root_pointer_store);
+     fail "stale patch root pointer should reject latest audit"
+   with Patch.Error msg ->
+     assert_true "stale patch root pointer detects mismatch"
+       (contains_substring msg "patch latest root mismatch"));
   let stale_latest_store = temp_dir "patch-audit-stale-latest" in
   let stale_first = Patch.apply stale_latest_store patch_ok in
   let stale_second = Patch.apply stale_latest_store chain_replace_patch in

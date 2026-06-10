@@ -73,7 +73,11 @@ Preuves de section: `lib/ast.ml`, `lib/kernel.ml`, `lib/canonical_ir.ml`,
   "global store project ... hardlink inode" dans `test/test_protoss.ml`,
   `README.md`.
 - [x] Exposer une commande de comparaison semantique entre deux roots.
-- [ ] Ajouter une provenance native liee aux roots et patches.
+- [x] Ajouter une provenance native liee aux roots et patches.
+  Preuves: `Patch_audit.root_state_of_checked`, `write_root_state`,
+  `write_patch_provenance`, champs `previous-root`/`root-ref` des audits,
+  assertions "patch provenance links audit and root" et "second patch audit
+  links previous root" dans `test/test_protoss.ml`, `README.md`.
 
 ## 2. Noms, extensions et formats officiels
 
