@@ -3991,6 +3991,11 @@ let () =
     patch_file "protoss-add-two.json"
       "{ \"op\":\"AddDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":[\"succ\",1] }"
   in
+  let patch_ok_review = Patch.review_text patch_ok in
+  assert_true "patch review header" (contains_substring patch_ok_review "Patch review");
+  assert_true "patch review operation" (contains_substring patch_ok_review "op 1: AddDef");
+  assert_true "patch review name" (contains_substring patch_ok_review "name: two");
+  assert_true "patch review type" (contains_substring patch_ok_review "type: Nat");
   let patch_audit_path store ref =
     Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
   in

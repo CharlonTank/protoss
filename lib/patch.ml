@@ -285,6 +285,41 @@ let parse_file path =
 let parse_ops_file path =
   try parse_ops_json (read_file path) with Error msg -> fail (locate path msg)
 
+let review_list xs = "[" ^ String.concat ", " xs ^ "]"
+
+let indent_text prefix s =
+  s |> String.split_on_char '\n' |> List.map (fun line -> prefix ^ line) |> String.concat "\n"
+
+let review_def_sources patch =
+  match patch.def with
+  | None -> []
+  | Some d ->
+      let typ =
+        match patch.sources.type_source with Some source -> source | None -> string_of_typ d.typ
+      in
+      let expr =
+        match patch.sources.expr_source with Some source -> source | None -> string_of_expr d.body
+      in
+      [ "  type: " ^ typ; "  expr:"; indent_text "    " expr ]
+
+let review_patch index patch =
+  [
+    "op " ^ string_of_int index ^ ": " ^ op_to_string patch.op;
+    "  name: " ^ patch.name;
+  ]
+  @ (match patch.new_name with Some name -> [ "  newName: " ^ name ] | None -> [])
+  @ [
+      "  deps: " ^ review_list patch.dependencies;
+      "  capabilities: " ^ review_list patch.capabilities;
+    ]
+  @ review_def_sources patch
+
+let review_text path =
+  let patches = parse_ops_file path in
+  "Patch review\nops: " ^ string_of_int (List.length patches) ^ "\n"
+  ^ String.concat "\n" (List.mapi (fun i patch -> review_patch (i + 1) patch |> String.concat "\n") patches)
+  ^ "\n"
+
 let def_by_name (defs : def list) name =
   List.find_opt (fun (d : def) -> String.equal d.name name) defs
 

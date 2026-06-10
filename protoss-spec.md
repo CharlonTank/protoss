@@ -409,7 +409,9 @@ listees dans la section "Gates de validation".
   Preuves: `diff --json` expose `affected.definitions` et
   `affected.harnesses`; les harnesses restent une surface vide stable tant que
   le systeme de harness de la section 12 n'existe pas.
-- [ ] Ajouter vue review humaine pour patches structurels.
+- [x] Ajouter vue review humaine pour patches structurels.
+  Preuves: `Patch.review_text`, commande `protoss patch review <patch.json>`,
+  assertion "patch review operation" dans `test/test_protoss.ml` et `README.md`.
 - [ ] Mapper `Git commit -> UniverseRoot`.
 - [ ] Mapper `Git branch -> Universe branch`.
 - [ ] Mapper `Git blame -> provenance ledger`.
