@@ -4361,6 +4361,18 @@ let () =
   let agent_committed_two, _ = Runtime.normalize_def agent_committed "two" in
   assert_equal "agent commit applies validated patch" "2"
     (Runtime.value_to_string agent_committed_two);
+  let agent_test_synthesis = Json.parse (Agent_protocol.synthesize_tests_json agent_committed) in
+  assert_equal "agent test synthesis format" "protoss-agent-test-synthesis-v1"
+    (json_string_field "format" agent_test_synthesis);
+  let agent_test_suggestions = json_array_field "suggestions" agent_test_synthesis in
+  assert_true "agent test synthesis suggests normalization harness"
+    (List.exists
+       (fun suggestion ->
+         String.equal (json_string_field "name" suggestion) "two"
+         && String.equal (json_string_field "kind" suggestion) "normalization"
+         && contains_substring (json_string_field "harnessTemplate" suggestion)
+              "harness two_normalizes = unit two")
+       agent_test_suggestions);
 
   let factor_store = temp_dir "factor-identical" in
   let factor_seed =

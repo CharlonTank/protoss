@@ -15,6 +15,8 @@ let factor_format = "protoss-factor-identical-v1"
 
 let candidate_comparison_format = "protoss-agent-candidate-comparison-v1"
 
+let test_synthesis_format = "protoss-agent-test-synthesis-v1"
+
 let json_string_list xs = Kernel.json_array Kernel.json_string xs
 
 let sort_uniq_strings xs = List.sort_uniq String.compare xs
@@ -397,6 +399,63 @@ let compare_candidates_json store patch_left patch_right =
       Kernel.json_field "reason" (Kernel.json_string reason);
       Kernel.json_field "requiresHarness" (Kernel.json_bool requires_harness);
       Kernel.json_field "candidates" (Kernel.json_array candidate_json [ left; right ]);
+    ]
+  ^ "\n"
+
+let harness_name name suffix =
+  let b = Buffer.create (String.length name + String.length suffix + 1) in
+  String.iter
+    (function
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' as c -> Buffer.add_char b c
+      | _ -> Buffer.add_char b '_')
+    name;
+  Buffer.add_char b '_';
+  Buffer.add_string b suffix;
+  Buffer.contents b
+
+let rec suggested_test_kind = function
+  | Ast.TProcess _ -> "process-ledger"
+  | Ast.TFun _ -> "example-call"
+  | Ast.TForall (_, t) -> suggested_test_kind t
+  | _ -> "normalization"
+
+let suggested_harness_template name typ =
+  match suggested_test_kind typ with
+  | "process-ledger" -> "harness " ^ harness_name name "process" ^ " = scenario " ^ name
+  | "example-call" -> "harness " ^ harness_name name "example" ^ " = example " ^ name ^ " (...)"
+  | _ -> "harness " ^ harness_name name "normalizes" ^ " = unit " ^ name
+
+let test_suggestion_json (d : Kernel.checked_def) =
+  let type_canonical = Kernel.type_to_canonical d.Kernel.def.typ in
+  Kernel.json_obj
+    [
+      Kernel.json_field "name" (Kernel.json_string d.def.name);
+      Kernel.json_field "defId" (Kernel.json_string d.def_id);
+      Kernel.json_field "typeCanonical" (Kernel.json_string type_canonical);
+      Kernel.json_field "kind" (Kernel.json_string (suggested_test_kind d.def.typ));
+      Kernel.json_field "harnessTemplate"
+        (Kernel.json_string (suggested_harness_template d.def.name d.def.typ));
+      Kernel.json_field "reason"
+        (Kernel.json_string "definition is public to the checked program graph");
+    ]
+
+let synthesize_tests_json checked =
+  let defs =
+    checked.Kernel.defs
+    |> List.sort
+         (fun (a : Kernel.checked_def) (b : Kernel.checked_def) ->
+           String.compare a.Kernel.def.name b.Kernel.def.name)
+  in
+  Kernel.json_obj
+    [
+      Kernel.json_field "format" (Kernel.json_string test_synthesis_format);
+      Kernel.json_field "protocol" (Kernel.json_string format);
+      Kernel.json_field "stage" (Kernel.json_string "Harness");
+      Kernel.json_field "programHash" (Kernel.json_string (Kernel.hash_program checked));
+      Kernel.json_field "suggestionCount" (string_of_int (List.length defs));
+      Kernel.json_field "suggestions" (Kernel.json_array test_suggestion_json defs);
+      Kernel.json_field "nextCommand"
+        (Kernel.json_string "protoss harness run <store> <harness.pth>");
     ]
   ^ "\n"
 
