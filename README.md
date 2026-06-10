@@ -41,6 +41,7 @@ What works now:
 - Patch diagnostics include patch file paths, JSON syntax `line:column` locations, the failing operation number, operation kind, definition name, field context, and embedded `expr.source` line/column when kernel type errors can be mapped back to that source. Successful `patch apply` writes a deterministic content-addressed audit file under `store/patches/<patch-ref>.patch`, links it to the previous audit with `previous-ref`, and updates `store/patches/latest`; `patch audit` verifies and prints that chain, and the default `latest` audit must match the current store program hash. Project `audit` also verifies the latest patch audit when present. Rejected patches do not write audit artifacts.
 - `invariants` runs executable checks over canonicalization, graph round-trip, graph-first loading, canonical graph migration, normalization, alpha-stability, typed `Process` resume, and typed ledger request/resume events.
 - `invariants package <project>` checks package lock consistency, package descriptor freshness, package interface refs, package interface JSON artifacts, exported capability descriptors, `contractHash`, exported canonical type hashes, imported package freshness, package refs, and audit.
+- The core test suite includes preservation/progression-style fixtures: well-typed pure definitions in `examples/preservation_progression.protoss` normalize to values matching their declared types, while paired type-error and recursion-error fixtures are rejected before evaluation.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 - `dune runtest` runs a fast smoke suite for parser/checker/hash/normalization/cache/process/patch rollback. Longer suites are explicit: `dune build @coretest`, `dune build @integrationtest`, `dune build @stdlibtest`, `dune build @selftest`, or `dune build @fulltest` (aggregates the per-section aliases — the whole workspace part plus the three web slices `@integrationtest-web-app`/`-patches`/`-audit` — and runs them as parallel processes; per-slice workspace aliases `@integrationtest-workspace-project`/`-consumer`/`-corruption` remain for targeted reruns). Test rules declare their fixture dependencies, so plain `dune build @fulltest` without `--force` is correct and a no-op when nothing changed.
 
@@ -168,6 +169,7 @@ dune exec protoss -- check examples/polymorphic_defs.protoss
 dune exec protoss -- check examples/polymorphic_inference.protoss
 dune exec protoss -- check examples/polymorphic_structural_recursion.protoss
 dune exec protoss -- check examples/inferred_lambdas.protoss
+dune exec protoss -- check examples/preservation_progression.protoss
 dune exec protoss -- check examples/list_case.protoss
 dune exec protoss -- check examples/pattern_match.protoss
 dune exec protoss -- check examples/record_destructure.protoss

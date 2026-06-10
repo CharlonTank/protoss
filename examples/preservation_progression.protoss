@@ -1,0 +1,26 @@
+(def two Nat (succ 1))
+
+(def flag Bool
+  (case true
+    (true false)
+    (false true)))
+
+(def label String "ok")
+
+(def pair (Record (count Nat) (label String))
+  (record
+    (count two)
+    (label label)))
+
+(def nums (List Nat)
+  (Cons Nat two
+    (Cons Nat 4
+      (Nil Nat))))
+
+(def choice (Variant (None Unit) (Some Nat))
+  (variant (Variant (None Unit) (Some Nat)) Some two))
+
+(def inc (-> Nat Nat)
+  (lambda (x Nat) (succ x)))
+
+(def applied Nat (inc 4))

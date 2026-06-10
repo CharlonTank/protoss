@@ -261,6 +261,45 @@ let graph_def graph name =
   | Some def -> def
   | None -> fail ("missing graph def: " ^ name)
 
+let rec runtime_value_matches_type value typ =
+  match (value, typ) with
+  | Runtime.VUnit, Ast.TUnit -> true
+  | Runtime.VBool _, Ast.TBool -> true
+  | Runtime.VNat _, Ast.TNat -> true
+  | Runtime.VString _, Ast.TString -> true
+  | Runtime.VClosure _, Ast.TFun _ -> true
+  | Runtime.VList (item_ty, items), Ast.TList expected_item_ty ->
+      Ast.equal_typ item_ty expected_item_ty
+      && List.for_all
+           (fun item -> runtime_value_matches_type item expected_item_ty)
+           items
+  | Runtime.VRecord actual_fields, Ast.TRecord expected_fields ->
+      let actual_fields = Ast.sort_fields actual_fields in
+      let expected_fields = Ast.sort_fields expected_fields in
+      List.length actual_fields = List.length expected_fields
+      && List.for_all2
+           (fun (actual_name, value) (expected_name, typ) ->
+             String.equal actual_name expected_name && runtime_value_matches_type value typ)
+           actual_fields expected_fields
+  | Runtime.VVariant (actual_ty, con, payload), Ast.TVariant expected_cases ->
+      Ast.equal_typ actual_ty typ
+      && (match List.assoc_opt con expected_cases with
+         | Some payload_ty -> runtime_value_matches_type payload payload_ty
+         | None -> false)
+  | Runtime.VView _, Ast.TView _ -> true
+  | Runtime.VAttribute _, Ast.TAttr _ -> true
+  | Runtime.VProcessDone value, Ast.TProcess typ -> runtime_value_matches_type value typ
+  | Runtime.VProcessRequest _, Ast.TProcess _ -> true
+  | _ -> false
+
+let assert_normalized_value_preserves_declared_type checked name =
+  let def = checked_def checked name in
+  let value, _ = Runtime.normalize_def checked name in
+  assert_true
+    ("normalized value for " ^ name ^ " matches declared type "
+    ^ Ast.string_of_typ def.Kernel.def.typ ^ ", got " ^ Runtime.value_to_string value)
+    (runtime_value_matches_type value def.Kernel.def.typ)
+
 let temp_dir name =
   let root =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -355,6 +394,15 @@ let () =
   let basic_pt_path = find_up (Sys.getcwd ()) "examples/basic.pt" in
   let basic_ptc_path = find_up (Sys.getcwd ()) "examples/basic.ptc" in
   let basic_ptb_path = find_up (Sys.getcwd ()) "examples/basic.ptb" in
+  let preservation_progression_path =
+    find_up (Sys.getcwd ()) "examples/preservation_progression.protoss"
+  in
+  let preservation_progression_type_error_path =
+    find_up (Sys.getcwd ()) "examples/preservation_progression_type_error.protoss"
+  in
+  let preservation_progression_recursion_error_path =
+    find_up (Sys.getcwd ()) "examples/preservation_progression_recursion_error.protoss"
+  in
   let basic_protoss = Loader.check_file basic_protoss_path in
   let basic_pt = Loader.check_file basic_pt_path in
   assert_equal ".pt source hashes as .protoss source" (Kernel.hash_program basic_protoss)
@@ -374,6 +422,20 @@ let () =
   let basic_pt_projection = Ast.string_of_program basic_protoss.Kernel.program in
   assert_equal ".pt projection parses with same hash" (Kernel.hash_program basic_protoss)
     (Kernel.hash_program (check basic_pt_projection));
+  let preservation_progression =
+    Loader.check_file preservation_progression_path
+  in
+  List.iter
+    (assert_normalized_value_preserves_declared_type preservation_progression)
+    [ "two"; "flag"; "label"; "pair"; "nums"; "choice"; "inc"; "applied" ];
+  (try
+     ignore (Loader.check_file preservation_progression_type_error_path);
+     fail "preservation/progression type-error fixture should be rejected"
+   with Loader.Error _ -> ());
+  (try
+     ignore (Loader.check_file preservation_progression_recursion_error_path);
+     fail "preservation/progression recursion fixture should be rejected"
+   with Loader.Error _ -> ());
   let elm_like = Loader.check_file elm_like_path in
   let elm_like_equiv = Loader.check_file elm_like_equiv_path in
   assert_equal "Elm-like surface hashes as S-expression surface"

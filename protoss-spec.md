@@ -140,7 +140,10 @@ listees dans la section "Gates de validation".
 - [ ] Supporter tailles statiques pour terminaison.
 - [ ] Supporter coinduction productive.
 - [ ] Supporter automates explicitement productifs.
-- [ ] Ajouter des tests de preservation/progression approximatifs par fixtures.
+- [x] Ajouter des tests de preservation/progression approximatifs par fixtures.
+  Preuves: `examples/preservation_progression*.protoss`,
+  `test/test_protoss.ml` helper
+  `assert_normalized_value_preserves_declared_type` et `README.md`.
 - [x] Ajouter une commande d'explication de terminaison par definition.
   Preuves: `protoss termination <file> <definition>`, `test/test_protoss.ml`
   assertion "termination explanation" et `README.md`.
