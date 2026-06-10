@@ -4021,6 +4021,17 @@ let () =
   let patch_latest_path store = Filename.concat (Filename.concat store "patches") "latest" in
   let patch_ok_ref = Patch.apply store patch_ok in
   assert_true "valid patch writes object" (count_objects store > 0);
+  let patch_gc_clean = Store.gc store in
+  assert_true "store gc keeps live patch object" (patch_gc_clean.Store.unreachable = []);
+  let garbage_object = Store.put_object store "test" "garbage" in
+  let patch_gc_dirty = Store.gc store in
+  assert_true "store gc reports unreachable object"
+    (List.exists (String.equal garbage_object) patch_gc_dirty.Store.unreachable);
+  let patch_gc_sweep = Store.gc ~delete:true store in
+  assert_true "store gc deletes unreachable object"
+    (List.exists (String.equal garbage_object) patch_gc_sweep.Store.deleted);
+  assert_true "store gc leaves deleted object absent"
+    (not (Sys.file_exists (Store.object_path store garbage_object)));
   assert_true "valid patch writes audit ref" (Sys.file_exists (patch_audit_path store patch_ok_ref));
   assert_equal "valid patch latest pointer" patch_ok_ref
     (String.trim (Store.read_file (patch_latest_path store)));

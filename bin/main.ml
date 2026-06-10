@@ -55,7 +55,7 @@ let usage () =
      \       protoss explain <error-code>|--list\n\
      \       protoss bench build <project>\n\
      \       protoss cache stats|list <dir>\n\
-     \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats [args]";
+     \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats|gc [args]";
   exit 2
 
 let parse_and_check file =
@@ -547,6 +547,9 @@ let command_store = function
   | [ "stats"; root ] ->
       let objects, defs, canonical = Protoss.Store.stats root in
       Printf.printf "objects=%d\ndefs=%d\ncanonical=%d\n" objects defs canonical
+  | [ "gc"; root ] -> print_string (Protoss.Store.gc_report (Protoss.Store.gc root))
+  | [ "gc"; "--sweep"; "--yes"; root ] ->
+      print_string (Protoss.Store.gc_report (Protoss.Store.gc ~delete:true root))
   | _ -> usage ()
 
 let command_cache = function

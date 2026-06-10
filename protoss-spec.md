@@ -210,7 +210,10 @@ listees dans la section "Gates de validation".
   `README.md`.
 - [ ] Ajouter verification cryptographique optionnelle des evenements signes.
 - [ ] Lier le ledger de provenance des patches au ledger monde.
-- [ ] Ajouter politiques de retention et garbage collection content-addressed.
+- [x] Ajouter politiques de retention et garbage collection content-addressed.
+  Preuves: `Store.gc`, commande `protoss store gc [--sweep --yes]`,
+  assertions "store gc reports unreachable object" dans `test/test_protoss.ml`
+  et `README.md`.
 
 ## 9. Capabilities et secrets
 

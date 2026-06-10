@@ -121,15 +121,25 @@ let def_path root name = Filename.concat (defs_dir root) (sanitize_name name ^ "
 
 let canonical_path root name = Filename.concat (canonical_dir root) (sanitize_name name ^ ".canon")
 
+let normal_dir root = Filename.concat root "normal"
+
+let normal_path root name = Filename.concat (normal_dir root) (sanitize_name name ^ ".nf")
+
 let remove_if_exists path = if Sys.file_exists path then Sys.remove path
+
+let trim_file path = String.trim (read_file path)
+
+let def_object_content d canonical normal =
+  "name=" ^ d.name ^ "\ntype=" ^ string_of_typ d.typ ^ "\ncanonical=" ^ canonical
+  ^ "\nnormal=" ^ normal ^ "\n"
+
+let def_object_hash d canonical normal =
+  Hashcons.hash ("kind=def\n" ^ def_object_content d canonical normal)
 
 let write_def root d canonical normal =
   ensure_store root;
   let source = string_of_def d ^ "\n" in
-  let object_content =
-    "name=" ^ d.name ^ "\ntype=" ^ string_of_typ d.typ ^ "\ncanonical=" ^ canonical
-    ^ "\nnormal=" ^ normal ^ "\n"
-  in
+  let object_content = def_object_content d canonical normal in
   let hash = put_object root "def" object_content in
   write_file_atomic_if_changed (canonical_path root d.name) (canonical ^ "\n");
   write_file_atomic_if_changed (def_path root d.name) source;
@@ -179,6 +189,54 @@ let list_objects root =
   let dir = objects_dir root in
   if not (Sys.file_exists dir) then []
   else Sys.readdir dir |> Array.to_list |> List.sort String.compare
+
+type gc_result = {
+  objects : int;
+  reachable : string list;
+  unreachable : string list;
+  deleted : string list;
+}
+
+let reachable_objects root =
+  let program = load_program root in
+  program.defs
+  |> List.filter_map (fun d ->
+         let canonical_file = canonical_path root d.name in
+         let normal_file = normal_path root d.name in
+         if Sys.file_exists canonical_file && Sys.file_exists normal_file then
+           Some (def_object_hash d (trim_file canonical_file) (trim_file normal_file))
+         else None)
+  |> List.sort_uniq String.compare
+
+let gc ?(delete = false) root =
+  let objects = list_objects root in
+  let reachable = reachable_objects root in
+  let is_reachable object_hash = List.exists (String.equal object_hash) reachable in
+  let unreachable = objects |> List.filter (fun object_hash -> not (is_reachable object_hash)) in
+  let deleted =
+    if delete then (
+      List.iter (fun object_hash -> remove_if_exists (object_path root object_hash)) unreachable;
+      unreachable)
+    else []
+  in
+  { objects = List.length objects; reachable; unreachable; deleted }
+
+let gc_report result =
+  let lines =
+    [
+      "Store GC";
+      "objects=" ^ string_of_int result.objects;
+      "reachable=" ^ string_of_int (List.length result.reachable);
+      "unreachable=" ^ string_of_int (List.length result.unreachable);
+      "deleted=" ^ string_of_int (List.length result.deleted);
+    ]
+  in
+  let unreachable =
+    match result.unreachable with
+    | [] -> []
+    | xs -> "unreachable_objects:" :: xs
+  in
+  String.concat "\n" (lines @ unreachable) ^ "\n"
 
 let get_object root hash =
   let path = object_path root hash in
