@@ -376,7 +376,10 @@ listees dans la section "Gates de validation".
   `bin/main.ml`, `protoss explain --list` et assertions `CLI ... code` dans
   `test/test_protoss.ml`.
 - [x] Verifier qu'aucune exception OCaml brute ne fuite dans les erreurs CLI.
-- [ ] Modeliser les erreurs externes negatives comme evenements ledger.
+- [x] Modeliser les erreurs externes negatives comme evenements ledger.
+  Preuves: `Ledger.record_external_error`, `protoss ledger reject`,
+  assertions "ledger negative external event" dans `test/test_protoss.ml`,
+  `README.md` et `CLAUDE.md`.
 - [x] Ajouter helpers `Result` pour erreurs metier dans les examples.
 
 ## 18. Securite

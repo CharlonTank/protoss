@@ -104,7 +104,8 @@ dispatcher (pattern-matches argv → `command_*` functions → `Protoss.<Module>
 - `store.ml` — content-addressed on-disk store primitives (atomic writes, graph-put/get).
 - `web.ml` — deterministic web bundle emission (`index.html`, runtime JS, embedded canonical graph
   + capabilities + host contract as JSON).
-- `ledger.ml` — append-only event log over `WorldRef`/`EventRef` for Process run/resume/replay/diff.
+- `ledger.ml` — append-only event log over `WorldRef`/`EventRef` for Process
+  run/resume/replay/diff, deterministic branch/merge, and typed external-error events.
 - `patch.ml` / `patch_audit.ml` — atomic content-addressed edits to a store, with a hash-linked
   audit chain (`store/patches/latest`).
 - `json.ml`, `string_prim.ml` — pure JSON ADT/encoder and string primitives, also exposed to
