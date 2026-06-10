@@ -616,7 +616,13 @@ package policies, secrets scelles, SecretLeakRisk et negative capabilities dans
   Preuves: `Kernel.secret_leak_risks`, sortie `protoss capabilities`, assertion
   "SecretLeakRisk detects local storage plus outbound request" dans
   `test/test_protoss.ml` et `README.md`.
-- [ ] Audit provenance complet.
+- [x] Audit provenance complet.
+  Preuves: `Patch_audit.write_root_state`, `Patch_audit.write_patch_provenance`,
+  `Patch_audit.verify_latest_matches_store`, ledger `kind=patch-provenance`,
+  `Workspace.write_git_mapping`, `Workspace.write_git_blame_ledger`, assertions
+  "patch provenance links audit and root", "patch provenance links to world
+  ledger", "git map records current universe root" et "git blame ledger records
+  line commits" dans `test/test_protoss.ml`, `README.md`.
 - [x] Tests de negative capabilities par package.
   Preuves: `Workspace.read_package_import` rejette une importation dont
   l'interface publique exige une capability absente du manifest consommateur;
