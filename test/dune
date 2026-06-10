@@ -73,6 +73,32 @@
           (setenv PROTOSS_INTEGRATION_PART web
            (run ./test_protoss.exe)))))
 
+; The web part dominates the integration section once the workspace slices
+; run on the mini stdlib, so it is sliced by PROTOSS_WEB_PART (app artifacts
+; / patches / audit+corruption+ledger). Every slice rebuilds the
+; deterministic todo project itself; plain @integrationtest-web still runs
+; every slice in one process.
+(rule
+ (alias integrationtest-web-app)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART web
+           (setenv PROTOSS_WEB_PART app
+            (run ./test_protoss.exe))))))
+
+(rule
+ (alias integrationtest-web-patches)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART web
+           (setenv PROTOSS_WEB_PART patches
+            (run ./test_protoss.exe))))))
+
+(rule
+ (alias integrationtest-web-audit)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART web
+           (setenv PROTOSS_WEB_PART audit
+            (run ./test_protoss.exe))))))
+
 (rule
  (alias integrationtest-runtime)
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
@@ -93,5 +119,7 @@
   (alias integrationtest-workspace-project)
   (alias integrationtest-workspace-consumer)
   (alias integrationtest-workspace-corruption)
-  (alias integrationtest-web)
+  (alias integrationtest-web-app)
+  (alias integrationtest-web-patches)
+  (alias integrationtest-web-audit)
   (alias integrationtest-runtime)))

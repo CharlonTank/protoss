@@ -117,6 +117,21 @@ let workspace_part =
     | None -> true
     | Some part -> String.equal part name
 
+(* The web integration part is sliced the same way (PROTOSS_WEB_PART:
+   app artifacts / patches / audit+corruption+ledger). Every slice rebuilds
+   the deterministic todo project from the example sources, so slices run as
+   independent processes; unset = run every slice in one process. *)
+let web_part =
+  let known = [ "app"; "patches"; "audit" ] in
+  (match Sys.getenv_opt "PROTOSS_WEB_PART" with
+  | Some part when not (List.mem part known) ->
+      fail ("unknown PROTOSS_WEB_PART: " ^ part)
+  | _ -> ());
+  fun name ->
+    match Sys.getenv_opt "PROTOSS_WEB_PART" with
+    | None -> true
+    | Some part -> String.equal part name
+
 let () =
   assert_equal "sha256 empty digest"
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -4150,14 +4165,42 @@ let () =
 
   if integration_part "workspace" then (
   trace_test "integration:start";
-  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
+  (* The workspace slices exercise store/package/audit *mechanics*, which are
+     size-independent: a handful of declarations keeps every assertion
+     meaningful (the recursive Json variant stays for the alias round-trip
+     and package-interface tests) while builds and audits stop re-checking
+     the full prelude on every workspace copy. Full-prelude workspace
+     coverage (build + audit) lives in the web part. *)
+  let mini_stdlib_root = temp_dir "mini-stdlib" in
+  ensure_dir mini_stdlib_root;
+  let mini_stdlib_path = Filename.concat mini_stdlib_root "prelude.protoss" in
+  write_file mini_stdlib_path
+    "; Minimal stdlib for workspace-mechanics tests.\n\
+     (type Pair (A B) (Record (first A) (second B)))\n\
+     (type Assoc (K V) (List (Pair K V)))\n\
+     (variant Json\n\
+     \  (JArray (List Json))\n\
+     \  (JBool Bool)\n\
+     \  (JNat Nat)\n\
+     \  (JNull Unit)\n\
+     \  (JObject (Assoc String Json))\n\
+     \  (JString String))\n\
+     (def Nat.add (-> Nat (-> Nat Nat))\n\
+     \  (lambda (a Nat) (lambda (b Nat) ((prim.Nat.add a) b))))\n\
+     (def Nat.mul (-> Nat (-> Nat Nat))\n\
+     \  (lambda (a Nat) (lambda (b Nat) ((prim.Nat.mul a) b))))\n\
+     (def List.mapNat (-> (List Nat) (-> (-> Nat Nat) (List Nat)))\n\
+     \  (lambda (xs (List Nat))\n\
+     \    (lambda (f (-> Nat Nat))\n\
+     \      (foldList xs (Nil Nat)\n\
+     \        (lambda (x Nat) (lambda (acc (List Nat)) (Cons Nat (f x) acc)))))))\n";
   let make_workspace name base_value bound =
     let root = temp_dir name in
     ensure_dir root;
     ensure_dir (Filename.concat root "src");
     write_file (Filename.concat root "protoss.toml")
       ("name = \"" ^ name ^ "\"\nversion = \"0.4.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
-     ^ stdlib_path
+     ^ mini_stdlib_path
       ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Human.ask\"]\n");
     write_file (Filename.concat root "src/math.protoss")
       ("(def base Nat " ^ string_of_int base_value
@@ -5090,7 +5133,7 @@ let () =
   ensure_dir (Filename.concat module_ws "src");
   write_file (Filename.concat module_ws "protoss.toml")
     ("name = \"workspace-modules\"\nversion = \"0.5.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
-   ^ stdlib_path
+   ^ mini_stdlib_path
     ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = []\n");
   write_file (Filename.concat module_ws "src/math.protoss")
     "(module Demo.Math)\n(export Number double)\n(type Number Nat)\n(def hidden Number 2)\n\
@@ -5169,12 +5212,20 @@ let () =
   if integration_part "web" then (
   let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let todo_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
-  let todo = temp_dir "web-todo" in
-  copy_tree todo_src todo;
-  write_file (Filename.concat todo "protoss.toml")
-    ("name = \"todo-web-alpha-test\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
-    ^ stdlib_path
-    ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Local.storage\"]\n");
+  (* Each web slice materializes its own todo project: the example sources
+     plus a pinned manifest, built deterministically, so slices stay
+     independent processes (same pattern as rebuild_workspace_a). *)
+  let make_todo () =
+    let todo = temp_dir "web-todo" in
+    copy_tree todo_src todo;
+    write_file (Filename.concat todo "protoss.toml")
+      ("name = \"todo-web-alpha-test\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
+      ^ stdlib_path
+      ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Local.storage\"]\n");
+    todo
+  in
+  if web_part "app" then (
+  let todo = make_todo () in
   trace_test "integration:web";
   let contract = Web.app_check todo in
   assert_equal "web app model"
@@ -5281,6 +5332,7 @@ let () =
     (List.for_all
        (fun request -> contains_substring (json_string_field "ref" request) "p2:")
        local_storage_requests);
+  trace_test "integration:web:artifacts";
   let web_dist_b = temp_dir "web-dist-b" in
   ignore (Web.build ~out:web_dist_b todo);
   List.iter
@@ -5302,6 +5354,7 @@ let () =
   assert_equal "web incremental parsed" "0" (string_of_int web_second.Workspace.stats.Workspace.parsed);
   assert_true "web incremental reused" (web_second.Workspace.stats.Workspace.reused > 0);
   assert_true "web inspect" (String.contains (Web.inspect todo) 'm');
+  trace_test "integration:web:deterministic";
 
   let init_value, _ = Runtime.eval_entry contract.Web.checked "init" in
   let model =
@@ -5321,8 +5374,11 @@ let () =
   (try
      ignore (Runtime.response_value suspended.req "String:oops");
      fail "wrong SaveLocal response should be rejected"
-   with Kernel.Error _ -> ());
+   with Kernel.Error _ -> ()));
 
+  if web_part "patches" then (
+  let todo = make_todo () in
+  let web_a = Web.build ~out:(temp_dir "web-dist-patches") todo in
   let patch_dir = find_up (Sys.getcwd ()) "patches/web" in
   trace_test "integration:web-patches-ledger";
   let web_store = web_a.Web.build.Workspace.store in
@@ -5344,7 +5400,19 @@ let () =
      fail "model patch without migration should be rejected"
    with Patch.Error _ -> ());
   ignore (Patch.check web_store (Filename.concat patch_dir "model_with_migration.json"));
+  trace_test "integration:web:patches");
 
+  if web_part "audit" then (
+  let todo = make_todo () in
+  ignore (Web.build ~out:(temp_dir "web-dist-audit") todo);
+  (* Audit over the full prelude lives here: the workspace slices run on the
+     mini stdlib, so this is the one place a complete-store audit still sees
+     the real 572-def program. It runs on a freshly built store — Patch.apply
+     records an audit chain for the patched program, so the patches slice
+     would legitimately read as drift. *)
+  assert_equal "web audit full prelude store" "Audit OK\n"
+    (Workspace.audit (Workspace.parse_manifest todo));
+  trace_test "integration:web:audit-ok";
   let corrupt_todo = temp_dir "web-corrupt" in
   copy_tree todo corrupt_todo;
   let corrupt_manifest = Workspace.parse_manifest corrupt_todo in
@@ -5354,6 +5422,7 @@ let () =
      ignore (Workspace.audit corrupt_manifest);
      fail "web audit should reject corrupt store"
    with Workspace.Error _ | Kernel.Error _ -> ());
+  trace_test "integration:web:corruption";
 
   let ledger_web = temp_dir "web-ledger" in
   let world0 = Ledger.init ledger_web in
@@ -5585,7 +5654,7 @@ let () =
   (try
      ignore (Runtime.parse_suspended "(protoss-runtime-v2 (suspended (request ReadClock)))");
      fail "invalid resume suspension should be rejected"
-   with Kernel.Error _ -> ()));
+   with Kernel.Error _ -> ())));
 
   if integration_part "runtime" then (
   trace_test "integration:runtime-store";
