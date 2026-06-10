@@ -1403,8 +1403,13 @@ let command_bench = function
       let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root project) in
       let result = Protoss.Workspace.build manifest in
       let elapsed = Unix.gettimeofday () -. start in
-      Printf.printf "build=%s\nseconds=%.6f\n%s" result.build_id elapsed
-        (Protoss.Workspace.stats_to_string result.stats)
+      let stats = Protoss.Workspace.stats_to_string result.stats in
+      let content =
+        Protoss.Benchmark.report_content ~kind:"build" ~subject:project
+          ~build_id:result.build_id ~seconds:elapsed ~stats
+      in
+      let benchmark_ref = Protoss.Benchmark.write_report result.store content in
+      Printf.printf "benchmark-ref=%s\n%s" benchmark_ref content
   | _ -> usage ()
 
 let () =

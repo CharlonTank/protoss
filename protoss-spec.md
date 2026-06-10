@@ -710,7 +710,10 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
   Preuves: `Agent_protocol.compare_candidates_json`, commande
   `protoss agent compare-candidates`, assertion "agent candidate comparison"
   dans `test/test_protoss.ml`, `README.md`.
-- [ ] Benchmarks content-addressed.
+- [x] Benchmarks content-addressed.
+  Preuves: `Benchmark.report_content`, `Benchmark.write_report`, commande
+  `protoss bench build`, assertion "content-addressed benchmark" dans
+  `test/test_protoss.ml`, `README.md`.
 
 ### v1.0 - Self-hosted
 

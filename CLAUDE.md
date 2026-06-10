@@ -133,6 +133,7 @@ dispatcher (pattern-matches argv → `command_*` functions → `Protoss.<Module>
   audit chain (`store/patches/latest`).
 - `agent_protocol.ml` — native agent mutation contract, canonical-write guard, commit wrapper,
   duplicate-DefId factorization patch proposals, and patch-candidate comparison reports.
+- `benchmark.ml` — content-addressed benchmark report formatting and persistence.
 - `json.ml`, `string_prim.ml` — pure JSON ADT/encoder and string primitives, also exposed to
   Protoss programs via the prelude.
 - `invariants.ml` — the executable invariant checks behind the `invariants` command.

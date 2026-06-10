@@ -4906,6 +4906,17 @@ let () =
     (String.concat "," (Store.list_objects store_a))
     (String.concat "," (Store.list_objects store_b));
 
+  let benchmark_store = temp_dir "benchmark" in
+  let benchmark_content =
+    Benchmark.report_content ~kind:"build" ~subject:"demo" ~build_id:"p2:demo"
+      ~seconds:1.25 ~stats:"parsed=1\nreused=0\n"
+  in
+  let benchmark_ref = Benchmark.write_report benchmark_store benchmark_content in
+  assert_equal "content-addressed benchmark ref" (Benchmark.report_ref benchmark_content)
+    benchmark_ref;
+  assert_equal "content-addressed benchmark content" benchmark_content
+    (Store.read_file (Benchmark.report_path benchmark_store benchmark_ref));
+
   let dedupe_store = temp_dir "dedupe" in
   let h1 = Store.put_object dedupe_store "test" "same" in
   let h2 = Store.put_object dedupe_store "test" "same" in
