@@ -483,35 +483,44 @@ let rec default_expr_source = function
       else None
   | _ -> None
 
-let migration_record_field old_fields (name, typ) =
-  match List.assoc_opt name old_fields with
-  | Some old_typ when Ast.equal_typ old_typ typ -> ("copy", "(get old " ^ name ^ ")")
-  | _ -> (
-      match default_expr_source typ with
-      | Some expr -> ("default", expr)
-      | None -> ("manual", "unit"))
-
-let migration_expr_source old_model new_model =
-  let body, strategies =
-    match (old_model, new_model) with
+let rec migration_expr_for old_expr old_typ new_typ =
+  if Ast.equal_typ old_typ new_typ then ([ "copy" ], old_expr)
+  else
+    match (old_typ, new_typ) with
     | Ast.TRecord old_fields, Ast.TRecord new_fields ->
-        let planned = List.map (migration_record_field old_fields) new_fields in
+        let planned =
+          new_fields
+          |> List.map (fun (name, typ) ->
+                 let strategies, expr =
+                   match List.assoc_opt name old_fields with
+                   | Some old_typ ->
+                       migration_expr_for ("(get " ^ old_expr ^ " " ^ name ^ ")") old_typ typ
+                   | None -> (
+                       match default_expr_source typ with
+                       | Some expr -> ([ "default" ], expr)
+                       | None -> ([ "manual" ], "unit"))
+                 in
+                 (name, strategies, expr))
+        in
         let body =
           "(record "
           ^ String.concat " "
-              (List.map2
-                 (fun (name, _) (_, expr) -> "(" ^ name ^ " " ^ expr ^ ")")
-                 new_fields planned)
+              (List.map (fun (name, _, expr) -> "(" ^ name ^ " " ^ expr ^ ")") planned)
           ^ ")"
         in
-        (body, planned |> List.map fst |> sort_uniq_strings)
+        ("nested" :: List.concat_map (fun (_, strategies, _) -> strategies) planned, body)
     | _ -> (
-        match default_expr_source new_model with
-        | Some expr -> (expr, [ "default" ])
-        | None -> ("old", [ "manual" ]))
+        match default_expr_source new_typ with
+        | Some expr -> ([ "default" ], expr)
+        | None -> ([ "manual" ], "unit"))
+
+let migration_expr_source old_model new_model =
+  let strategies, body =
+    if Ast.equal_typ old_model new_model then ([ "copy" ], "old")
+    else migration_expr_for "old" old_model new_model
   in
   ( "(lambda (old " ^ Ast.string_of_typ old_model ^ ") " ^ body ^ ")",
-    strategies )
+    sort_uniq_strings strategies )
 
 let migration_patch_candidate old_model new_model expr =
   Kernel.json_obj

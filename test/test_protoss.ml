@@ -1288,6 +1288,48 @@ let () =
     (List.exists
        (fun note -> contains_substring note "Depends on: two")
        (json_string_array_field "notes" agent_explain));
+  let nested_old_model =
+    Ast.TRecord
+      (Ast.sort_fields
+         [
+           ("count", Ast.TNat);
+           ("prefs", Ast.TRecord (Ast.sort_fields [ ("theme", Ast.TString) ]));
+         ])
+  in
+  let nested_new_model =
+    Ast.TRecord
+      (Ast.sort_fields
+         [
+           ("count", Ast.TNat);
+           ( "prefs",
+             Ast.TRecord
+               (Ast.sort_fields [ ("density", Ast.TNat); ("theme", Ast.TString) ]) );
+         ])
+  in
+  let nested_migration_expr, nested_migration_strategies =
+    Agent_protocol.migration_expr_source nested_old_model nested_new_model
+  in
+  assert_true "agent nested migration copies nested field"
+    (contains_substring nested_migration_expr
+       "(theme (get (get old prefs) theme))");
+  assert_true "agent nested migration defaults nested field"
+    (contains_substring nested_migration_expr "(density 0)");
+  assert_equal "agent nested migration strategies" "copy,default,nested"
+    (String.concat "," nested_migration_strategies);
+  let nested_migration_checked =
+    check
+      ("(def old " ^ Ast.string_of_typ nested_old_model
+     ^ " (record (count 4) (prefs (record (theme \"dark\")))))\n\
+        (def migrate "
+      ^ Ast.string_of_typ (Ast.TFun (nested_old_model, nested_new_model))
+      ^ " " ^ nested_migration_expr ^ ")\n\
+        (def migrated "
+      ^ Ast.string_of_typ nested_new_model ^ " (migrate old))")
+  in
+  let nested_migrated, _ = Runtime.normalize_def nested_migration_checked "migrated" in
+  assert_equal "agent nested migration normalizes"
+    "{count = 4, prefs = {density = 0, theme = \"dark\"}}"
+    (Runtime.value_to_string nested_migrated);
   let mcp_response request =
     match Mcp_server.handle_message request with
     | Some response -> Json.parse response

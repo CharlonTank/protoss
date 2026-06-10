@@ -673,7 +673,13 @@ contract, runtime browser payload et UI/message mismatch dans
   et `runtime_js` gerent `architecture=cmd`, sortie `protoss app check`
   inclut `architecture`, assertion "web app cmd architecture" et build
   `protoss-app.json` dans `test/test_protoss.ml`, `README.md`, `CLAUDE.md`.
-- [ ] Ajouter migrations UI/harness pour changements de model plus complexes.
+- [x] Ajouter migrations UI/harness pour changements de model plus complexes.
+  Preuves: `Agent_protocol.migration_expr_for` migre recursivement les records
+  imbriques, `Harness.Migration`, fixtures `patches/web/model_with_migration.json`,
+  assertions "agent nested migration copies nested field", "agent nested
+  migration defaults nested field", "agent nested migration normalizes",
+  "harness migration contract passes" et "agent migration generation proposes
+  model migration" dans `test/test_protoss.ml`, `README.md`.
 - [x] Ajouter examples humains Protoss/H complets pour apps web.
   Preuves: `examples/web/site_vitrine/src/site.protoss`,
   `examples/web/site_vitrine/protoss.toml`, commande `protoss app check
