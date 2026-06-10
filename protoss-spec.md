@@ -47,7 +47,7 @@ listees dans la section "Gates de validation".
 - [ ] Faire du `UniverseRoot` la source de verite de toutes les commandes projet.
 - [ ] Ajouter un store global partage entre projets pour l'interning des noeuds.
 - [ ] Dedupliquer physiquement les noeuds identiques entre projets distincts.
-- [ ] Exposer une commande de comparaison semantique entre deux roots.
+- [x] Exposer une commande de comparaison semantique entre deux roots.
 - [ ] Ajouter une provenance native liee aux roots et patches.
 
 ## 2. Noms, extensions et formats officiels

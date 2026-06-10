@@ -11,6 +11,7 @@ let usage () =
      \       protoss check|nf|hash --store-graph <project-or-store> <graphHash>\n\
      \       protoss canon <file> | protoss canon --ptb <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
      \       protoss convert --to pt|ptc|ptb <file>\n\
+     \       protoss compare <file-a> <file-b> | protoss compare --graph <graph-a.json> <graph-b.json> | protoss compare --project <project-a> <project-b>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -170,6 +171,32 @@ let command_hash_graph file =
 let command_hash_store_graph project_or_store graph_hash =
   let checked = checked_store_graph project_or_store graph_hash in
   print_endline (Protoss.Kernel.hash_program checked)
+
+let finish_compare left_hash right_hash =
+  if String.equal left_hash right_hash then Printf.printf "same\nhash=%s\n" left_hash
+  else (
+    Printf.printf "different\nleft=%s\nright=%s\n" left_hash right_hash;
+    exit 1)
+
+let command_compare = function
+  | [ left; right ] ->
+      finish_compare
+        (Protoss.Kernel.hash_program (parse_and_check left))
+        (Protoss.Kernel.hash_program (parse_and_check right))
+  | [ "--graph"; left; right ] ->
+      finish_compare
+        (Protoss.Kernel.hash_program (checked_graph left))
+        (Protoss.Kernel.hash_program (checked_graph right))
+  | [ "--project"; left; right ] ->
+      let project_hash root =
+        let manifest =
+          Protoss.Workspace.parse_manifest
+            (Protoss.Workspace.project_root root)
+        in
+        (Protoss.Workspace.build ~write:false manifest).Protoss.Workspace.build_id
+      in
+      finish_compare (project_hash left) (project_hash right)
+  | _ -> usage ()
 
 let canonical_program checked =
   Protoss.Kernel.serialize_program checked.Protoss.Kernel.program.capabilities
@@ -1155,6 +1182,7 @@ let () =
       | [ "hash"; "--store-graph"; project_or_store; graph_hash ] ->
           command_hash_store_graph project_or_store graph_hash
       | [ "hash"; file ] -> command_hash file
+      | "compare" :: args -> command_compare args
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--ptb"; file ] -> command_canon_ptb file
       | [ "canon"; "--graph"; file ] -> command_canon_graph file
