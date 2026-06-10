@@ -567,7 +567,10 @@ diff/patch review et chemins structurels dans `test/test_protoss.ml`.
   Preuves: `Workspace.git_universe_branch`, champ `universe-branch` dans
   `.protoss/git.map`, assertion "git map records universe branch" dans
   `test/test_protoss.ml`, `README.md`.
-- [ ] Mapper `Git blame -> provenance ledger`.
+- [x] Mapper `Git blame -> provenance ledger`.
+  Preuves: `Workspace.write_git_blame_ledger`, commande `protoss git blame`,
+  fichiers `.protoss/provenance/git-blame/*.ledger`, assertion "git blame
+  ledger records line commits" dans `test/test_protoss.ml`, `README.md`.
 - [ ] Exporter layout `/protoss.lock`, `/views/**/*.pt`, `/cache/**/*.ptb`,
   `/harness/**/*.pth`.
 

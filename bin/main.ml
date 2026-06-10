@@ -38,7 +38,7 @@ let usage () =
      \       protoss patch from-diff <store-a> <store-b>\n\
      \       protoss diff [--json] <store-a> <store-b>\n\
      \       protoss audit [project]\n\
-     \       protoss git map [project]\n\
+     \       protoss git map [project] | protoss git blame [project] <file>\n\
      \       protoss invariants file <file> | graph <graph.json> | alpha <file-a> <file-b>\n\
      \       protoss invariants graph --store-graph <project-or-store> <graphHash>\n\
      \       protoss invariants process <file> --entry <name> --response <value>\n\
@@ -740,6 +740,14 @@ let command_git = function
       let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root project) in
       let mapping = Protoss.Workspace.write_git_mapping manifest in
       print_string (Protoss.Workspace.git_mapping_content mapping)
+  | [ "blame"; file ] ->
+      let manifest = Protoss.Workspace.parse_manifest (Sys.getcwd ()) in
+      let ledger = Protoss.Workspace.write_git_blame_ledger manifest file in
+      print_string (Protoss.Workspace.git_blame_ledger_content ledger)
+  | [ "blame"; project; file ] ->
+      let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root project) in
+      let ledger = Protoss.Workspace.write_git_blame_ledger manifest file in
+      print_string (Protoss.Workspace.git_blame_ledger_content ledger)
   | _ -> usage ()
 
 let command_invariants = function

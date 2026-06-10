@@ -783,6 +783,16 @@ type git_mapping = {
   git_universe_branch : string;
 }
 
+type git_blame_entry = { blame_line : int; blame_commit : string }
+
+type git_blame_ledger = {
+  git_blame_path : string;
+  git_blame_file : string;
+  git_blame_universe_root : string;
+  git_blame_universe_branch : string;
+  git_blame_entries : git_blame_entry list;
+}
+
 type prepared_build = {
   units : unit_load list;
   checked : Kernel.checked;
@@ -1178,6 +1188,65 @@ let write_git_mapping manifest =
   ensure_dir (Filename.dirname mapping.git_map_path);
   write_file mapping.git_map_path (git_mapping_content mapping);
   mapping
+
+let is_hex = function '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false
+
+let is_commit_hash s =
+  String.length s = 40 && String.for_all is_hex s
+
+let git_blame_entries blame_output =
+  blame_output |> String.split_on_char '\n'
+  |> List.concat_map (fun line ->
+         match split_words line with
+         | commit :: _original :: final :: count :: _ when is_commit_hash commit -> (
+             try
+               let final = int_of_string final in
+               let count = int_of_string count in
+               List.init count (fun i -> { blame_line = final + i; blame_commit = commit })
+             with Failure _ -> [])
+         | _ -> [])
+  |> List.sort (fun a b -> compare a.blame_line b.blame_line)
+
+let git_blame_dir manifest =
+  Filename.concat (Filename.concat manifest.root ".protoss/provenance") "git-blame"
+
+let git_blame_ledger_path manifest rel_file =
+  Filename.concat (git_blame_dir manifest) (sanitize_id rel_file ^ ".ledger")
+
+let git_blame_latest_path manifest = Filename.concat (git_blame_dir manifest) "latest"
+
+let git_blame_ledger_content ledger =
+  String.concat "\n"
+    ([
+       "protoss-git-blame-ledger-v1";
+       "file=" ^ ledger.git_blame_file;
+       "universe-root=" ^ ledger.git_blame_universe_root;
+       "universe-branch=" ^ ledger.git_blame_universe_branch;
+     ]
+    @ List.map
+        (fun entry ->
+          "line=" ^ string_of_int entry.blame_line ^ " commit=" ^ entry.blame_commit)
+        ledger.git_blame_entries
+    @ [ "" ])
+
+let write_git_blame_ledger manifest file =
+  let mapping = write_git_mapping manifest in
+  let resolved = path_in_project manifest file in
+  let rel_file = cache_project_path manifest resolved in
+  let blame_output = git_output manifest.root [ "blame"; "--line-porcelain"; "--"; rel_file ] in
+  let ledger =
+    {
+      git_blame_path = git_blame_ledger_path manifest rel_file;
+      git_blame_file = rel_file;
+      git_blame_universe_root = mapping.git_universe_root;
+      git_blame_universe_branch = mapping.git_universe_branch;
+      git_blame_entries = git_blame_entries blame_output;
+    }
+  in
+  ensure_dir (Filename.dirname ledger.git_blame_path);
+  write_file ledger.git_blame_path (git_blame_ledger_content ledger);
+  write_file (git_blame_latest_path manifest) (ledger.git_blame_path ^ "\n");
+  ledger
 
 let lock_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "lock"
 

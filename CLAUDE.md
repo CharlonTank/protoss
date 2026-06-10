@@ -25,8 +25,9 @@ name/version or advertised policy before resolving to the locked package hash.
 hardlinks project objects to that global payload when possible; preserve content-addressed writes.
 Patch audits carry `previous-root`/`root-ref` and write native `store/provenance` root-state plus
 patch-provenance records; latest patch verification must keep program hash and root state aligned.
-`protoss git map [project]` writes `.protoss/git.map`; keep the commit/branch to UniverseRoot
-mapping deterministic and derived from `Workspace.write_git_mapping`.
+`protoss git map [project]` writes `.protoss/git.map`; `protoss git blame [project] <file>`
+writes `.protoss/provenance/git-blame/*.ledger`. Keep both deterministic and derived from
+`Workspace.write_git_mapping`.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

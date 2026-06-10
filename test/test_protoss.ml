@@ -4769,6 +4769,15 @@ let () =
     && contains_substring git_map_content ("universe-root=" ^ git_mapping.git_universe_root)
     && contains_substring git_map_content
          ("universe-branch=" ^ git_mapping.git_universe_branch));
+  let git_blame_ledger = Workspace.write_git_blame_ledger git_map_manifest "src/app.protoss" in
+  let git_blame_content = Store.read_file git_blame_ledger.Workspace.git_blame_path in
+  assert_true "git blame ledger records file"
+    (contains_substring git_blame_content "file=src/app.protoss");
+  assert_true "git blame ledger records universe root"
+    (contains_substring git_blame_content ("universe-root=" ^ git_mapping.git_universe_root));
+  assert_true "git blame ledger records line commits"
+    (List.length git_blame_ledger.Workspace.git_blame_entries > 0
+    && contains_substring git_blame_content ("commit=" ^ git_mapping.git_commit));
   let ws_a = make_workspace "workspace-a" 2 "x" in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";
