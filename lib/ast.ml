@@ -10,6 +10,7 @@ type typ =
   | TView of typ
   | TAttr of typ
   | TProcess of string list option * typ
+  | TCmd of string list option * typ
   | TSecretRef of string * typ
   | TVar of int
   | TForall of int * typ
@@ -125,6 +126,8 @@ let rec equal_typ a b =
   | TAttr a, TAttr b -> equal_typ a b
   | TProcess (caps_a, a), TProcess (caps_b, b) ->
       equal_process_capabilities caps_a caps_b && equal_typ a b
+  | TCmd (caps_a, a), TCmd (caps_b, b) ->
+      equal_process_capabilities caps_a caps_b && equal_typ a b
   | TSecretRef (scope_a, a), TSecretRef (scope_b, b) ->
       String.equal scope_a scope_b && equal_typ a b
   | TVar a, TVar b -> a = b
@@ -184,6 +187,11 @@ let rec string_of_typ_with_params params = function
   | TProcess (None, t) -> "(Process " ^ string_of_typ_with_params params t ^ ")"
   | TProcess (Some caps, t) ->
       "(Process (capabilities"
+      ^ (match caps with [] -> "" | _ -> " " ^ String.concat " " caps)
+      ^ ") " ^ string_of_typ_with_params params t ^ ")"
+  | TCmd (None, t) -> "(Cmd " ^ string_of_typ_with_params params t ^ ")"
+  | TCmd (Some caps, t) ->
+      "(Cmd (capabilities"
       ^ (match caps with [] -> "" | _ -> " " ^ String.concat " " caps)
       ^ ") " ^ string_of_typ_with_params params t ^ ")"
   | TSecretRef (scope, t) ->

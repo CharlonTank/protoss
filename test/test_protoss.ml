@@ -329,6 +329,7 @@ let rec runtime_value_matches_type value typ =
   | Runtime.VAttribute _, Ast.TAttr _ -> true
   | Runtime.VProcessDone value, Ast.TProcess (_, typ) -> runtime_value_matches_type value typ
   | Runtime.VProcessRequest _, Ast.TProcess _ -> true
+  | Runtime.VUnit, Ast.TCmd _ -> true
   | _ -> false
 
 let assert_normalized_value_preserves_declared_type checked name =
@@ -6852,6 +6853,30 @@ let () =
   assert_equal "web app model"
     "(Record (draft String) (items (List String)) (next Nat))"
     (Ast.string_of_typ contract.Web.model_ty);
+  assert_equal "web app process architecture" "process" contract.Web.architecture;
+  let cmd_app = temp_dir "web-cmd-app" in
+  ensure_dir (Filename.concat cmd_app "src");
+  write_file (Filename.concat cmd_app "src/app.protoss")
+    "(type Model Nat)\n\
+     (variant Msg (Click Unit))\n\
+     (def init (Tuple Model (Cmd (capabilities) Msg)) (tuple 0 unit))\n\
+     (def update (-> Msg (-> Model (Tuple Model (Cmd (capabilities) Msg))))\n\
+     \  (lambda (msg Msg) (lambda (model Model) (tuple (succ model) unit))))\n\
+     (def view (-> Model (View Msg)) (lambda (model Model) (text \"cmd app\")))\n";
+  write_file (Filename.concat cmd_app "protoss.toml")
+    ("name = \"cmd-web-alpha-test\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
+    ^ stdlib_path
+    ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = []\n");
+  let cmd_contract = Web.app_check cmd_app in
+  assert_equal "web app cmd architecture" "cmd" cmd_contract.Web.architecture;
+  assert_equal "web app cmd model" "Nat" (Ast.string_of_typ cmd_contract.Web.model_ty);
+  let cmd_dist = temp_dir "web-cmd-dist" in
+  ignore (Web.build ~out:cmd_dist cmd_app);
+  let cmd_app_json = Json.parse (Store.read_file (Filename.concat cmd_dist "protoss-app.json")) in
+  assert_equal "web app cmd architecture embedded" "cmd"
+    (json_string_field "architecture" cmd_app_json);
+  assert_equal "web app cmd initial model" "0"
+    (string_of_int (json_nat_field "value" (json_field "initialModel" cmd_app_json)));
   let web_dist_a = temp_dir "web-dist-a" in
   let web_a = Web.build ~out:web_dist_a todo in
   List.iter

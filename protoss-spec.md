@@ -660,7 +660,13 @@ contract, runtime browser payload et UI/message mismatch dans
 - [x] Rendre sans `innerHTML`.
 - [x] Dispatcher des messages types depuis le runtime navigateur.
 - [x] Rejeter statiquement les mismatches UI/message.
-- [ ] Ajouter architecture `(Model, Cmd caps Msg)` comme alternative officielle.
+- [x] Ajouter architecture `(Model, Cmd caps Msg)` comme alternative officielle.
+  Preuves: `Ast.TCmd`, `Parser.parse_type`, `Kernel.check_elab` accepte
+  `unit` comme `Cmd.none`, `Web.check_contract` accepte
+  `init/update` en `(Tuple Model (Cmd caps Msg))`, `Web.initial_model_and_view`
+  et `runtime_js` gerent `architecture=cmd`, sortie `protoss app check`
+  inclut `architecture`, assertion "web app cmd architecture" et build
+  `protoss-app.json` dans `test/test_protoss.ml`, `README.md`, `CLAUDE.md`.
 - [ ] Ajouter migrations UI/harness pour changements de model plus complexes.
 - [ ] Ajouter examples humains Protoss/H complets pour apps web.
 

@@ -307,28 +307,32 @@ let plain_signature typ = { typ; capabilities = None }
 let parse_signature_type_text text =
   let tokens = tokenize text in
   match tokens with
-  | Ident "Process" :: LBrace :: rest ->
+  | Ident (("Process" | "Cmd") as head) :: LBrace :: rest ->
       let rec caps acc = function
         | RBrace :: value_tokens ->
-            ensure_unique_names "process capability" acc;
+            ensure_unique_names (String.lowercase_ascii head ^ " capability") acc;
             let capabilities = List.sort String.compare acc in
             let value_type = parse_type value_tokens in
             {
               typ =
                 Sexp.List
                   [
-                    Sexp.Atom "Process";
+                    Sexp.Atom head;
                     Sexp.List (Sexp.Atom "capabilities" :: List.map (fun c -> Sexp.Atom c) capabilities);
                     value_type;
                   ];
-              capabilities = Some capabilities;
+              capabilities = if String.equal head "Process" then Some capabilities else None;
             }
         | Comma :: rest -> caps acc rest
         | Ident name :: rest ->
-            if not (is_name name) then fail ("invalid process capability: " ^ name);
+            if not (is_name name) then
+              fail ("invalid " ^ String.lowercase_ascii head ^ " capability: " ^ name);
             caps (name :: acc) rest
-        | tok :: _ -> fail ("invalid process capability token: " ^ token_name tok)
-        | [] -> fail "unterminated Process capability set"
+        | tok :: _ ->
+            fail
+              ("invalid " ^ String.lowercase_ascii head ^ " capability token: "
+             ^ token_name tok)
+        | [] -> fail ("unterminated " ^ head ^ " capability set")
       in
       caps [] rest
   | _ -> plain_signature (parse_type tokens)

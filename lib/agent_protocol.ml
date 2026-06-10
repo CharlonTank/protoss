@@ -418,6 +418,7 @@ let harness_name name suffix =
 
 let rec suggested_test_kind = function
   | Ast.TProcess _ -> "process-ledger"
+  | Ast.TCmd _ -> "web-command"
   | Ast.TFun _ -> "example-call"
   | Ast.TForall (_, t) -> suggested_test_kind t
   | _ -> "normalization"

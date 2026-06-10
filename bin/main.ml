@@ -746,9 +746,10 @@ let command_project = function
 let command_app = function
   | [ "check"; project ] ->
       let contract = Protoss.Web.app_check project in
-      Printf.printf "App OK model=%s msg=%s\n"
+      Printf.printf "App OK model=%s msg=%s architecture=%s\n"
         (Protoss.Ast.string_of_typ contract.Protoss.Web.model_ty)
         (Protoss.Ast.string_of_typ contract.msg_ty)
+        contract.architecture
   | _ -> usage ()
 
 let command_web = function

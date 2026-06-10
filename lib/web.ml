@@ -41,30 +41,90 @@ type app_contract = {
   view_def : Kernel.checked_def;
   model_ty : typ;
   msg_ty : typ;
+  architecture : string;
 }
+
+let record_field name fields =
+  List.find_opt (fun (field, _) -> String.equal field name) fields |> Option.map snd
+
+let cmd_tuple_shape = function
+  | TRecord fields -> (
+      match (record_field "_1" fields, record_field "_2" fields) with
+      | Some model, Some (TCmd (caps, msg)) -> Some (model, caps, msg)
+      | _ -> None)
+  | _ -> None
+
+let require_cmd_capabilities expected actual context =
+  if not (equal_process_capabilities expected actual) then
+    fail
+      (context ^ " command capability mismatch: expected " ^ string_of_typ (TCmd (expected, TUnit))
+     ^ ", got " ^ string_of_typ (TCmd (actual, TUnit)))
 
 let check_contract checked =
   let init_def = require_def checked "init" in
   let update_def = require_def checked "update" in
   let view_def = require_def checked "view" in
-  let model_ty =
+  let model_ty, msg_ty, architecture =
     match init_def.def.typ with
-    | TProcess (_, model) -> model
-    | t -> fail ("WEB002 init must have type Process Model, got " ^ string_of_typ t)
-  in
-  let msg_ty =
-    match update_def.def.typ with
-    | TFun (msg, TFun (model, TProcess (_, model'))) ->
-        if not (equal_typ model_ty model) then
-          fail
-            ("WEB003 update model argument mismatch: expected " ^ string_of_typ model_ty
-           ^ ", got " ^ string_of_typ model);
-        if not (equal_typ model_ty model') then
-          fail
-            ("WEB004 update result mismatch: expected Process " ^ string_of_typ model_ty
-           ^ ", got Process " ^ string_of_typ model');
-        msg
-    | t -> fail ("WEB005 update must have type Msg -> Model -> Process Model, got " ^ string_of_typ t)
+    | TProcess (_, model_ty) ->
+        let msg_ty =
+          match update_def.def.typ with
+          | TFun (msg, TFun (model, TProcess (_, model'))) ->
+              if not (equal_typ model_ty model) then
+                fail
+                  ("WEB003 update model argument mismatch: expected " ^ string_of_typ model_ty
+                 ^ ", got " ^ string_of_typ model);
+              if not (equal_typ model_ty model') then
+                fail
+                  ("WEB004 update result mismatch: expected Process " ^ string_of_typ model_ty
+                 ^ ", got Process " ^ string_of_typ model');
+              msg
+          | t ->
+              fail
+                ("WEB005 update must have type Msg -> Model -> Process Model, got "
+               ^ string_of_typ t)
+        in
+        (model_ty, msg_ty, "process")
+    | init_ty -> (
+        match cmd_tuple_shape init_ty with
+        | None ->
+            fail
+              ("WEB002 init must have type Process Model or (Tuple Model (Cmd caps Msg)), got "
+             ^ string_of_typ init_ty)
+        | Some (model_ty, init_caps, init_msg_ty) ->
+            let msg_ty =
+              match update_def.def.typ with
+              | TFun (msg, TFun (model, update_result)) -> (
+                  if not (equal_typ model_ty model) then
+                    fail
+                      ("WEB003 update model argument mismatch: expected "
+                     ^ string_of_typ model_ty ^ ", got " ^ string_of_typ model);
+                  if not (equal_typ init_msg_ty msg) then
+                    fail
+                      ("WEB007 update message mismatch: expected "
+                     ^ string_of_typ init_msg_ty ^ ", got " ^ string_of_typ msg);
+                  match cmd_tuple_shape update_result with
+                  | Some (model', update_caps, update_msg_ty) ->
+                      if not (equal_typ model_ty model') then
+                        fail
+                          ("WEB004 update result mismatch: expected "
+                         ^ string_of_typ model_ty ^ ", got " ^ string_of_typ model');
+                      if not (equal_typ msg update_msg_ty) then
+                        fail
+                          ("WEB007 update command message mismatch: expected "
+                         ^ string_of_typ msg ^ ", got " ^ string_of_typ update_msg_ty);
+                      require_cmd_capabilities init_caps update_caps "WEB012 update";
+                      msg
+                  | None ->
+                      fail
+                        ("WEB005 update must return (Tuple Model (Cmd caps Msg)), got "
+                       ^ string_of_typ update_result))
+              | t ->
+                  fail
+                    ("WEB005 update must have type Msg -> Model -> (Tuple Model (Cmd caps Msg)), got "
+                   ^ string_of_typ t)
+            in
+            (model_ty, msg_ty, "cmd"))
   in
   (match view_def.def.typ with
   | TFun (model, TView msg) ->
@@ -77,7 +137,7 @@ let check_contract checked =
           ("WEB007 view message mismatch: expected View " ^ string_of_typ msg_ty ^ ", got View "
          ^ string_of_typ msg)
   | t -> fail ("WEB008 view must have type Model -> View Msg, got " ^ string_of_typ t));
-  { checked; init_def; update_def; view_def; model_ty; msg_ty }
+  { checked; init_def; update_def; view_def; model_ty; msg_ty; architecture }
 
 let app_check project =
   let manifest = manifest project in
@@ -211,13 +271,22 @@ and attr_to_json = function
 
 let initial_model_and_view contract =
   match fst (Runtime.eval_entry contract.checked "init") with
-  | Runtime.VProcessDone model -> (
+  | Runtime.VProcessDone model when String.equal contract.architecture "process" -> (
       let view_fn, _ = Runtime.eval_entry contract.checked "view" in
       match Runtime.apply contract.checked view_fn model with
       | Runtime.VView view -> (model, view)
       | other -> fail ("WEB009 view did not produce View at runtime: " ^ Runtime.value_to_string other))
-  | Runtime.VProcessRequest _ ->
+  | Runtime.VProcessRequest _ when String.equal contract.architecture "process" ->
       fail "WEB010 init suspended; Web Alpha requires init to be Done for deterministic bundle"
+  | Runtime.VRecord fields when String.equal contract.architecture "cmd" -> (
+      match record_field "_1" fields with
+      | Some model -> (
+          let view_fn, _ = Runtime.eval_entry contract.checked "view" in
+          match Runtime.apply contract.checked view_fn model with
+          | Runtime.VView view -> (model, view)
+          | other ->
+              fail ("WEB009 view did not produce View at runtime: " ^ Runtime.value_to_string other))
+      | None -> fail "WEB013 init command tuple missing model")
   | other -> fail ("WEB011 init is not a Process result: " ^ Runtime.value_to_string other)
 
 let stored_graph_json store =
@@ -257,8 +326,8 @@ let stored_graph_dot store =
 let write_web_marker store contract =
   write_file (Filename.concat store "web_app")
     ("model=" ^ string_of_typ contract.model_ty ^ "\nmsg=" ^ string_of_typ contract.msg_ty
-   ^ "\ninit=" ^ contract.init_def.def_id ^ "\nupdate=" ^ contract.update_def.def_id
-   ^ "\nview=" ^ contract.view_def.def_id ^ "\n")
+   ^ "\narchitecture=" ^ contract.architecture ^ "\ninit=" ^ contract.init_def.def_id
+   ^ "\nupdate=" ^ contract.update_def.def_id ^ "\nview=" ^ contract.view_def.def_id ^ "\n")
 
 let current_world_json () =
   json_obj
@@ -708,12 +777,24 @@ let runtime_js =
         }
         throw new Error("update returned non-process");
       }
+      function modelFromCommandResult(result) {
+        if (result && result.tag === "Record" && result.fields && result.fields._1) {
+          return result.fields._1;
+        }
+        throw new Error("update returned non-command tuple");
+      }
       function dispatch(rawMsg) {
         var msg = rawMsg && rawMsg.inputHandler
           ? machine.apply(rawMsg.inputHandler, jsToStringValue(rawMsg.value))
           : rawMsg;
         record("message", msg);
-        handleProcess(machine.update(app.update, msg, modelValue));
+        var result = machine.update(app.update, msg, modelValue);
+        if (app.architecture === "cmd") {
+          modelValue = modelFromCommandResult(result);
+          render();
+        } else {
+          handleProcess(result);
+        }
       }
       function render() {
         mount.innerHTML = "";
@@ -948,6 +1029,7 @@ let build ?out project =
         json_field "compiledArtifact" (json_string compiled_artifact.compiled_artifact_ref);
         json_field "modelType" (type_to_json contract.model_ty);
         json_field "msgType" (type_to_json contract.msg_ty);
+        json_field "architecture" (json_string contract.architecture);
         json_field "init" (json_string contract.init_def.def_id);
         json_field "update" (json_string contract.update_def.def_id);
         json_field "view" (json_string contract.view_def.def_id);
@@ -983,8 +1065,9 @@ let inspect project =
   let contract = check_contract build.checked in
   "package=" ^ manifest.name ^ "\nversion=" ^ manifest.version ^ "\nbuild=" ^ build.build_id
   ^ "\nmodel=" ^ string_of_typ contract.model_ty ^ "\nmsg=" ^ string_of_typ contract.msg_ty
-  ^ "\ninit=" ^ contract.init_def.def_id ^ "\nupdate=" ^ contract.update_def.def_id
-  ^ "\nview=" ^ contract.view_def.def_id ^ "\nstore=" ^ build.store ^ "\n"
+  ^ "\narchitecture=" ^ contract.architecture ^ "\ninit=" ^ contract.init_def.def_id
+  ^ "\nupdate=" ^ contract.update_def.def_id ^ "\nview=" ^ contract.view_def.def_id
+  ^ "\nstore=" ^ build.store ^ "\n"
 
 let content_type path =
   if has_suffix ".html" path then "text/html"

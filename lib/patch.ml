@@ -556,7 +556,7 @@ let rec contains_process_type = function
   | TProcess _ -> true
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
-  | TList t | TView t | TAttr t | TSecretRef (_, t) -> contains_process_type t
+  | TList t | TView t | TAttr t | TCmd (_, t) | TSecretRef (_, t) -> contains_process_type t
   | TForall (_, t) -> contains_process_type t
   | TVar _ -> false
   | TNamed _ -> false

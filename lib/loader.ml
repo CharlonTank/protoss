@@ -608,7 +608,8 @@ let rec type_refs = function
   | TUnit | TBool | TNat | TString -> []
   | TFun (a, b) -> type_refs a @ type_refs b
   | TRecord fields | TVariant fields -> List.concat_map (fun (_, t) -> type_refs t) fields
-  | TList t | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) -> type_refs t
+  | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t) ->
+      type_refs t
   | TVar _ -> []
   | TForall (_, t) -> type_refs t
   | TNamed (n, args) -> n :: List.concat_map type_refs args

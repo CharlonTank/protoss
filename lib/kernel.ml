@@ -83,6 +83,8 @@ let rec type_to_canonical = function
   | TAttr t -> "(Attr " ^ type_to_canonical t ^ ")"
   | TProcess (caps, t) ->
       "(Process" ^ process_capabilities_to_canonical caps ^ " " ^ type_to_canonical t ^ ")"
+  | TCmd (caps, t) ->
+      "(Cmd" ^ process_capabilities_to_canonical caps ^ " " ^ type_to_canonical t ^ ")"
   | TSecretRef (scope, t) -> "(SecretRef " ^ scope ^ " " ^ type_to_canonical t ^ ")"
   | TVar i -> "(TVar " ^ string_of_int i ^ ")"
   | TForall (arity, body) ->
@@ -275,6 +277,7 @@ let builtin_type_names =
     "List";
     "View";
     "Process";
+    "Cmd";
     "Record";
     "Variant";
     "Tuple";
@@ -336,7 +339,8 @@ let rec direct_self_refs alias guarded = function
   | TRecord fields -> List.concat_map (fun (_, t) -> direct_self_refs alias guarded t) fields
   | TVariant cases -> List.concat_map (fun (_, t) -> direct_self_refs alias true t) cases
   | TList t -> direct_self_refs alias guarded t
-  | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) -> direct_self_refs alias false t
+  | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t) ->
+      direct_self_refs alias false t
   | TForall (_, body) -> direct_self_refs alias guarded body
   | TNamed (n, args) ->
       let arg_refs = List.concat_map (direct_self_refs alias guarded) args in
@@ -380,6 +384,7 @@ let rec expand_type recursive_names aliases vars stack = function
   | TView t -> TView (expand_type recursive_names aliases vars stack t)
   | TAttr t -> TAttr (expand_type recursive_names aliases vars stack t)
   | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, expand_type recursive_names aliases vars stack t)
+  | TCmd (caps, t) -> TCmd (normalize_process_capabilities caps, expand_type recursive_names aliases vars stack t)
   | TSecretRef (scope, t) -> TSecretRef (scope, expand_type recursive_names aliases vars stack t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, expand_type recursive_names aliases vars stack body)
@@ -800,6 +805,7 @@ let rec subst_type args = function
   | TView t -> TView (subst_type args t)
   | TAttr t -> TAttr (subst_type args t)
   | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, subst_type args t)
+  | TCmd (caps, t) -> TCmd (normalize_process_capabilities caps, subst_type args t)
   | TSecretRef (scope, t) -> TSecretRef (scope, subst_type args t)
   | TVar i -> option_or_fail ("type argument missing for TVar " ^ string_of_int i) (List.nth_opt args i)
   | TForall (arity, body) -> TForall (arity, subst_type args body)
@@ -833,6 +839,7 @@ let rec subst_named_type_params vars = function
   | TView t -> TView (subst_named_type_params vars t)
   | TAttr t -> TAttr (subst_named_type_params vars t)
   | TProcess (caps, t) -> TProcess (normalize_process_capabilities caps, subst_named_type_params vars t)
+  | TCmd (caps, t) -> TCmd (normalize_process_capabilities caps, subst_named_type_params vars t)
   | TSecretRef (scope, t) -> TSecretRef (scope, subst_named_type_params vars t)
   | TVar i -> TVar i
   | TForall (arity, body) -> TForall (arity, subst_named_type_params vars body)
@@ -1018,7 +1025,7 @@ let rec contains_process_type = function
   | TProcess _ -> true
   | TFun (a, b) -> contains_process_type a || contains_process_type b
   | TRecord fields | TVariant fields -> List.exists (fun (_, t) -> contains_process_type t) fields
-  | TList t | TView t | TAttr t | TSecretRef (_, t) -> contains_process_type t
+  | TList t | TView t | TAttr t | TCmd (_, t) | TSecretRef (_, t) -> contains_process_type t
   | TForall (_, t) -> contains_process_type t
   | TNamed _ -> false
   | TVar _ | TUnit | TBool | TNat | TString -> false
@@ -1674,6 +1681,7 @@ and check_elab ctx expected expr =
       require_process_capabilities expected_caps (Some []) "done";
       let _, e = check_elab ctx expected_value e in
       (expected, EDone e)
+  | TCmd _, EUnit -> (expected, EUnit)
   | TView msg_ty, ENode (tag, attrs, children) ->
       let _, tag = check_elab ctx TString tag in
       let _, attrs = check_elab ctx (TList (TAttr msg_ty)) attrs in
@@ -1866,6 +1874,13 @@ and poly_app_elab ctx expected expr =
                       ("cannot infer " ^ name);
                     unify p a
                 | _ -> fail ("cannot infer " ^ name ^ ": expected Process"))
+            | TCmd (pattern_caps, p) -> (
+                match actual with
+                | TCmd (actual_caps, a) ->
+                    require_process_capabilities pattern_caps actual_caps
+                      ("cannot infer " ^ name);
+                    unify p a
+                | _ -> fail ("cannot infer " ^ name ^ ": expected Cmd"))
             | TNamed (pn, ps) -> (
                 match actual with
                 | TNamed (an, args) when String.equal pn an && List.length ps = List.length args ->
@@ -2274,6 +2289,7 @@ let executable_grammar_text =
       "declaration ::= (defrec Name type-params? type recursion-body)";
       "type ::= Unit | Bool | Nat | String | (-> type type) | (List type) | (Process type)";
       "type ::= (Process (capabilities Capability*) type)";
+      "type ::= (Cmd type) | (Cmd (capabilities Capability*) type)";
       "type ::= (Record field*) | (Variant variant-case*) | (Named Name type*) | TypeName";
       "expr ::= unit | true | false | Nat | String | Name | (lambda binder+ expr)";
       "expr ::= (let binding expr) | (record field*) | (get expr Field)";
@@ -2490,6 +2506,13 @@ let rec type_to_graph_json = function
   | TProcess (caps, t) ->
       json_obj
         ([ json_field "tag" (json_string "Process"); json_field "result" (type_to_graph_json t) ]
+        @
+        match normalize_process_capabilities caps with
+        | None -> []
+        | Some caps -> [ json_field "capabilities" (json_array json_string caps) ])
+  | TCmd (caps, t) ->
+      json_obj
+        ([ json_field "tag" (json_string "Cmd"); json_field "message" (type_to_graph_json t) ]
         @
         match normalize_process_capabilities caps with
         | None -> []
@@ -2812,6 +2835,7 @@ let type_node_tag = function
   | TView _ -> "View"
   | TAttr _ -> "Attr"
   | TProcess _ -> "Process"
+  | TCmd _ -> "Cmd"
   | TSecretRef _ -> "SecretRef"
   | TVar _ -> "TypeVar"
   | TForall _ -> "Forall"
@@ -2863,7 +2887,8 @@ let type_node_edges_via type_id = function
   | TUnit | TBool | TNat | TString | TVar _ -> []
   | TFun (a, b) -> [ type_id a; type_id b ]
   | TRecord fields | TVariant fields -> fields |> List.map (fun (_, t) -> type_id t)
-  | TList t | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) -> [ type_id t ]
+  | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t) ->
+      [ type_id t ]
   | TForall (_, body) -> [ type_id body ]
   | TNamed (_, args) -> List.map type_id args
 
@@ -2998,7 +3023,8 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
         add_type a;
         add_type b
     | TRecord fields | TVariant fields -> List.iter (fun (_, t) -> add_type t) fields
-    | TList t | TView t | TAttr t | TProcess (_, t) | TSecretRef (_, t) | TForall (_, t) ->
+    | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t)
+    | TForall (_, t) ->
         add_type t
     | TNamed (_, args) -> List.iter add_type args
   in
@@ -3156,6 +3182,16 @@ let rec type_of_canonical_sexp = function
         |> List.sort_uniq String.compare
       in
       TProcess (Some caps, type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Cmd"; t ] -> TCmd (None, type_of_canonical_sexp t)
+  | Sexp.List [ Sexp.Atom "Cmd"; Sexp.List (Sexp.Atom "Capabilities" :: caps); t ] ->
+      let caps =
+        caps
+        |> List.map (function
+             | Sexp.Atom cap | Sexp.Str cap -> cap
+             | x -> fail ("invalid Cmd capability in canonical type: " ^ Sexp.to_string x))
+        |> List.sort_uniq String.compare
+      in
+      TCmd (Some caps, type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "SecretRef"; Sexp.Atom scope; t ] ->
       TSecretRef (scope, type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "List"; t ] -> TList (type_of_canonical_sexp t)

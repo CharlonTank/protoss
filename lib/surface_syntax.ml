@@ -39,6 +39,8 @@ type ::= Unit | Bool | Nat | String
        | (Attr type)
        | (Process type)
        | (Process (capabilities CapabilityName*) type)
+       | (Cmd type)
+       | (Cmd (capabilities CapabilityName*) type)
        | (SecretRef Scope type)
        | (forall Nat type)
        | (Name type*)
@@ -93,6 +95,7 @@ elm_type ::= Unit | Bool | Nat | String | Name | Name elm_type+
            | { field_type (, field_type)* }
            | [ elm_type ]
            | Process { CapabilityName* } elm_type
+           | Cmd { CapabilityName* } elm_type
 
 elm_expr ::= literal | Name | \Name+ -> elm_expr
            | if elm_expr then elm_expr else elm_expr

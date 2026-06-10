@@ -101,6 +101,20 @@ let rec type_of_graph_json obj =
         | Some _ -> fail "canonical graph Process capabilities must be an array"
       in
       Ast.TProcess (capabilities, type_of_graph_json (json_field "result" obj))
+  | "Cmd" ->
+      let capabilities =
+        match Json.field "capabilities" obj with
+        | None -> None
+        | Some (Json.Array caps) ->
+            Some
+              (caps
+              |> List.map (function
+                   | Json.String cap -> cap
+                   | _ -> fail "canonical graph Cmd capability must be string")
+              |> List.sort_uniq String.compare)
+        | Some _ -> fail "canonical graph Cmd capabilities must be an array"
+      in
+      Ast.TCmd (capabilities, type_of_graph_json (json_field "message" obj))
   | "SecretRef" ->
       Ast.TSecretRef
         (json_string_field "scope" obj, type_of_graph_json (json_field "value" obj))
