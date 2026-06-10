@@ -407,9 +407,16 @@ commande `protoss agent graph` et assertions "agent graph" dans
 `test/test_protoss.ml`; explications de definitions via
 `Canonical_ir.agent_graph_definition_explanation_json`, commande
 `protoss agent explain` et assertion "agent graph explanation" dans
-`test/test_protoss.ml`.
+`test/test_protoss.ml`; protocole agent et garde d'ecriture via
+`Agent_protocol.protocol_json`, `Agent_protocol.guard_write_json`,
+`Agent_protocol.commit_patch_json`, commandes `protoss agent protocol`,
+`protoss agent guard-write`, `protoss agent commit`, assertions
+"agent protocol" et "agent commit" dans `test/test_protoss.ml`.
 
-- [ ] Definir le protocole agent: `AI -> PatchCandidate -> Validator -> Harness -> Commit`.
+- [x] Definir le protocole agent: `AI -> PatchCandidate -> Validator -> Harness -> Commit`.
+  Preuves: `Agent_protocol.protocol_json`, commande
+  `protoss agent protocol`, assertion "agent protocol pipeline" dans
+  `test/test_protoss.ml`.
 - [x] Fournir une API d'exploration du graphe pour agents.
   Preuves: `Canonical_ir.agent_graph_summary_json`,
   `Canonical_ir.agent_graph_node_json`,
@@ -426,7 +433,11 @@ commande `protoss agent graph` et assertions "agent graph" dans
 - [ ] Simuler changements dans un `WorldRef` forke.
 - [ ] Comparer deux branches par harness.
 - [x] Generer des vues humaines lisibles depuis le graphe.
-- [ ] Interdire aux agents l'ecriture directe du programme canonique.
+- [x] Interdire aux agents l'ecriture directe du programme canonique.
+  Preuves: `Agent_protocol.guard_write_json`,
+  `Agent_protocol.commit_patch_json`, commandes `protoss agent guard-write` et
+  `protoss agent commit`, assertions "agent guard rejects canonical write" et
+  "agent commit denies direct canonical writes" dans `test/test_protoss.ml`.
 
 ## 14. Self-hosting
 

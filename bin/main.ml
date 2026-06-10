@@ -55,6 +55,7 @@ let usage () =
      \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent explain <graph.json> <nameOrDefId> | protoss agent explain --store-graph <project-or-store> <graphHash> <nameOrDefId>\n\
+     \       protoss agent protocol | guard-write <path> | commit <store> <patch.json>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
      \       protoss grammar kernel\n\
@@ -1005,6 +1006,13 @@ let command_agent_graph_query source input = function
   | _ -> usage ()
 
 let command_agent = function
+  | [ "protocol" ] -> print_string (Protoss.Agent_protocol.protocol_json ())
+  | [ "guard-write"; path ] ->
+      let guard = Protoss.Agent_protocol.guard_write path in
+      print_string (Protoss.Agent_protocol.guard_write_result_json guard);
+      if not guard.guard_allowed then exit 1
+  | [ "commit"; store; patch ] ->
+      print_string (Protoss.Agent_protocol.commit_patch_json store patch)
   | "graph" :: "--store-graph" :: project_or_store :: graph_hash :: args ->
       let store = Protoss.Workspace.store_of_arg project_or_store in
       let source =

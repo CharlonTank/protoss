@@ -47,6 +47,7 @@ What works now:
 - Store objects are interned through a global content store (`PROTOSS_GLOBAL_STORE`, or `$HOME/.protoss/global-store` by default) and project object files hardlink to the shared payload when the filesystem allows it, physically deduplicating identical nodes across projects.
 - `store gc <store>` reports unreferenced content-addressed objects, and `store gc --sweep --yes <store>` removes those unreachable objects while keeping current definition objects.
 - Patch diagnostics include patch file paths, JSON syntax `line:column` locations, the failing operation number, operation kind, definition name, field context, and embedded `expr.source` line/column when kernel type errors can be mapped back to that source. `patch review` renders a human-readable operation summary before validation or apply. Successful `patch apply` writes a deterministic content-addressed audit file under `store/patches/<patch-ref>.patch`, links it to the previous audit with `previous-ref`, records `previous-root`/`root-ref`, writes content-addressed root-state and patch-provenance records under `store/provenance/`, and updates `store/patches/latest`; `patch audit` verifies and prints that chain, and the default `latest` audit must match the current store program hash and latest root state. Project `audit` also verifies the latest patch audit when present. Rejected patches do not write audit artifacts.
+- The native agent protocol is `AI -> PatchCandidate -> Validator -> Harness -> Commit`. `protoss agent protocol` prints the versioned contract, `protoss agent guard-write <path>` rejects direct writes to canonical/store internals, and `protoss agent commit <store> <patch.json>` is the agent mutation path through patch validation and content-addressed audit.
 - `invariants` runs executable checks over canonicalization, graph round-trip, graph-first loading, canonical graph migration, normalization, alpha-stability, typed `Process` resume, and typed ledger request/resume events.
 - `invariants package <project>` checks package lock consistency, package descriptor freshness, package interface refs, package interface JSON artifacts, exported capability descriptors, `contractHash`, exported canonical type hashes, imported package freshness, package refs, and audit.
 - The core test suite includes preservation/progression-style fixtures: well-typed pure definitions in `examples/preservation_progression.protoss` normalize to values matching their declared types, while paired type-error and recursion-error fixtures are rejected before evaluation.
@@ -148,6 +149,9 @@ dune exec protoss -- agent graph graph.json --node <nodeRef>
 dune exec protoss -- agent graph graph.json --deps <nameOrDefId>
 dune exec protoss -- agent graph graph.json --explain <nameOrDefId>
 dune exec protoss -- agent explain graph.json <nameOrDefId>
+dune exec protoss -- agent protocol
+dune exec protoss -- agent guard-write .protoss/store/program.canon
+dune exec protoss -- agent commit examples/web/todo_app/.protoss/store patches/web/change_button_text.json
 dune exec protoss -- agent graph --store-graph examples/workspace <graphHash> --capabilities
 dune exec protoss -- agent graph --store-graph examples/workspace <graphHash> --host-contract
 dune exec protoss -- canon --ptb examples/basic.protoss > /tmp/basic.ptb

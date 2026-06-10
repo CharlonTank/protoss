@@ -84,6 +84,11 @@ let json_nat_field name obj =
   | Json.Num n when n >= 0 -> n
   | _ -> fail ("JSON field is not natural number: " ^ name)
 
+let json_bool_field name obj =
+  match json_field name obj with
+  | Json.Bool b -> b
+  | _ -> fail ("JSON field is not bool: " ^ name)
+
 let json_string_array_field name obj =
   json_array_field name obj
   |> List.map (function Json.String s -> s | _ -> fail ("JSON field is not string array: " ^ name))
@@ -4169,6 +4174,37 @@ let () =
   assert_true "patch review operation" (contains_substring patch_ok_review "op 1: AddDef");
   assert_true "patch review name" (contains_substring patch_ok_review "name: two");
   assert_true "patch review type" (contains_substring patch_ok_review "type: Nat");
+  let agent_protocol = Json.parse (Agent_protocol.protocol_json ()) in
+  assert_equal "agent protocol format" "protoss-agent-protocol-v1"
+    (json_string_field "format" agent_protocol);
+  assert_equal "agent protocol pipeline" "AI,PatchCandidate,Validator,Harness,Commit"
+    (String.concat "," (json_string_array_field "pipeline" agent_protocol));
+  let agent_guard_direct =
+    Json.parse (Agent_protocol.guard_write_json (Filename.concat store "program.canon"))
+  in
+  assert_true "agent guard rejects canonical write"
+    (not (json_bool_field "allowed" agent_guard_direct));
+  assert_equal "agent guard direct decision" "deny"
+    (json_string_field "decision" agent_guard_direct);
+  let agent_guard_patch = Json.parse (Agent_protocol.guard_write_json patch_ok) in
+  assert_true "agent guard allows patch candidate" (json_bool_field "allowed" agent_guard_patch);
+  let agent_commit_store = temp_dir "agent-commit" in
+  let agent_commit = Json.parse (Agent_protocol.commit_patch_json agent_commit_store patch_ok) in
+  assert_equal "agent commit format" "protoss-agent-commit-v1"
+    (json_string_field "format" agent_commit);
+  assert_equal "agent commit protocol" "protoss-agent-protocol-v1"
+    (json_string_field "protocol" agent_commit);
+  assert_equal "agent commit stage" "Commit" (json_string_field "stage" agent_commit);
+  assert_true "agent commit denies direct canonical writes"
+    (not (json_bool_field "directCanonicalWrites" agent_commit));
+  assert_true "agent commit patch ref" (contains_substring (json_string_field "patchRef" agent_commit) "p2:");
+  let agent_commit_guard = json_field "canonicalWriteGuard" agent_commit in
+  assert_true "agent commit embeds denied canonical guard"
+    (not (json_bool_field "allowed" agent_commit_guard));
+  let agent_committed = Store.load_program agent_commit_store |> Kernel.check_program in
+  let agent_committed_two, _ = Runtime.normalize_def agent_committed "two" in
+  assert_equal "agent commit applies validated patch" "2"
+    (Runtime.value_to_string agent_committed_two);
   let patch_audit_path store ref =
     Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
   in
