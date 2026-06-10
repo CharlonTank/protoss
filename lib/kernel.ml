@@ -3199,6 +3199,28 @@ type checked = {
   defs : checked_def list;
 }
 
+let secret_leak_risks checked =
+  let has cap caps = List.exists (String.equal cap) caps in
+  let outbound_sinks caps =
+    [ "Http.get"; "Server.request" ] |> List.filter (fun cap -> has cap caps)
+  in
+  let risk_for_scope scope caps =
+    let caps = List.sort_uniq String.compare caps in
+    let sinks = outbound_sinks caps in
+    if has "Local.storage" caps && sinks <> [] then
+      [
+        "SecretLeakRisk scope=" ^ scope ^ " sources=[Local.storage] sinks=["
+        ^ String.concat "," sinks ^ "]";
+      ]
+    else []
+  in
+  let program_risks = risk_for_scope "program" checked.program.capabilities in
+  let def_risks =
+    checked.defs
+    |> List.concat_map (fun d -> risk_for_scope ("def:" ^ d.def.name) d.capabilities)
+  in
+  program_risks @ def_risks
+
 let ensure_unique_canonical_defs defs =
   let names = Hashtbl.create 32 in
   List.iter

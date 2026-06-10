@@ -216,9 +216,12 @@ let capability_audit_text checked =
            d.def.name ^ " cap-scope-ref=" ^ Protoss.Kernel.capability_scope_ref caps
            ^ " caps=[" ^ String.concat "," caps ^ "]")
   in
+  let risk_lines = Protoss.Kernel.secret_leak_risks checked in
   "program-hash=" ^ Protoss.Kernel.hash_program checked ^ "\nprogram-caps=["
   ^ String.concat "," program_caps ^ "]\ndefs=\n" ^ String.concat "\n" def_lines
-  ^ if def_lines = [] then "" else "\n"
+  ^ (if def_lines = [] then "" else "\n")
+  ^ "risks=\n"
+  ^ (match risk_lines with [] -> "none\n" | lines -> String.concat "\n" lines ^ "\n")
 
 let command_capabilities = function
   | [ file ] -> print_string (capability_audit_text (parse_and_check file))

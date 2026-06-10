@@ -406,7 +406,10 @@ listees dans la section "Gates de validation".
 - [x] Policies attachees aux packages.
   Preuves: `Workspace.parse_manifest`, `lock_content`, `package_content`,
   assertions "project lock records policies" et `README.md`.
-- [ ] Analyse de risque `SecretLeakRisk`.
+- [x] Analyse de risque `SecretLeakRisk`.
+  Preuves: `Kernel.secret_leak_risks`, sortie `protoss capabilities`, assertion
+  "SecretLeakRisk detects local storage plus outbound request" dans
+  `test/test_protoss.ml` et `README.md`.
 - [ ] Audit provenance complet.
 - [x] Tests de negative capabilities par package.
   Preuves: `Workspace.read_package_import` rejette une importation dont

@@ -288,6 +288,7 @@ type checked_def = {
   capabilities : string list;
 }
 type checked = { program : Ast.program; defs : checked_def list; }
+val secret_leak_risks : checked -> string list
 val ensure_unique_canonical_defs : canonical_def list -> unit
 val canonical_def_by_ref :
   canonical_def list -> string -> canonical_def option
