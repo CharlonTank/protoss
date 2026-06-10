@@ -2119,6 +2119,7 @@ let () =
   let eval_key_b_alt_policy =
     Runtime.eval_key_for_def ~cache_scope:"alternate-runtime-policy" memo "b"
   in
+  let eval_key_b_cap_scope = Runtime.eval_key_for_def ~cap_scope:[ "Human.ask" ] memo "b" in
   assert_equal "eval key explicit shape"
     (Kernel.hash_string
        ("protoss.eval.v1\ndef-id=p2:def\nargs-hash=p2:args\nruntime-policy=policy"))
@@ -2127,11 +2128,16 @@ let () =
     (contains_substring eval_key_b "p2:");
   assert_true "eval key partitions by runtime policy"
     (not (String.equal eval_key_b eval_key_b_alt_policy));
+  assert_true "eval key partitions by capability scope"
+    (not (String.equal eval_key_b eval_key_b_cap_scope));
   assert_true "runtime policy records stdlib fast paths"
     (contains_substring
        (Runtime.eval_runtime_policy ~stdlib_fast_paths:true
           ~cache_scope:"alternate-runtime-policy" memo)
        "stdlib-fast-paths=true");
+  assert_true "runtime policy records capability scope"
+    (contains_substring (Runtime.eval_runtime_policy ~cap_scope:[ "Human.ask" ] memo)
+       "cap-scope=Human.ask");
   let _, _ = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let _, persistent_trace = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let _, _ =

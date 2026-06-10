@@ -221,7 +221,10 @@ listees dans la section "Gates de validation".
 - [x] Rejeter les changements web qui violent les capabilities attendues.
 - [ ] Ajouter `SecretRef scope a` au langage.
 - [ ] Sceller les secrets de facon a hasher le handle sans hasher la valeur.
-- [ ] Partitionner caches et evaluation par `CapScope`.
+- [x] Partitionner caches et evaluation par `CapScope`.
+  Preuves: `Runtime.runtime_policy_text` inclut `cap-scope`, les `EvalKey`
+  utilisent la capability scope effective, et assertions "eval key partitions
+  by capability scope" dans `test/test_protoss.ml`.
 - [ ] Ajouter policies de package autour des capabilities.
 - [ ] Ajouter tests de fuite de secret.
 - [x] Exposer une commande d'audit des capabilities par root.
@@ -390,7 +393,10 @@ listees dans la section "Gates de validation".
 - [x] Imports packages verrouilles par hashes.
 - [x] Rendu HTML sans injection `innerHTML`.
 - [ ] Secrets scelles.
-- [ ] Cache partitionne par capability scope.
+- [x] Cache partitionne par capability scope.
+  Preuves: `Runtime.runtime_policy_text`, `Runtime.eval_key_for_def`,
+  assertion "runtime policy records capability scope" dans `test/test_protoss.ml`
+  et `README.md`.
 - [ ] Policies attachees aux packages.
 - [ ] Analyse de risque `SecretLeakRisk`.
 - [ ] Audit provenance complet.

@@ -88,12 +88,17 @@ type eval_state = {
   mutable cap_scope : string list;
 }
 
-let runtime_policy_text ~cache_scope ~stdlib_fast_paths =
+let capability_scope_text caps =
+  String.concat " " (List.sort_uniq String.compare caps)
+
+let runtime_policy_text ~cap_scope ~cache_scope ~stdlib_fast_paths =
   "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ cache_scope
   ^ "\nstdlib-fast-paths=" ^ string_of_bool stdlib_fast_paths
+  ^ "\ncap-scope=" ^ capability_scope_text cap_scope
 
 let runtime_policy_of_state st =
   runtime_policy_text ~cache_scope:st.cache_scope ~stdlib_fast_paths:st.stdlib_fast_paths
+    ~cap_scope:st.cap_scope
 
 let rec value_to_string = function
   | VThunk thunk -> value_to_string (force_value (VThunk thunk))
@@ -970,8 +975,11 @@ and apply_value st fv av =
   | v, _ -> fail ("application of non-function runtime value: " ^ value_to_string v)
 
 and eval_key_for_checked_def st (d : Kernel.checked_def) =
+  let cap_scope = merge_caps st.cap_scope d.capabilities in
   eval_key ~def_id:d.def_id ~args_hash:no_args_hash
-    ~runtime_policy:(runtime_policy_of_state st)
+    ~runtime_policy:
+      (runtime_policy_text ~cache_scope:st.cache_scope ~stdlib_fast_paths:st.stdlib_fast_paths
+         ~cap_scope)
 
 and eval_def st n =
   match Hashtbl.find_opt st.def_cache n with
@@ -1010,18 +1018,21 @@ let program_cache_scope checked =
       cache_scope_memo := Some (checked, h);
       h
 
-let eval_runtime_policy ?(stdlib_fast_paths = false) ?cache_scope checked =
+let eval_runtime_policy ?(stdlib_fast_paths = false) ?cache_scope ?(cap_scope = []) checked =
   let scope =
     match cache_scope with Some scope -> scope | None -> program_cache_scope checked
   in
-  runtime_policy_text ~cache_scope:scope ~stdlib_fast_paths
+  runtime_policy_text ~cache_scope:scope ~stdlib_fast_paths ~cap_scope
 
-let eval_key_for_def ?(stdlib_fast_paths = false) ?cache_scope checked name =
+let eval_key_for_def ?(stdlib_fast_paths = false) ?cache_scope ?cap_scope checked name =
   match def_by_ref checked name with
   | None -> fail ("unknown definition for eval key: " ^ name)
   | Some d ->
+      let cap_scope =
+        match cap_scope with Some caps -> caps | None -> d.capabilities
+      in
       eval_key ~def_id:d.def_id ~args_hash:no_args_hash
-        ~runtime_policy:(eval_runtime_policy ~stdlib_fast_paths ?cache_scope checked)
+        ~runtime_policy:(eval_runtime_policy ~stdlib_fast_paths ?cache_scope ~cap_scope checked)
 
 (* Normal forms are pure functions of the program, yet the default
    [eval_entry]/[normalize_def] path rebuilt empty caches on every call. Reuse
