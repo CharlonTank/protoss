@@ -244,6 +244,10 @@ let event_path root event = Filename.concat (Filename.concat root "events") even
 
 let world_path root world = Filename.concat (Filename.concat root "worlds") world
 
+let branch_dir root = Filename.concat root "branches"
+
+let branch_path root name = Filename.concat (branch_dir root) (Store.sanitize_name name)
+
 let read_event root event = read_file (event_path root event)
 
 let read_world root world = read_file (world_path root world)
@@ -496,14 +500,33 @@ let import root payload =
   write_file_atomic (Filename.concat imports imported) payload;
   imported
 
+let fork root name world =
+  ignore (init root);
+  if not (Sys.file_exists (world_path root world)) then
+    failwith ("world not found: " ^ world);
+  ensure_dir (branch_dir root);
+  write_file_atomic (branch_path root name) (world ^ "\n");
+  world
+
 let branches root =
   let worlds = Filename.concat root "worlds" in
-  if not (Sys.file_exists worlds) then ""
-  else
-    Sys.readdir worlds |> Array.to_list |> List.sort String.compare
-    |> List.map (fun world ->
-           let fields = parse_lines (read_world root world) in
-           world ^ " previous=" ^ Option.value (field "previous" fields) ~default:""
-           ^ " event=" ^ Option.value (field "event" fields) ~default:"")
-    |> String.concat "\n"
-    |> fun s -> if s = "" then "" else s ^ "\n"
+  let world_lines =
+    if not (Sys.file_exists worlds) then []
+    else
+      Sys.readdir worlds |> Array.to_list |> List.sort String.compare
+      |> List.map (fun world ->
+             let fields = parse_lines (read_world root world) in
+             "world " ^ world ^ " previous="
+             ^ Option.value (field "previous" fields) ~default:""
+             ^ " event=" ^ Option.value (field "event" fields) ~default:"")
+  in
+  let branch_lines =
+    let dir = branch_dir root in
+    if not (Sys.file_exists dir) then []
+    else
+      Sys.readdir dir |> Array.to_list |> List.sort String.compare
+      |> List.map (fun name ->
+             "branch " ^ name ^ " world=" ^ String.trim (read_file (Filename.concat dir name)))
+  in
+  let s = String.concat "\n" (world_lines @ branch_lines) in
+  if s = "" then "" else s ^ "\n"

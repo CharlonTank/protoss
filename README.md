@@ -83,6 +83,7 @@ dune exec protoss -- duplicates --project examples/web/todo_app
 dune exec protoss -- ledger inspect <WorldRefOrEventRef>
 dune exec protoss -- ledger replay <WorldRef>
 dune exec protoss -- ledger diff <WorldRefA> <WorldRefB>
+dune exec protoss -- ledger fork feature <WorldRef>
 
 dune exec protoss -- fmt examples/web/todo_app/src/app.protoss
 dune exec protoss -- fmt --check examples/web/todo_app/src/app.protoss

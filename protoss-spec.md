@@ -160,7 +160,7 @@ listees dans la section "Gates de validation".
 - [ ] Rendre les capabilities visibles dans le type de `Process`.
 - [ ] Representer `WorldRef` comme Merkle-DAG evenementiel complet.
 - [ ] Ajouter fork/merge de mondes.
-- [ ] Ajouter branches de monde deterministes.
+- [x] Ajouter branches de monde deterministes.
 - [ ] Garantir que toute lecture monde passe par evenement explicite.
 - [ ] Ajouter API pour reponse externe negative comme evenement typed.
 - [ ] Ajouter fixtures pour capteurs ou autres effets extensibles.
