@@ -3419,6 +3419,32 @@ let () =
     | _ -> false);
   expect_check_error
     "capabilities Human.ask\nbad : Process { } String\nbad = Human.ask \"Name?\"\n";
+  let effect_sensors_path = find_up (Sys.getcwd ()) "examples/effect_sensors.protoss" in
+  let effect_sensors = Loader.check_file effect_sensors_path in
+  let assert_sensor_request name expected_req expected_scope =
+    let value, _ = Runtime.eval_entry effect_sensors name in
+    match value with
+    | Runtime.VProcessRequest suspended ->
+        assert_true ("sensor fixture request " ^ name)
+          (match (suspended.Runtime.req, expected_req) with
+          | Ast.ReadClock, Ast.ReadClock -> true
+          | Ast.HttpGet a, Ast.HttpGet b -> String.equal a b
+          | Ast.ServerRequest (ar, ap), Ast.ServerRequest (br, bp) ->
+              String.equal ar br && String.equal ap bp
+          | _ -> false);
+        assert_equal ("sensor fixture scope " ^ name) expected_scope
+          (String.concat "," suspended.Runtime.cap_scope);
+        assert_equal ("sensor fixture response type " ^ name) "\"ok\""
+          (Runtime.value_to_string (Runtime.response_value suspended.req "String:ok"))
+    | other -> fail ("sensor fixture should suspend " ^ name ^ ", got " ^ Runtime.value_to_string other)
+  in
+  assert_sensor_request "readTime" Ast.ReadClock "Clock.read";
+  assert_sensor_request "fetchStatus"
+    (Ast.HttpGet "https://example.invalid/status")
+    "Http.get";
+  assert_sensor_request "askSensor"
+    (Ast.ServerRequest ("/sensor/read", "{\"sensor\":\"temperature\"}"))
+    "Server.request";
   let defcap_process =
     check
       "(capabilities Human.ask)\n\

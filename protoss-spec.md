@@ -191,7 +191,9 @@ listees dans la section "Gates de validation".
   Preuves: `Ledger.record_external_error`, `protoss ledger reject`,
   assertions "ledger negative external event" dans `test/test_protoss.ml` et
   `README.md`.
-- [ ] Ajouter fixtures pour capteurs ou autres effets extensibles.
+- [x] Ajouter fixtures pour capteurs ou autres effets extensibles.
+  Preuves: `examples/effect_sensors.protoss`, assertions "sensor fixture"
+  dans `test/test_protoss.ml` et `README.md`.
 
 ## 8. Ledger
 

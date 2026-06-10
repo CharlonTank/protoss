@@ -1,0 +1,10 @@
+(capabilities Clock.read Http.get Server.request)
+
+(defcap readTime (capabilities Clock.read) (Process String)
+  (Clock.read))
+
+(defcap fetchStatus (capabilities Http.get) (Process String)
+  (Http.get "https://example.invalid/status"))
+
+(defcap askSensor (capabilities Server.request) (Process String)
+  (Server.request "/sensor/read" "{\"sensor\":\"temperature\"}"))
