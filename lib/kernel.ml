@@ -4027,6 +4027,12 @@ type termination_counts = {
   recur : int;
 }
 
+type termination_static_size = {
+  type_nodes : int;
+  arrow_arity : int;
+  sized_arguments : (int * string) list;
+}
+
 let termination_zero = { fold_nat = 0; fold_list = 0; fold_variant = 0; recur = 0 }
 
 let termination_add a b =
@@ -4099,11 +4105,62 @@ let termination_status counts =
   else if counts.fold_nat + counts.fold_list + counts.fold_variant > 0 then "structural-fold"
   else "trivial"
 
+let rec type_node_count = function
+  | TUnit | TBool | TNat | TString | TVar _ -> 1
+  | TFun (a, b) -> 1 + type_node_count a + type_node_count b
+  | TRecord fields | TVariant fields ->
+      1 + List.fold_left (fun acc (_, t) -> acc + type_node_count t) 0 fields
+  | TList t | TView t | TAttr t | TProcess (_, t) | TCmd (_, t) | TSecretRef (_, t)
+  | TForall (_, t) ->
+      1 + type_node_count t
+  | TNamed (_, args) ->
+      1 + List.fold_left (fun acc t -> acc + type_node_count t) 0 args
+
+let rec curried_argument_types = function
+  | TForall (_, body) -> curried_argument_types body
+  | TFun (arg, result) -> arg :: curried_argument_types result
+  | _ -> []
+
+let rec type_static_measure = function
+  | TNat -> Some "Nat.value"
+  | TList _ -> Some "List.length"
+  | TVariant _ -> Some "Variant.height"
+  | TNamed (name, _) -> Some (name ^ ".height")
+  | TRecord fields ->
+      let field_measures =
+        fields
+        |> List.filter_map (fun (field, t) ->
+               type_static_measure t |> Option.map (fun measure -> field ^ ":" ^ measure))
+      in
+      if field_measures = [] then None
+      else Some ("Record{" ^ String.concat "," field_measures ^ "}")
+  | TForall (_, body) -> type_static_measure body
+  | _ -> None
+
+let termination_static_size_type typ =
+  let args = curried_argument_types typ in
+  {
+    type_nodes = type_node_count typ;
+    arrow_arity = List.length args;
+    sized_arguments =
+      args
+      |> List.mapi (fun i t -> (i, type_static_measure t))
+      |> List.filter_map (fun (i, measure) -> measure |> Option.map (fun m -> (i, m)));
+  }
+
+let termination_static_sized_arguments_to_string = function
+  | [] -> "none"
+  | args ->
+      args
+      |> List.map (fun (i, measure) -> "arg" ^ string_of_int i ^ ":" ^ measure)
+      |> String.concat ","
+
 let termination_explanation_text checked name =
   match checked_def_by_name checked name with
   | None -> fail ("unknown definition for termination explanation: " ^ name)
   | Some def ->
       let counts = termination_counts_term def.cterm in
+      let static_size = termination_static_size_type def.def.typ in
       let explanation =
         match termination_status counts with
         | "trivial" -> "no recursion or structural fold in canonical body"
@@ -4115,7 +4172,11 @@ let termination_explanation_text checked name =
       ^ string_of_typ def.def.typ ^ "\nstatus=" ^ termination_status counts ^ "\nfoldNat="
       ^ string_of_int counts.fold_nat ^ "\nfoldList=" ^ string_of_int counts.fold_list
       ^ "\nfoldVariant=" ^ string_of_int counts.fold_variant ^ "\nrecur="
-      ^ string_of_int counts.recur ^ "\nexplanation=" ^ explanation ^ "\n"
+      ^ string_of_int counts.recur ^ "\nstaticTypeNodes="
+      ^ string_of_int static_size.type_nodes ^ "\nstaticArrowArity="
+      ^ string_of_int static_size.arrow_arity ^ "\nstaticSizedArguments="
+      ^ termination_static_sized_arguments_to_string static_size.sized_arguments
+      ^ "\nexplanation=" ^ explanation ^ "\n"
 
 let rec shift amount cutoff = function
   | CUnit -> CUnit

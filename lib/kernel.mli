@@ -337,8 +337,14 @@ type termination_counts = {
   fold_variant : int;
   recur : int;
 }
+type termination_static_size = {
+  type_nodes : int;
+  arrow_arity : int;
+  sized_arguments : (int * string) list;
+}
 val termination_counts_term : cterm -> termination_counts
 val termination_status : termination_counts -> string
+val termination_static_size_type : Ast.typ -> termination_static_size
 val termination_explanation_text : checked -> string -> string
 val shift : int -> int -> cterm -> cterm
 val shift_branch : int -> int -> cbranch -> cbranch

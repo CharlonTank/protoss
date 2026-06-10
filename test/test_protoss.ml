@@ -1487,6 +1487,12 @@ let () =
     (contains_substring defrec_nat_termination "foldNat=1");
   assert_true "termination explanation reports structural status"
     (contains_substring defrec_nat_termination "status=structural-fold");
+  assert_true "termination explanation reports static type nodes"
+    (contains_substring defrec_nat_termination "staticTypeNodes=3");
+  assert_true "termination explanation reports static arity"
+    (contains_substring defrec_nat_termination "staticArrowArity=1");
+  assert_true "termination explanation reports Nat static size"
+    (contains_substring defrec_nat_termination "staticSizedArguments=arg0:Nat.value");
   let four, _ = Runtime.normalize_def defrec_nat "four" in
   assert_equal "defrec Nat normalization" "4" (Runtime.value_to_string four);
 
@@ -1590,6 +1596,11 @@ let () =
     (Kernel.hash_program defrec_variant);
   let tree_size, _ = Runtime.normalize_def defrec_variant "out" in
   assert_equal "defrec Variant normalization" "2" (Runtime.value_to_string tree_size);
+  let defrec_variant_termination =
+    Kernel.termination_explanation_text defrec_variant "sizeRec"
+  in
+  assert_true "termination explanation reports recursive variant static size"
+    (contains_substring defrec_variant_termination "staticSizedArguments=arg0:Tree.height");
   let nested_tree_rec =
     check
       ("(variant DeepTree \

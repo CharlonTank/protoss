@@ -207,7 +207,14 @@ assertions recursion, alpha-stabilite et normalisation dans `test/test_protoss.m
   Preuves: `Kernel.direct_recur_terms_for_value` parcourt recursivement les
   champs record imbriques, `README.md`, assertion "defrec nested record
   subterm recursion" dans `test/test_protoss.ml`.
-- [ ] Supporter tailles statiques pour terminaison.
+- [x] Supporter tailles statiques pour terminaison.
+  Preuves: `Kernel.termination_static_size_type` calcule `staticTypeNodes`,
+  `staticArrowArity` et `staticSizedArguments` pour Nat/List/Variant/record;
+  `protoss termination <file> <definition>` les affiche; assertions
+  "termination explanation reports static type nodes", "termination explanation
+  reports static arity", "termination explanation reports Nat static size" et
+  "termination explanation reports recursive variant static size" dans
+  `test/test_protoss.ml`; `README.md`.
 - [ ] Supporter coinduction productive.
 - [ ] Supporter automates explicitement productifs.
 - [x] Ajouter des tests de preservation/progression approximatifs par fixtures.
