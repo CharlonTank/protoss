@@ -420,11 +420,30 @@ serveur MCP stdio `Mcp_server.serve_stdio`, outils `protoss.*` dans
 
 ## 12. Harness integre
 
-- [ ] Definir la syntaxe `harness name = ...`.
+Preuves de section: `lib/harness.ml`, commande `protoss harness run`,
+fixture `examples/harness_project/harness/smoke.pth`, assertions "harness
+parser", "harness report" et "harness failing" dans `test/test_protoss.ml`,
+`README.md`.
+
+- [x] Definir la syntaxe `harness name = ...`.
+  Preuves: `Harness.parse`, grammaire `harness name = example def` et
+  `harness name = unit def == expected`, assertion "harness parser
+  declarations" dans `test/test_protoss.ml`, `README.md`.
 - [ ] Stocker les harnesses dans le graphe canonique.
-- [ ] Hasher les harnesses avec `HarnessId = H(canonicalBytes(harness))`.
-- [ ] Supporter exemples executables.
-- [ ] Supporter tests unitaires.
+- [x] Hasher les harnesses avec `HarnessId = H(canonicalBytes(harness))`.
+  Preuves: `Harness.canonical_bytes`, `Harness.harness_id`,
+  `Harness.file_ref`, champ `(harness-id ...)` des locks/packages/universe,
+  assertions "harness canonical bytes include format", "harness file ref is
+  canonical" et "project universe root records harness files" dans
+  `test/test_protoss.ml`.
+- [x] Supporter exemples executables.
+  Preuves: `Harness.run_json`, syntaxe `example`, commande
+  `protoss harness run`, fixture `examples/harness_project/harness/smoke.pth`,
+  assertion "harness example passes" dans `test/test_protoss.ml`.
+- [x] Supporter tests unitaires.
+  Preuves: `Harness.run_json`, syntaxe `unit def == expected`, assertions
+  "harness unit actual", "harness failing status" et "harness failing
+  expected" dans `test/test_protoss.ml`.
 - [ ] Supporter tests de proprietes.
 - [ ] Supporter generateurs de donnees.
 - [ ] Supporter benchmarks.
@@ -699,7 +718,11 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 - [x] ADT.
 - [x] Records.
 - [x] Pattern matching par lowering.
-- [ ] Harness examples.
+- [x] Harness examples.
+  Preuves: `examples/harness_project/protoss.toml`,
+  `examples/harness_project/src/main.protoss`,
+  `examples/harness_project/harness/smoke.pth`, commande README
+  `protoss harness run` sur `examples/harness_project`.
 
 ### v0.2 - Store global
 

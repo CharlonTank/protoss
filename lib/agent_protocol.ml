@@ -425,7 +425,7 @@ let suggested_harness_template name typ =
   match suggested_test_kind typ with
   | "process-ledger" -> "harness " ^ harness_name name "process" ^ " = scenario " ^ name
   | "example-call" -> "harness " ^ harness_name name "example" ^ " = example " ^ name ^ " (...)"
-  | _ -> "harness " ^ harness_name name "normalizes" ^ " = unit " ^ name
+  | _ -> "harness " ^ harness_name name "normalizes" ^ " = unit " ^ name ^ " == <expected>"
 
 let test_suggestion_json (d : Kernel.checked_def) =
   let type_canonical = Kernel.type_to_canonical d.Kernel.def.typ in

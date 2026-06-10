@@ -29,6 +29,7 @@ let usage () =
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
+     \       protoss harness run <project-or-store> <harness.pth>\n\
      \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
      \       protoss self typecheck <file> [--json] | type-of <file> --entry <name> | compare-typecheck <file>\n\
      \       protoss self fmt [--check] <file>\n\
@@ -103,6 +104,7 @@ let protect f =
   | Protoss.Loader.Error msg -> print_error "load error" msg
   | Protoss.Kernel.Error msg -> print_error "check error" msg
   | Protoss.Patch.Error msg -> print_error "patch error" msg
+  | Protoss.Harness.Error msg -> print_error "harness error" msg
   | Protoss.Store.Error msg -> print_error "store error" msg
   | Protoss.Workspace.Error msg -> print_error "workspace error" msg
   | Protoss.Web.Error msg -> print_error "web error" msg
@@ -399,6 +401,28 @@ let command_run_graph file args =
 
 let command_run_store_graph project_or_store graph_hash args =
   run_checked (checked_store_graph project_or_store graph_hash) args
+
+let checked_project_or_store project_or_store =
+  let root = Protoss.Workspace.project_root project_or_store in
+  if Sys.file_exists (Protoss.Workspace.manifest_path root) then
+    let build =
+      Protoss.Workspace.build (Protoss.Workspace.parse_manifest root)
+    in
+    build.Protoss.Workspace.checked
+  else
+    let store = Protoss.Workspace.store_of_arg project_or_store in
+    let graph_path = Filename.concat store "program.graph.json" in
+    if Sys.file_exists graph_path then
+      Protoss.Canonical_ir.checked_of_graph (Protoss.Store.read_file graph_path)
+    else Protoss.Kernel.fail ("missing current program graph: " ^ graph_path)
+
+let command_harness = function
+  | [ "run"; project_or_store; harness_file ] ->
+      let checked = checked_project_or_store project_or_store in
+      print_string
+        (Protoss.Harness.run_json checked ~source:harness_file
+           (Protoss.Store.read_file harness_file))
+  | _ -> usage ()
 
 let resume_checked checked args =
   let _entry, _ = find_entry args in
@@ -1476,6 +1500,7 @@ let () =
       | "app" :: args -> command_app args
       | "web" :: args -> command_web args
       | "runtime" :: args -> command_runtime args
+      | "harness" :: args -> command_harness args
       | "self" :: args -> command_self args
       | "project" :: args -> command_project args
       | "build" :: args -> command_project_build args

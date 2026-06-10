@@ -4371,8 +4371,53 @@ let () =
          String.equal (json_string_field "name" suggestion) "two"
          && String.equal (json_string_field "kind" suggestion) "normalization"
          && contains_substring (json_string_field "harnessTemplate" suggestion)
-              "harness two_normalizes = unit two")
+              "harness two_normalizes = unit two == <expected>")
        agent_test_suggestions);
+  let harness_checked = check "(def two Nat 2)\n(def main Nat 0)" in
+  let harness_source =
+    "harness twoExample = example two\nharness twoUnit = unit two == 2\n"
+  in
+  let harnesses = Harness.parse harness_source in
+  assert_equal "harness parser declarations" "2"
+    (string_of_int (List.length harnesses));
+  assert_true "harness canonical bytes include format"
+    (contains_substring (Harness.canonical_bytes harness_source)
+       Harness.canonical_format);
+  assert_equal "harness file ref is canonical"
+    (Kernel.hash_string (Harness.canonical_bytes harness_source))
+    (Harness.file_ref harness_source);
+  let harness_report =
+    Json.parse (Harness.run_json harness_checked ~source:"inline.pth" harness_source)
+  in
+  assert_equal "harness report format" Harness.format
+    (json_string_field "format" harness_report);
+  assert_equal "harness report status" "pass"
+    (json_string_field "status" harness_report);
+  assert_equal "harness report count" "2"
+    (string_of_int (json_nat_field "harnessCount" harness_report));
+  let harness_results = json_array_field "harnesses" harness_report in
+  let harness_example = List.hd harness_results in
+  assert_equal "harness result id"
+    (Harness.harness_id (List.hd harnesses))
+    (json_string_field "harnessId" harness_example);
+  assert_true "harness example passes" (json_bool_field "passed" harness_example);
+  let harness_unit = List.nth harness_results 1 in
+  assert_equal "harness unit actual" "2" (json_string_field "actual" harness_unit);
+  assert_equal "harness unit expected" "2"
+    (json_string_field "expected" harness_unit);
+  let failing_harness =
+    Json.parse
+      (Harness.run_json harness_checked ~source:"inline.pth"
+         "harness bad = unit two == 3\n")
+  in
+  assert_equal "harness failing status" "fail"
+    (json_string_field "status" failing_harness);
+  let failing_result = List.hd (json_array_field "harnesses" failing_harness) in
+  assert_true "harness failing unit is marked"
+    (not (json_bool_field "passed" failing_result));
+  assert_equal "harness failing actual" "2" (json_string_field "actual" failing_result);
+  assert_equal "harness failing expected" "3"
+    (json_string_field "expected" failing_result);
 
   let factor_store = temp_dir "factor-identical" in
   let factor_seed =
@@ -5275,9 +5320,9 @@ let () =
   let harness_dir = Filename.concat ws_a "harness" in
   ensure_dir harness_dir;
   let package_harness_path = Filename.concat harness_dir "smoke.pth" in
-  let package_harness_content = "protoss-harness-v1\nkind=example\nname=smoke\n" in
+  let package_harness_content = "harness smoke = example appMain\n" in
   write_file package_harness_path package_harness_content;
-  let package_harness_ref = Kernel.hash_string package_harness_content in
+  let package_harness_ref = Harness.file_ref package_harness_content in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";
   Workspace.check_project manifest_a;
@@ -5650,7 +5695,8 @@ let () =
     package_checked.interface_path;
   assert_equal "project package check interface contract" package_a.interface_contract_hash
     package_checked.interface_contract_hash;
-  write_file package_harness_path (package_harness_content ^ "changed=true\n");
+  write_file package_harness_path
+    (package_harness_content ^ "harness changed = example appMain\n");
   (try
      ignore (Workspace.check_package manifest_a);
      fail "package check should reject harness drift"
@@ -6707,7 +6753,7 @@ let () =
   assert_true "ledger simulation updates branch pointer"
     (contains_substring (Ledger.branches ledger_web) ("branch feature world=" ^ simulation_world));
   let harness_compare_path = Filename.concat ledger_web "branch-compare.pth" in
-  let harness_compare_content = "harness branchComparison = ledgerDiff\n" in
+  let harness_compare_content = "harness branchComparison = example ledgerDiff\n" in
   write_file harness_compare_path harness_compare_content;
   let _control_event, control_world =
     Ledger.simulate ledger_web "control" world1 "try control local-storage value"

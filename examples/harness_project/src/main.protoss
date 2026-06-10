@@ -1,0 +1,2 @@
+(def two Nat 2)
+(def label String "ok")

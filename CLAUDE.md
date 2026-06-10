@@ -19,6 +19,9 @@ Policy names are executable, not just descriptor text: for example
 Package aliases are local manifest entries (`package_aliases = ["name@semver=path"]` or
 `package_policy_aliases = ["name@policy=path"]`) and must validate the imported package
 name/version or advertised policy before resolving to the locked package hash.
+`lib/harness.ml` owns `.pth` harness parsing, canonical bytes, `HarnessId` derivation, and
+the JSON runner used by `protoss harness run`; package/universe harness refs must use those
+canonical IDs rather than raw file hashes.
 `protoss grammar kernel` is the stable executable grammar surface for the trusted core; update
 `Kernel.executable_grammar_text` when adding core forms. `protoss grammar human` is the shipped
 Protoss/H grammar surface; update `Surface_syntax.human_grammar_text` when adding human syntax.

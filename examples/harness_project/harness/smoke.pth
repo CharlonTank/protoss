@@ -1,0 +1,3 @@
+harness twoExample = example two
+harness twoUnit = unit two == 2
+harness labelUnit = unit label == "ok"

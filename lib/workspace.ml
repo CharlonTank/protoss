@@ -1018,7 +1018,7 @@ let harness_item manifest path =
   lock_item "harness"
     [
       lock_item "path" [ lock_string (relative_to_root manifest path) ];
-      lock_item "hash" [ Kernel.hash_string content ];
+      lock_item "harness-id" [ Harness.file_ref content ];
       lock_item "bytes" [ string_of_int (String.length content) ];
     ]
 
