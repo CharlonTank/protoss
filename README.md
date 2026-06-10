@@ -111,6 +111,7 @@ dune exec protoss -- ledger inspect <WorldRefOrEventRef>
 dune exec protoss -- ledger replay <WorldRef>
 dune exec protoss -- ledger diff <WorldRefA> <WorldRefB>
 dune exec protoss -- ledger fork feature <WorldRef>
+dune exec protoss -- ledger simulate feature <WorldRef> "try alternate host response"
 dune exec protoss -- ledger merge <ledger-root> <WorldRefA> <WorldRefB>
 dune exec protoss -- ledger reject <ledger-root> <WorldRef> <EventRef> HOST_TIMEOUT "host timed out"
 

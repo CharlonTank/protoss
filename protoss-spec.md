@@ -476,7 +476,11 @@ factorisation des doublons via `Agent_protocol.factor_identical_json`,
   `Agent_protocol.factor_identical_patch_json`, commande
   `protoss agent factor-identical`, assertions "agent factor identical" dans
   `test/test_protoss.ml`.
-- [ ] Simuler changements dans un `WorldRef` forke.
+- [x] Simuler changements dans un `WorldRef` forke.
+  Preuves: `Ledger.simulate`, event `kind=simulation`, commande `protoss ledger
+  simulate`, assertions "ledger simulation event records fork", "ledger
+  simulation diff is isolated to fork" et "ledger simulation updates branch
+  pointer" dans `test/test_protoss.ml`, `README.md`.
 - [ ] Comparer deux branches par harness.
 - [x] Generer des vues humaines lisibles depuis le graphe.
 - [x] Interdire aux agents l'ecriture directe du programme canonique.

@@ -25,7 +25,7 @@ let usage () =
      \       protoss resume --graph <graph.json> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss resume --store-graph <project-or-store> <graphHash> --entry <name> --event <event> --response <value> [--ledger <root>]\n\
      \       protoss world init [<ledger-root>]\n\
-     \       protoss ledger event|world|inspect|replay|diff|export|import|fork|merge|branches|reject [args]\n\
+     \       protoss ledger event|world|inspect|replay|diff|export|import|fork|simulate|merge|branches|reject [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
@@ -466,6 +466,14 @@ let command_ledger = function
       print_endline (Protoss.Ledger.import root (Protoss.Store.read_file file))
   | [ "fork"; name; world ] -> print_endline (Protoss.Ledger.fork default_ledger name world)
   | [ "fork"; root; name; world ] -> print_endline (Protoss.Ledger.fork root name world)
+  | [ "simulate"; name; world; description ] ->
+      let event, simulated_world =
+        Protoss.Ledger.simulate default_ledger name world description
+      in
+      Printf.printf "SimulationEvent %s\nWorld %s\n" event simulated_world
+  | [ "simulate"; root; name; world; description ] ->
+      let event, simulated_world = Protoss.Ledger.simulate root name world description in
+      Printf.printf "SimulationEvent %s\nWorld %s\n" event simulated_world
   | [ "merge"; world_a; world_b ] ->
       print_endline (Protoss.Ledger.merge default_ledger world_a world_b)
   | [ "merge"; root; world_a; world_b ] ->

@@ -6664,6 +6664,21 @@ let () =
   let imported_ref = Ledger.import ledger_web exported in
   assert_true "ledger export/import" (String.length imported_ref > 3);
   assert_true "ledger branches" (String.contains (Ledger.branches ledger_web) 'p');
+  let simulation_event, simulation_world =
+    Ledger.simulate ledger_web "feature" world1 "try alternate local-storage value"
+  in
+  let simulation_content = Ledger.inspect_event ledger_web simulation_event in
+  assert_true "ledger simulation event records fork"
+    (contains_substring simulation_content "kind=simulation"
+    && contains_substring simulation_content ("base-world=" ^ world1)
+    && contains_substring simulation_content "branch=feature");
+  assert_true "ledger simulation replay includes simulated event"
+    (contains_substring (Ledger.replay ledger_web simulation_world) ("Event " ^ simulation_event));
+  assert_true "ledger simulation diff is isolated to fork"
+    (contains_substring (Ledger.diff ledger_web world1 simulation_world)
+       ("only_b=" ^ simulation_event));
+  assert_true "ledger simulation updates branch pointer"
+    (contains_substring (Ledger.branches ledger_web) ("branch feature world=" ^ simulation_world));
 
   let ledger_root = temp_dir "ledger-inspect" in
   let world = Ledger.init ledger_root in

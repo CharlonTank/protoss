@@ -585,6 +585,15 @@ let validate_event root event content =
           "root-ref";
           "program-hash";
         ]
+  | Some "simulation" ->
+      List.iter need [ "branch"; "base-world"; "description" ];
+      let base = Option.value (field "base-world" fields) ~default:"" in
+      if not (String.equal base event_world) then
+        failwith
+          ("maltyped event " ^ event ^ ": simulation base-world mismatch: expected "
+         ^ event_world ^ ", got " ^ base);
+      if not (Sys.file_exists (world_path root base)) then
+        failwith ("maltyped event " ^ event ^ ": simulation base world not found: " ^ base)
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
   fields
@@ -730,6 +739,16 @@ let fork root name world =
   ensure_dir (branch_dir root);
   write_file_atomic (branch_path root name) (world ^ "\n");
   world
+
+let simulate root name world description =
+  let base_world = fork root name world in
+  let event, simulated_world =
+    add_event root base_world
+      ("kind=simulation\nbranch=" ^ name ^ "\nbase-world=" ^ base_world
+     ^ "\ndescription=" ^ String.escaped description)
+  in
+  write_file_atomic (branch_path root name) (simulated_world ^ "\n");
+  (event, simulated_world)
 
 let merge root world_a world_b =
   ignore (init root);
