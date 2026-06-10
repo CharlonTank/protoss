@@ -4633,6 +4633,36 @@ let () =
    with Workspace.Error msg ->
      assert_true "project syntax error has file line column"
        (contains_substring msg (bad_project_file ^ ":1:1: unterminated list")));
+  let policy_project_root = temp_dir "project-policy-capability" in
+  ignore (Workspace.init policy_project_root);
+  let policy_manifest_path = Filename.concat policy_project_root "protoss.toml" in
+  write_file policy_manifest_path
+    "name = \"policy-capability\"\n\
+     version = \"0.1.0\"\n\
+     entrypoints = [\"src/main.protoss\"]\n\
+     stdlib = \"none\"\n\
+     source_dirs = [\"src\"]\n\
+     store_dir = \".protoss/store\"\n\
+     cache_dir = \".protoss/cache\"\n\
+     capabilities = []\n\
+     policies = [\"NoNetworkExceptDeclared\"]\n";
+  write_file (Filename.concat policy_project_root "src/main.protoss")
+    "(capabilities Http.get)\n\
+     (defcap fetch (capabilities Http.get) (Process String)\n\
+     \  (Http.get \"https://example.invalid/status\"))\n";
+  let policy_manifest = Workspace.parse_manifest policy_project_root in
+  (try
+     ignore (Workspace.build policy_manifest);
+     fail "NoNetworkExceptDeclared should require manifest network capabilities"
+   with Workspace.Error msg ->
+     assert_true "NoNetworkExceptDeclared reports missing manifest capability"
+       (contains_substring msg
+          "policy NoNetworkExceptDeclared requires manifest capability declaration: Http.get"));
+  write_file policy_manifest_path
+    (replace_once (Store.read_file policy_manifest_path) "capabilities = []"
+       "capabilities = [\"Http.get\"]");
+  let policy_manifest_declared = Workspace.parse_manifest policy_project_root in
+  ignore (Workspace.build policy_manifest_declared);
   let ws_a = make_workspace "workspace-a" 2 "x" in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";

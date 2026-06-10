@@ -843,6 +843,29 @@ let program_of_units (manifest : manifest) (units : unit_load list) =
     defs = List.concat (List.map (fun u -> u.defs) units);
   }
 
+let has_policy (manifest : manifest) name = List.exists (String.equal name) manifest.policies
+
+let capability_declared_in_manifest (manifest : manifest) cap =
+  List.exists (String.equal cap) manifest.capabilities
+
+let is_network_capability cap = has_prefix "Http." cap || has_prefix "Server." cap
+
+let enforce_capability_policy (manifest : manifest) checked policy predicate =
+  if has_policy manifest policy then
+    let missing =
+      checked.Kernel.program.capabilities
+      |> List.filter predicate
+      |> List.filter (fun cap -> not (capability_declared_in_manifest manifest cap))
+      |> sort_uniq
+    in
+    if missing <> [] then
+      fail
+        ("policy " ^ policy ^ " requires manifest capability declaration: "
+       ^ String.concat ", " missing)
+
+let enforce_capability_policies (manifest : manifest) checked =
+  enforce_capability_policy manifest checked "NoNetworkExceptDeclared" is_network_capability
+
 let prepare_build manifest =
   let stats = empty_stats () in
   let store = store_root manifest in
@@ -850,6 +873,7 @@ let prepare_build manifest =
   let cache_key = prepare_build_cache_key manifest units in
   match Hashtbl.find_opt prepared_build_cache cache_key with
   | Some core ->
+      enforce_capability_policies manifest core.core_checked;
       {
         units;
         checked = core.core_checked;
@@ -868,6 +892,7 @@ let prepare_build manifest =
       let checked =
         try Kernel.check_program program with Kernel.Error msg -> fail msg
       in
+      enforce_capability_policies manifest checked;
       let program_canonical = Kernel.serialize_checked_program checked in
       let program_graph = lazy (Kernel.checked_to_graph_json checked) in
       let build_id = Kernel.hash_string program_canonical in

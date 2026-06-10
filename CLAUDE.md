@@ -13,6 +13,9 @@ change that makes equivalent sources hash differently, or that introduces non-de
 Workspace builds also write a deterministic `UniverseRoot` (`universe.root` plus
 `universe.root.content`) over package metadata, defs, types, harness slots, policies, and world refs;
 lock/package flows must keep their `universe-root` field in sync with that store root.
+Policy names are executable, not just descriptor text: for example
+`NoNetworkExceptDeclared` requires `Http.*` and `Server.*` capabilities to be present in manifest
+`capabilities`.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

@@ -278,7 +278,11 @@ scope refs, package negative capabilities et SecretLeakRisk dans
   Preuves: `Runtime.runtime_policy_text` inclut `cap-scope`, les `EvalKey`
   utilisent la capability scope effective, et assertions "eval key partitions
   by capability scope" dans `test/test_protoss.ml`.
-- [ ] Ajouter policies de package autour des capabilities.
+- [x] Ajouter policies de package autour des capabilities.
+  Preuves: `Workspace.enforce_capability_policies` applique
+  `NoNetworkExceptDeclared` aux capabilities reseau, assertions
+  "NoNetworkExceptDeclared ..." dans `test/test_protoss.ml`, `README.md` et
+  `CLAUDE.md`.
 - [ ] Ajouter tests de fuite de secret.
 - [x] Exposer une commande d'audit des capabilities par root.
 
