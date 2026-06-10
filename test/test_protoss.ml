@@ -6532,6 +6532,31 @@ let () =
     (contains_substring merged_replay ("Event " ^ negative_event));
   assert_true "ledger branches list merge parents"
     (contains_substring (Ledger.branches ledger_root) "merge-left=");
+  let bad_event_hash = "p2:bad-event-hash" in
+  Store.write_file_atomic (Ledger.event_path ledger_root bad_event_hash) inspected_request_event;
+  (try
+     ignore (Ledger.inspect_event ledger_root bad_event_hash);
+     fail "ledger event under wrong hash should be rejected"
+   with Failure msg ->
+     assert_true "ledger event hash mismatch is reported"
+       (contains_substring msg "content hash mismatch"));
+  let bad_world_hash = "p2:bad-world-hash" in
+  Store.write_file_atomic (Ledger.world_path ledger_root bad_world_hash) inspected_merged_world;
+  (try
+     ignore (Ledger.inspect_world ledger_root bad_world_hash);
+     fail "ledger world under wrong hash should be rejected"
+   with Failure msg ->
+     assert_true "ledger world hash mismatch is reported"
+       (contains_substring msg "hash mismatch"));
+  let bad_world_no_event = "p2:bad-world-no-event" in
+  Store.write_file_atomic (Ledger.world_path ledger_root bad_world_no_event)
+    ("previous=" ^ next_world ^ "\nevent=\n");
+  (try
+     ignore (Ledger.inspect_world ledger_root bad_world_no_event);
+     fail "ledger world without event should be rejected"
+   with Failure msg ->
+     assert_true "ledger world requires explicit event"
+       (contains_substring msg "previous/event"));
   let bad_negative_signature_ref_event = "p2:bad-negative-signature-ref-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_negative_signature_ref_event)
     (replace_once inspected_negative_event ("request-signature-ref=" ^ human_signature_ref)

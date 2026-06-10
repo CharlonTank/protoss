@@ -167,6 +167,12 @@ let validate_request_signature_fields event fields request =
   require_equal "response-codec-ref" (response_codec_ref signature);
   signature
 
+let validate_event_hash event content =
+  let expected = hash ("event:" ^ content) in
+  if not (String.equal event expected) then
+    failwith
+      ("maltyped event " ^ event ^ ": content hash mismatch: expected " ^ expected)
+
 let add_event root world payload =
   ensure_dir root;
   let events = Filename.concat root "events" in
@@ -340,6 +346,7 @@ let record_external_error root world event code message =
    ^ String.escaped code ^ "\nerror-message=" ^ String.escaped message)
 
 let validate_event root event content =
+  validate_event_hash event content;
   let fields = parse_lines content in
   let need name =
     match field name fields with
@@ -348,6 +355,9 @@ let validate_event root event content =
   in
   need "world";
   need "kind";
+  let event_world = Option.value (field "world" fields) ~default:"" in
+  if not (Sys.file_exists (world_path root event_world)) then
+    failwith ("maltyped event " ^ event ^ ": world not found: " ^ event_world);
   (match field "kind" fields with
   | Some "request" ->
       List.iter need
@@ -511,14 +521,71 @@ let inspect_event root event =
   ignore (validate_event root event content);
   content
 
+let next_world world event = hash ("world:" ^ world ^ ":" ^ event)
+
+let validate_world_content root world content =
+  let fields = parse_lines content in
+  let need name =
+    match field name fields with
+    | Some value -> value
+    | None -> failwith ("maltyped world " ^ world ^ ": missing " ^ name)
+  in
+  let previous = need "previous" in
+  let event = need "event" in
+  match (previous, event, field "merge-left" fields, field "merge-right" fields) with
+  | "", "", None, None ->
+      if not (String.equal world initial_world) then
+        failwith
+          ("maltyped world " ^ world ^ ": initial world hash mismatch: expected "
+         ^ initial_world)
+  | "", _, _, _ | _, "", _, _ ->
+      failwith ("maltyped world " ^ world ^ ": previous/event must both be empty or set")
+  | previous, event, None, None ->
+      if not (Sys.file_exists (world_path root previous)) then
+        failwith ("maltyped world " ^ world ^ ": previous world not found: " ^ previous);
+      let event_content = inspect_event root event in
+      let event_fields = parse_lines event_content in
+      (match field "world" event_fields with
+      | Some event_world when String.equal event_world previous -> ()
+      | Some event_world ->
+          failwith
+            ("maltyped world " ^ world ^ ": event world mismatch: expected " ^ previous
+           ^ ", got " ^ event_world)
+      | None -> failwith ("maltyped world " ^ world ^ ": event missing world"));
+      let expected = next_world previous event in
+      if not (String.equal world expected) then
+        failwith
+          ("maltyped world " ^ world ^ ": content hash mismatch: expected " ^ expected)
+  | previous, event, Some left, Some right ->
+      if not (String.equal previous left) then
+        failwith
+          ("maltyped world " ^ world ^ ": merge previous mismatch: expected " ^ left
+         ^ ", got " ^ previous);
+      if not (Sys.file_exists (world_path root left)) then
+        failwith ("maltyped world " ^ world ^ ": merge-left world not found: " ^ left);
+      if not (Sys.file_exists (world_path root right)) then
+        failwith ("maltyped world " ^ world ^ ": merge-right world not found: " ^ right);
+      let event_content = inspect_event root event in
+      let event_fields = parse_lines event_content in
+      (match
+         ( field "kind" event_fields,
+           field "merge-left" event_fields,
+           field "merge-right" event_fields )
+       with
+      | Some "merge", Some event_left, Some event_right
+        when String.equal event_left left && String.equal event_right right ->
+          ()
+      | _ -> failwith ("maltyped world " ^ world ^ ": merge event fields mismatch"));
+      let expected = hash ("world-merge:" ^ left ^ ":" ^ right ^ ":" ^ event) in
+      if not (String.equal world expected) then
+        failwith
+          ("maltyped world " ^ world ^ ": merge hash mismatch: expected " ^ expected)
+  | _, _, _, _ -> failwith ("maltyped world " ^ world ^ ": incomplete merge parents")
+
 let inspect_world root world =
   let content = read_world root world in
-  let fields = parse_lines content in
-  if field "previous" fields = None || field "event" fields = None then
-    failwith ("maltyped world " ^ world);
+  validate_world_content root world content;
   content
-
-let next_world world event = hash ("world:" ^ world ^ ":" ^ event)
 
 let event_suspended root event =
   match field "suspended" (event_fields root event) with
@@ -582,6 +649,7 @@ let fork root name world =
   ignore (init root);
   if not (Sys.file_exists (world_path root world)) then
     failwith ("world not found: " ^ world);
+  ignore (inspect_world root world);
   ensure_dir (branch_dir root);
   write_file_atomic (branch_path root name) (world ^ "\n");
   world
@@ -592,6 +660,8 @@ let merge root world_a world_b =
     failwith ("world not found: " ^ world_a);
   if not (Sys.file_exists (world_path root world_b)) then
     failwith ("world not found: " ^ world_b);
+  ignore (inspect_world root world_a);
+  ignore (inspect_world root world_b);
   let left, right =
     if String.compare world_a world_b <= 0 then (world_a, world_b)
     else (world_b, world_a)
@@ -621,7 +691,7 @@ let branches root =
     else
       Sys.readdir worlds |> Array.to_list |> List.sort String.compare
       |> List.map (fun world ->
-             let fields = parse_lines (read_world root world) in
+             let fields = parse_lines (inspect_world root world) in
              "world " ^ world ^ " previous="
              ^ Option.value (field "previous" fields) ~default:""
              ^ " event=" ^ Option.value (field "event" fields) ~default:""

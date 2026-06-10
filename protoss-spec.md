@@ -247,12 +247,18 @@ Process/ledger/web runtime dans `test/test_protoss.ml`.
 - [x] Exporter les metadonnees de requete dans le runtime web.
 - [ ] Promouvoir `Process` vers `Process caps a` dans le langage surface.
 - [ ] Rendre les capabilities visibles dans le type de `Process`.
-- [ ] Representer `WorldRef` comme Merkle-DAG evenementiel complet.
+- [x] Representer `WorldRef` comme Merkle-DAG evenementiel complet.
+  Preuves: `Ledger.add_event`, `Ledger.merge`, `Ledger.validate_event_hash`,
+  `Ledger.validate_world_content`, assertions "ledger event hash mismatch",
+  "ledger world hash mismatch" et "ledger merged" dans `test/test_protoss.ml`,
+  `README.md`.
 - [x] Ajouter fork/merge de mondes.
   Preuves: `Ledger.fork`, `Ledger.merge`, `protoss ledger merge`, assertions
   "ledger merged" dans `test/test_protoss.ml` et `README.md`.
 - [x] Ajouter branches de monde deterministes.
-- [ ] Garantir que toute lecture monde passe par evenement explicite.
+- [x] Garantir que toute lecture monde passe par evenement explicite.
+  Preuves: `Ledger.validate_world_content`, `Ledger.inspect_world`, assertion
+  "ledger world requires explicit event" dans `test/test_protoss.ml`.
 - [x] Ajouter API pour reponse externe negative comme evenement typed.
   Preuves: `Ledger.record_external_error`, `protoss ledger reject`,
   assertions "ledger negative external event" dans `test/test_protoss.ml` et
