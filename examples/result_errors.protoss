@@ -1,0 +1,44 @@
+(import "../stdlib/prelude.protoss")
+
+(variant SignupError
+  (AgeTooLow Nat)
+  (NameMissing Unit))
+
+(record User
+  (age Nat)
+  (name String))
+
+(def validateAge (-> Nat (Result SignupError Nat))
+  (lambda (age Nat)
+    (case ((Nat.lt age) 13)
+      (true (variant Err (variant SignupError AgeTooLow age)))
+      (false (variant Ok age)))))
+
+(def makeUser (-> String (-> Nat (Result SignupError User)))
+  (lambda (name String)
+    (lambda (age Nat)
+      (((inst Result.map SignupError Nat User)
+        (lambda (validAge Nat)
+          (record (age validAge) (name name))))
+        (validateAge age)))))
+
+(def ada (Result SignupError User)
+  ((makeUser "Ada") 18))
+
+(def teen (Result SignupError User)
+  ((makeUser "Tim") 10))
+
+(def adaAge Nat
+  (((inst Result.withDefault SignupError Nat) 0)
+    (((inst Result.map SignupError User Nat)
+      (lambda (user User) (get user age)))
+      ada)))
+
+(def teenDefaultAge Nat
+  (((inst Result.withDefault SignupError Nat) 0)
+    (((inst Result.map SignupError User Nat)
+      (lambda (user User) (get user age)))
+      teen)))
+
+(def teenRejected Bool
+  ((inst Result.isErr SignupError User) teen))

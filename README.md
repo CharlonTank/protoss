@@ -169,6 +169,7 @@ dune exec protoss -- check examples/record_destructure.protoss
 dune exec protoss -- check examples/recursive_tree.protoss
 dune exec protoss -- nf examples/recursive_tree.protoss
 dune exec protoss -- check examples/stdlib_generics.protoss
+dune exec protoss -- check examples/result_errors.protoss
 dune exec protoss -- check examples/structural_recursion.protoss
 dune exec protoss -- check examples/modules/app.protoss
 dune exec protoss -- project build examples/workspace --stats

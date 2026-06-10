@@ -1985,6 +1985,17 @@ let () =
   let stdlib_generics_path = find_up (Sys.getcwd ()) "examples/stdlib_generics.protoss" in
   if Sys.getenv_opt "PROTOSS_RUN_STDLIB_TESTS" = Some "1" then (
   let stdlib_generics = Loader.check_file stdlib_generics_path in
+  let result_errors_path = find_up (Sys.getcwd ()) "examples/result_errors.protoss" in
+  let result_errors = Loader.check_file result_errors_path in
+  let ada_age, _ = Runtime.normalize_def result_errors "adaAge" in
+  assert_equal "Result business error example keeps Ok value" "18"
+    (Runtime.value_to_string ada_age);
+  let teen_default_age, _ = Runtime.normalize_def result_errors "teenDefaultAge" in
+  assert_equal "Result business error example defaults Err value" "0"
+    (Runtime.value_to_string teen_default_age);
+  let teen_rejected, _ = Runtime.normalize_def result_errors "teenRejected" in
+  assert_equal "Result business error example exposes Err branch" "true"
+    (Runtime.value_to_string teen_rejected);
   let bumped, _ = Runtime.normalize_def stdlib_generics "bumped" in
   assert_equal "stdlib generic List.map" "[2, 3]" (Runtime.value_to_string bumped);
   let greeting, _ = Runtime.normalize_def stdlib_generics "greeting" in

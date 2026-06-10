@@ -337,7 +337,7 @@ listees dans la section "Gates de validation".
 - [ ] Associer un code stable a chaque erreur publique.
 - [ ] Verifier qu'aucune exception OCaml brute ne fuite dans les erreurs CLI.
 - [ ] Modeliser les erreurs externes negatives comme evenements ledger.
-- [ ] Ajouter helpers `Result` pour erreurs metier dans les examples.
+- [x] Ajouter helpers `Result` pour erreurs metier dans les examples.
 
 ## 18. Securite
 
