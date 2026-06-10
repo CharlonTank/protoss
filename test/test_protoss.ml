@@ -5061,6 +5061,97 @@ let () =
   assert_true "patch DeleteDef removes capability scope"
     (not (Sys.file_exists (cap_scope_path "askName")));
 
+  let patch_adt_store = temp_dir "patch-adt" in
+  let patch_adt_seed =
+    patch_file "protoss-patch-adt-seed.json"
+      "{ \"ops\": [\
+       { \"op\":\"AddDef\", \"name\":\"person\", \"deps\":[], \
+       \"type\":{\"source\":\"(Record (name String))\"}, \
+       \"expr\":{\"source\":\"(record (name \\\"Ada\\\"))\"} },\
+       { \"op\":\"AddDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":2 },\
+       { \"op\":\"AddDef\", \"name\":\"three\", \"deps\":[\"two\"], \"type\":\"Nat\", \"expr\":[\"succ\",\"two\"] },\
+       { \"op\":\"AddDef\", \"name\":\"four\", \"deps\":[\"three\"], \"type\":\"Nat\", \"expr\":[\"succ\",\"three\"] }\
+       ] }"
+  in
+  ignore (Patch.apply patch_adt_store patch_adt_seed);
+  let patch_add_field =
+    patch_file "protoss-patch-add-field.json"
+      "{ \"op\":\"AddField\", \"name\":\"person\", \"field\":\"age\", \
+       \"fieldType\":\"Nat\", \"expr\":41, \"deps\":[] }"
+  in
+  ignore (Patch.apply patch_adt_store patch_add_field);
+  let patch_add_field_checked = Store.load_program patch_adt_store |> Kernel.check_program in
+  let person_age, _ = Runtime.normalize_def patch_add_field_checked "person" in
+  assert_equal "patch ADT AddField updates record" "{age = 41, name = \"Ada\"}"
+    (Runtime.value_to_string person_age);
+  let patch_remove_field =
+    patch_file "protoss-patch-remove-field.json"
+      "{ \"op\":\"RemoveField\", \"name\":\"person\", \"field\":\"age\", \"deps\":[] }"
+  in
+  ignore (Patch.apply patch_adt_store patch_remove_field);
+  let patch_remove_field_checked = Store.load_program patch_adt_store |> Kernel.check_program in
+  let person_no_age, _ = Runtime.normalize_def patch_remove_field_checked "person" in
+  assert_equal "patch ADT RemoveField updates record" "{name = \"Ada\"}"
+    (Runtime.value_to_string person_no_age);
+  let patch_inline =
+    patch_file "protoss-patch-inline.json"
+      "{ \"op\":\"Inline\", \"name\":\"four\", \"inline\":\"three\", \"deps\":[\"two\"] }"
+  in
+  ignore (Patch.apply patch_adt_store patch_inline);
+  let patch_inline_checked = Store.load_program patch_adt_store |> Kernel.check_program in
+  let four_inlined, _ = Runtime.normalize_def patch_inline_checked "four" in
+  assert_equal "patch ADT Inline preserves value" "4" (Runtime.value_to_string four_inlined);
+  let patch_extract =
+    patch_file "protoss-patch-extract.json"
+      "{ \"op\":\"Extract\", \"name\":\"nextTwo\", \"from\":\"four\", \"deps\":[\"two\"], \
+       \"type\":\"Nat\", \"expr\":{\"source\":\"(succ two)\"} }"
+  in
+  ignore (Patch.apply patch_adt_store patch_extract);
+  let patch_extract_checked = Store.load_program patch_adt_store |> Kernel.check_program in
+  let extracted, _ = Runtime.normalize_def patch_extract_checked "nextTwo" in
+  assert_equal "patch ADT Extract creates def" "3" (Runtime.value_to_string extracted);
+  let four_after_extract, _ = Runtime.normalize_def patch_extract_checked "four" in
+  assert_equal "patch ADT Extract rewrites source" "4"
+    (Runtime.value_to_string four_after_extract);
+  let patch_add_capability =
+    patch_file "protoss-patch-add-capability.json"
+      "{ \"op\":\"AddCapability\", \"name\":\"Human.ask\", \"deps\":[], \
+       \"capabilities\":[\"Human.ask\"] }"
+  in
+  let add_cap_ref = Patch.apply patch_adt_store patch_add_capability in
+  let add_cap_audit =
+    Store.read_file (Filename.concat (Filename.concat patch_adt_store "patches") (add_cap_ref ^ ".patch"))
+  in
+  assert_true "patch ADT AddCapability records audit"
+    (contains_substring add_cap_audit "kind=AddCapability");
+  assert_true "patch ADT AddCapability writes capability set"
+    (contains_substring (Store.read_file (Filename.concat patch_adt_store "capabilities"))
+       "Human.ask");
+  let patch_add_harness =
+    patch_file "protoss-patch-add-harness.json"
+      "{ \"op\":\"AddHarness\", \"name\":\"twoHarness\", \"deps\":[], \
+       \"source\":\"harness twoHarness = unit two == 2\\n\" }"
+  in
+  let add_harness_ref = Patch.apply patch_adt_store patch_add_harness in
+  let add_harness_audit =
+    Store.read_file (Filename.concat (Filename.concat patch_adt_store "patches") (add_harness_ref ^ ".patch"))
+  in
+  assert_true "patch ADT AddHarness records audit"
+    (contains_substring add_harness_audit "kind=AddHarness");
+  let migrate_store = temp_dir "patch-adt-migrate" in
+  let migrate_patch =
+    patch_file "protoss-patch-migrate-type.json"
+      "{ \"op\":\"MigrateType\", \"name\":\"migrate_v1_v2\", \"deps\":[], \
+       \"type\":{\"source\":\"(-> Nat Nat)\"}, \
+       \"expr\":{\"source\":\"(lambda (old Nat) old)\"} }"
+  in
+  ignore (Patch.apply migrate_store migrate_patch);
+  let migrate_checked = Store.load_program migrate_store |> Kernel.check_program in
+  let migrate_value, _ = Runtime.eval_entry migrate_checked "migrate_v1_v2" in
+  let migrated = Runtime.apply migrate_checked migrate_value (Runtime.VNat 5) in
+  assert_equal "patch ADT MigrateType adds migration" "5"
+    (Runtime.value_to_string migrated);
+
   let duplicate_before = count_files store in
   (try
      let _ = Patch.apply store patch_ok in

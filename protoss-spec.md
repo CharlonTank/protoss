@@ -421,8 +421,14 @@ serveur MCP stdio `Mcp_server.serve_stdio`, outils `protoss.*` dans
 - [x] Exposer `protoss.normalize` via MCP.
 - [x] Exposer `protoss.diff` via MCP.
 - [x] Exposer `protoss.rollback` via MCP.
-- [ ] Ajouter Patch ADT pour `AddField`, `RemoveField`, `Inline`, `Extract`,
+- [x] Ajouter Patch ADT pour `AddField`, `RemoveField`, `Inline`, `Extract`,
   `AddHarness`, `AddCapability`, `MigrateType`.
+  Preuves: variantes `Patch.op`, parsing `Patch.parse_one_json`,
+  elaboration `Patch.merge_defs`, reecritures `Patch.rewrite_name_expr` et
+  `Patch.replace_first_expr`, assertions "patch ADT AddField ...",
+  "patch ADT RemoveField ...", "patch ADT Inline ...", "patch ADT Extract
+  ...", "patch ADT AddHarness ...", "patch ADT AddCapability ..." et "patch
+  ADT MigrateType ..." dans `test/test_protoss.ml`, `README.md`.
 - [x] Convertir diff texte humain en candidat patch structurel.
   Preuves: `Patch.from_text_diff`, commande `protoss patch from-text-diff`,
   assertions "patch text diff" dans `test/test_protoss.ml`, `README.md`.

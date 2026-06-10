@@ -6,7 +6,18 @@ let fail msg = raise (Error msg)
 
 let option_or_fail msg = function Some x -> x | None -> fail msg
 
-type op = AddDef | ReplaceDef | DeleteDef | RenameDef
+type op =
+  | AddDef
+  | ReplaceDef
+  | DeleteDef
+  | RenameDef
+  | AddField
+  | RemoveField
+  | Inline
+  | Extract
+  | AddHarness
+  | AddCapability
+  | MigrateType
 
 type embedded_sources = {
   type_source : string option;
@@ -18,6 +29,12 @@ type t = {
   name : string;
   new_name : string option;
   def : def option;
+  field_name : string option;
+  field_type : typ option;
+  field_expr : expr option;
+  from_name : string option;
+  inline_name : string option;
+  harness_source : string option;
   capabilities : string list;
   dependencies : string list;
   sources : embedded_sources;
@@ -52,6 +69,13 @@ let op_to_string = function
   | ReplaceDef -> "ReplaceDef"
   | DeleteDef -> "DeleteDef"
   | RenameDef -> "RenameDef"
+  | AddField -> "AddField"
+  | RemoveField -> "RemoveField"
+  | Inline -> "Inline"
+  | Extract -> "Extract"
+  | AddHarness -> "AddHarness"
+  | AddCapability -> "AddCapability"
+  | MigrateType -> "MigrateType"
 
 let patch_context index patch =
   "patch op #" ^ string_of_int index ^ " " ^ op_to_string patch.op ^ " " ^ patch.name
@@ -191,6 +215,16 @@ let embedded_source = function
   | Json.Object [ ("source", Json.String s) ] -> Some s
   | _ -> None
 
+let parse_patch_type context value =
+  with_context context (fun () ->
+      try Parser.parse_type (type_sexp_of_json value) with
+      | Parser.Error msg -> fail ("invalid patch type: " ^ msg))
+
+let parse_patch_expr context value =
+  with_context context (fun () ->
+      try Parser.parse_expr (expr_sexp_of_json value) with
+      | Parser.Error msg -> fail ("invalid patch expr: " ^ msg))
+
 let parse_one_json ?(index = 1) obj =
   let op =
     with_context (partial_context index ()) (fun () ->
@@ -199,6 +233,13 @@ let parse_one_json ?(index = 1) obj =
         | "ReplaceDef" -> ReplaceDef
         | "DeleteDef" -> DeleteDef
         | "RenameDef" -> RenameDef
+        | "AddField" -> AddField
+        | "RemoveField" -> RemoveField
+        | "Inline" -> Inline
+        | "Extract" -> Extract
+        | "AddHarness" -> AddHarness
+        | "AddCapability" -> AddCapability
+        | "MigrateType" -> MigrateType
         | s -> fail ("unknown patch op: " ^ s))
   in
   let name =
@@ -215,34 +256,81 @@ let parse_one_json ?(index = 1) obj =
   in
   let def =
     match op with
-    | AddDef | ReplaceDef ->
+    | AddDef | ReplaceDef | Extract | MigrateType ->
         let type_json =
           with_context (context ^ " field type") (fun () -> json_field "type" obj)
         in
         let expr_json =
           with_context (context ^ " field expr") (fun () -> json_field "expr" obj)
         in
-        let typ =
-          with_context (context ^ " field type") (fun () ->
-              try Parser.parse_type (type_sexp_of_json type_json) with
-              | Parser.Error msg -> fail ("invalid patch type: " ^ msg))
-        in
-        let body =
-          with_context (context ^ " field expr") (fun () ->
-              try Parser.parse_expr (expr_sexp_of_json expr_json) with
-              | Parser.Error msg -> fail ("invalid patch expr: " ^ msg))
-        in
+        let typ = parse_patch_type (context ^ " field type") type_json in
+        let body = parse_patch_expr (context ^ " field expr") expr_json in
         Some { name; type_params = []; declared_capabilities = None; typ; body }
-    | DeleteDef | RenameDef -> None
+    | AddField | DeleteDef | RemoveField | RenameDef | Inline | AddHarness | AddCapability ->
+        None
+  in
+  let field_name =
+    match op with
+    | AddField | RemoveField ->
+        Some
+          (with_context (context ^ " field field") (fun () -> json_string_field "field" obj))
+    | AddDef | ReplaceDef | DeleteDef | RenameDef | Inline | Extract | AddHarness
+    | AddCapability | MigrateType ->
+        None
+  in
+  let field_type =
+    match op with
+    | AddField ->
+        Some
+          (parse_patch_type (context ^ " field fieldType") (json_field "fieldType" obj))
+    | AddDef | ReplaceDef | DeleteDef | RenameDef | RemoveField | Inline | Extract
+    | AddHarness | AddCapability | MigrateType ->
+        None
+  in
+  let field_expr =
+    match op with
+    | AddField ->
+        Some (parse_patch_expr (context ^ " field expr") (json_field "expr" obj))
+    | AddDef | ReplaceDef | DeleteDef | RenameDef | RemoveField | Inline | Extract
+    | AddHarness | AddCapability | MigrateType ->
+        None
+  in
+  let from_name =
+    match op with
+    | Extract ->
+        Some
+          (with_context (context ^ " field from") (fun () -> json_string_field "from" obj))
+    | AddDef | ReplaceDef | DeleteDef | RenameDef | AddField | RemoveField | Inline
+    | AddHarness | AddCapability | MigrateType ->
+        None
+  in
+  let inline_name =
+    match op with
+    | Inline ->
+        Some
+          (with_context (context ^ " field inline") (fun () -> json_string_field "inline" obj))
+    | AddDef | ReplaceDef | DeleteDef | RenameDef | AddField | RemoveField | Extract
+    | AddHarness | AddCapability | MigrateType ->
+        None
+  in
+  let harness_source =
+    match op with
+    | AddHarness ->
+        Some
+          (with_context (context ^ " field source") (fun () -> json_string_field "source" obj))
+    | AddDef | ReplaceDef | DeleteDef | RenameDef | AddField | RemoveField | Inline
+    | Extract | AddCapability | MigrateType ->
+        None
   in
   let sources =
     match op with
-    | AddDef | ReplaceDef ->
+    | AddDef | ReplaceDef | Extract | MigrateType ->
         {
           type_source = embedded_source (json_field "type" obj);
           expr_source = embedded_source (json_field "expr" obj);
         }
-    | DeleteDef | RenameDef -> no_sources
+    | AddField | DeleteDef | RemoveField | RenameDef | Inline | AddHarness | AddCapability ->
+        no_sources
   in
   let capabilities =
     with_context (context ^ " field capabilities") (fun () ->
@@ -256,12 +344,27 @@ let parse_one_json ?(index = 1) obj =
           | Some _ -> fail "capabilities must be an array"
         in
         (try Kernel.validate_capabilities caps with Kernel.Error msg -> fail msg);
+        if op = AddCapability && caps = [] then fail "AddCapability requires capabilities";
         caps)
   in
   let dependencies =
     with_context (context ^ " field deps") (fun () -> json_string_array_field "deps" obj)
   in
-  { op; name; new_name; def; capabilities; dependencies; sources }
+  {
+    op;
+    name;
+    new_name;
+    def;
+    field_name;
+    field_type;
+    field_expr;
+    from_name;
+    inline_name;
+    harness_source;
+    capabilities;
+    dependencies;
+    sources;
+  }
 
 let parse_json input =
   let obj =
@@ -308,6 +411,9 @@ let review_patch index patch =
     "  name: " ^ patch.name;
   ]
   @ (match patch.new_name with Some name -> [ "  newName: " ^ name ] | None -> [])
+  @ (match patch.field_name with Some name -> [ "  field: " ^ name ] | None -> [])
+  @ (match patch.from_name with Some name -> [ "  from: " ^ name ] | None -> [])
+  @ (match patch.inline_name with Some name -> [ "  inline: " ^ name ] | None -> [])
   @ [
       "  deps: " ^ review_list patch.dependencies;
       "  capabilities: " ^ review_list patch.capabilities;
@@ -488,12 +594,429 @@ let validate_web_patch store_root checked =
 let required_def patch =
   option_or_fail "patch operation requires a definition body" patch.def
 
+let required_field_name patch = option_or_fail "patch operation requires field" patch.field_name
+
+let required_field_type patch =
+  option_or_fail "AddField operation requires fieldType" patch.field_type
+
+let required_field_expr patch =
+  option_or_fail "AddField operation requires expr" patch.field_expr
+
+let required_inline_name patch =
+  option_or_fail "Inline operation requires inline" patch.inline_name
+
+let required_from_name patch = option_or_fail "Extract operation requires from" patch.from_name
+
+let field_exists name fields = List.exists (fun (field, _) -> String.equal field name) fields
+
+let remove_field name fields = List.filter (fun (field, _) -> not (String.equal field name)) fields
+
 let dependents (defs : def list) name =
   defs
   |> List.filter (fun (d : def) ->
          not (String.equal d.name name)
          && List.exists (String.equal name) (Kernel.dependencies_of_defs defs d.name))
   |> List.map (fun (d : def) -> d.name)
+
+let add_record_field patch old_def =
+  let field = required_field_name patch in
+  let field_type = required_field_type patch in
+  let field_expr = required_field_expr patch in
+  match (old_def.typ, old_def.body) with
+  | TRecord type_fields, ERecord expr_fields ->
+      if field_exists field type_fields then fail ("AddField field already exists: " ^ field);
+      if field_exists field expr_fields then
+        fail ("AddField expression field already exists: " ^ field);
+      {
+        old_def with
+        typ = TRecord (sort_fields ((field, field_type) :: type_fields));
+        body = ERecord (sort_fields ((field, field_expr) :: expr_fields));
+      }
+  | TRecord _, _ -> fail ("AddField target body is not a record literal: " ^ patch.name)
+  | _ -> fail ("AddField target type is not a record: " ^ patch.name)
+
+let remove_record_field patch old_def =
+  let field = required_field_name patch in
+  match (old_def.typ, old_def.body) with
+  | TRecord type_fields, ERecord expr_fields ->
+      if not (field_exists field type_fields) then fail ("RemoveField type field missing: " ^ field);
+      if not (field_exists field expr_fields) then
+        fail ("RemoveField expression field missing: " ^ field);
+      {
+        old_def with
+        typ = TRecord (remove_field field type_fields);
+        body = ERecord (remove_field field expr_fields);
+      }
+  | TRecord _, _ -> fail ("RemoveField target body is not a record literal: " ^ patch.name)
+  | _ -> fail ("RemoveField target type is not a record: " ^ patch.name)
+
+let rec rewrite_name_expr source replacement bound = function
+  | EName name when String.equal name source && not (List.exists (String.equal name) bound) ->
+      replacement
+  | EName _ | EUnit | EBool _ | ENat _ | EString _ | ERequest _ | ENil _ | ENilInfer as e -> e
+  | ELambda (name, typ, body) ->
+      ELambda (name, typ, rewrite_name_expr source replacement (name :: bound) body)
+  | ELambdaInfer (name, body) ->
+      ELambdaInfer (name, rewrite_name_expr source replacement (name :: bound) body)
+  | EApp (fn, arg) ->
+      EApp (rewrite_name_expr source replacement bound fn, rewrite_name_expr source replacement bound arg)
+  | EStrict expr -> EStrict (rewrite_name_expr source replacement bound expr)
+  | ELet (name, value, body) ->
+      ELet
+        ( name,
+          rewrite_name_expr source replacement bound value,
+          rewrite_name_expr source replacement (name :: bound) body )
+  | ELetAnnot (name, typ, value, body) ->
+      ELetAnnot
+        ( name,
+          typ,
+          rewrite_name_expr source replacement bound value,
+          rewrite_name_expr source replacement (name :: bound) body )
+  | ELetRecord (record, fields, body) ->
+      let binders = List.map snd fields in
+      ELetRecord
+        ( rewrite_name_expr source replacement bound record,
+          fields,
+          rewrite_name_expr source replacement (binders @ bound) body )
+  | ERecord fields ->
+      ERecord (List.map (fun (name, expr) -> (name, rewrite_name_expr source replacement bound expr)) fields)
+  | ERecordUpdate (record, updates) ->
+      ERecordUpdate
+        ( rewrite_name_expr source replacement bound record,
+          List.map (fun (name, expr) -> (name, rewrite_name_expr source replacement bound expr)) updates )
+  | EField (expr, field) -> EField (rewrite_name_expr source replacement bound expr, field)
+  | EVariant (typ, constructor, payload) ->
+      EVariant (typ, constructor, rewrite_name_expr source replacement bound payload)
+  | EVariantInferred (constructor, payload) ->
+      EVariantInferred (constructor, rewrite_name_expr source replacement bound payload)
+  | EInst _ as e -> e
+  | ECase (scrutinee, branches) ->
+      ECase
+        ( rewrite_name_expr source replacement bound scrutinee,
+          List.map (rewrite_name_branch source replacement bound) branches )
+  | EFoldNat (target, zero, step) ->
+      EFoldNat
+        ( rewrite_name_expr source replacement bound target,
+          rewrite_name_expr source replacement bound zero,
+          rewrite_name_expr source replacement bound step )
+  | EFoldVariant (target, result, scrutinee, branches) ->
+      EFoldVariant
+        ( target,
+          result,
+          rewrite_name_expr source replacement bound scrutinee,
+          List.map (rewrite_name_branch source replacement bound) branches )
+  | ERecur expr -> ERecur (rewrite_name_expr source replacement bound expr)
+  | ECons (typ, head, tail) ->
+      ECons
+        (typ, rewrite_name_expr source replacement bound head, rewrite_name_expr source replacement bound tail)
+  | EConsInfer (head, tail) ->
+      EConsInfer (rewrite_name_expr source replacement bound head, rewrite_name_expr source replacement bound tail)
+  | EFoldList (target, zero, step) ->
+      EFoldList
+        ( rewrite_name_expr source replacement bound target,
+          rewrite_name_expr source replacement bound zero,
+          rewrite_name_expr source replacement bound step )
+  | ECaseList (target, nil_body, head, tail, cons_body) ->
+      ECaseList
+        ( rewrite_name_expr source replacement bound target,
+          rewrite_name_expr source replacement bound nil_body,
+          head,
+          tail,
+          rewrite_name_expr source replacement (head :: tail :: bound) cons_body )
+  | EText expr -> EText (rewrite_name_expr source replacement bound expr)
+  | EImage (a, b) ->
+      EImage (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | EButton (a, b) ->
+      EButton (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | EInput (a, b) ->
+      EInput (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | EColumn expr -> EColumn (rewrite_name_expr source replacement bound expr)
+  | ERow expr -> ERow (rewrite_name_expr source replacement bound expr)
+  | EListView (a, b) ->
+      EListView (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | EWhenView (a, b) ->
+      EWhenView (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | ENode (a, b, c) ->
+      ENode
+        ( rewrite_name_expr source replacement bound a,
+          rewrite_name_expr source replacement bound b,
+          rewrite_name_expr source replacement bound c )
+  | EAttr (a, b) ->
+      EAttr (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | EOn (a, b) ->
+      EOn (rewrite_name_expr source replacement bound a, rewrite_name_expr source replacement bound b)
+  | EDone expr -> EDone (rewrite_name_expr source replacement bound expr)
+  | EBind (process, name, typ, body) ->
+      EBind
+        ( rewrite_name_expr source replacement bound process,
+          name,
+          typ,
+          rewrite_name_expr source replacement (name :: bound) body )
+  | EBindInfer (process, name, body) ->
+      EBindInfer
+        ( rewrite_name_expr source replacement bound process,
+          name,
+          rewrite_name_expr source replacement (name :: bound) body )
+
+and rewrite_name_branch source replacement bound = function
+  | BBool (value, body) -> BBool (value, rewrite_name_expr source replacement bound body)
+  | BVariant (constructor, binder, body) ->
+      BVariant (constructor, binder, rewrite_name_expr source replacement (binder :: bound) body)
+  | BVariantUnit (constructor, body) ->
+      BVariantUnit (constructor, rewrite_name_expr source replacement bound body)
+  | BWildcard body -> BWildcard (rewrite_name_expr source replacement bound body)
+
+let rec replace_first_expr target replacement expr =
+  if expr = target then (replacement, true)
+  else
+    match expr with
+    | EName _ | EUnit | EBool _ | ENat _ | EString _ | ERequest _ | ENil _ | ENilInfer
+    | EInst _ ->
+        (expr, false)
+    | ELambda (name, typ, body) ->
+        let body, changed = replace_first_expr target replacement body in
+        (ELambda (name, typ, body), changed)
+    | ELambdaInfer (name, body) ->
+        let body, changed = replace_first_expr target replacement body in
+        (ELambdaInfer (name, body), changed)
+    | EApp (fn, arg) ->
+        let fn, changed = replace_first_expr target replacement fn in
+        if changed then (EApp (fn, arg), true)
+        else
+          let arg, changed = replace_first_expr target replacement arg in
+          (EApp (fn, arg), changed)
+    | EStrict body ->
+        let body, changed = replace_first_expr target replacement body in
+        (EStrict body, changed)
+    | ELet (name, value, body) ->
+        let value, changed = replace_first_expr target replacement value in
+        if changed then (ELet (name, value, body), true)
+        else
+          let body, changed = replace_first_expr target replacement body in
+          (ELet (name, value, body), changed)
+    | ELetAnnot (name, typ, value, body) ->
+        let value, changed = replace_first_expr target replacement value in
+        if changed then (ELetAnnot (name, typ, value, body), true)
+        else
+          let body, changed = replace_first_expr target replacement body in
+          (ELetAnnot (name, typ, value, body), changed)
+    | ELetRecord (record, fields, body) ->
+        let record, changed = replace_first_expr target replacement record in
+        if changed then (ELetRecord (record, fields, body), true)
+        else
+          let body, changed = replace_first_expr target replacement body in
+          (ELetRecord (record, fields, body), changed)
+    | ERecord fields ->
+        let rec loop acc = function
+          | [] -> (ERecord (List.rev acc), false)
+          | (name, field_expr) :: rest ->
+              let field_expr, changed = replace_first_expr target replacement field_expr in
+              if changed then (ERecord (List.rev_append acc ((name, field_expr) :: rest)), true)
+              else loop ((name, field_expr) :: acc) rest
+        in
+        loop [] fields
+    | ERecordUpdate (record, updates) ->
+        let record, changed = replace_first_expr target replacement record in
+        if changed then (ERecordUpdate (record, updates), true)
+        else
+          let rec loop acc = function
+            | [] -> (ERecordUpdate (record, List.rev acc), false)
+            | (name, value) :: rest ->
+                let value, changed = replace_first_expr target replacement value in
+                if changed then
+                  (ERecordUpdate (record, List.rev_append acc ((name, value) :: rest)), true)
+                else loop ((name, value) :: acc) rest
+          in
+          loop [] updates
+    | EField (body, field) ->
+        let body, changed = replace_first_expr target replacement body in
+        (EField (body, field), changed)
+    | EVariant (typ, constructor, payload) ->
+        let payload, changed = replace_first_expr target replacement payload in
+        (EVariant (typ, constructor, payload), changed)
+    | EVariantInferred (constructor, payload) ->
+        let payload, changed = replace_first_expr target replacement payload in
+        (EVariantInferred (constructor, payload), changed)
+    | ECase (scrutinee, branches) ->
+        let scrutinee, changed = replace_first_expr target replacement scrutinee in
+        if changed then (ECase (scrutinee, branches), true)
+        else
+          let branches, changed = replace_first_branch target replacement branches in
+          (ECase (scrutinee, branches), changed)
+    | EFoldNat (a, b, c) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EFoldNat (a, b, c), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          if changed then (EFoldNat (a, b, c), true)
+          else
+            let c, changed = replace_first_expr target replacement c in
+            (EFoldNat (a, b, c), changed)
+    | EFoldVariant (target_ty, result_ty, scrutinee, branches) ->
+        let scrutinee, changed = replace_first_expr target replacement scrutinee in
+        if changed then (EFoldVariant (target_ty, result_ty, scrutinee, branches), true)
+        else
+          let branches, changed = replace_first_branch target replacement branches in
+          (EFoldVariant (target_ty, result_ty, scrutinee, branches), changed)
+    | ERecur body ->
+        let body, changed = replace_first_expr target replacement body in
+        (ERecur body, changed)
+    | ECons (typ, head, tail) ->
+        let head, changed = replace_first_expr target replacement head in
+        if changed then (ECons (typ, head, tail), true)
+        else
+          let tail, changed = replace_first_expr target replacement tail in
+          (ECons (typ, head, tail), changed)
+    | EConsInfer (head, tail) ->
+        let head, changed = replace_first_expr target replacement head in
+        if changed then (EConsInfer (head, tail), true)
+        else
+          let tail, changed = replace_first_expr target replacement tail in
+          (EConsInfer (head, tail), changed)
+    | EFoldList (a, b, c) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EFoldList (a, b, c), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          if changed then (EFoldList (a, b, c), true)
+          else
+            let c, changed = replace_first_expr target replacement c in
+            (EFoldList (a, b, c), changed)
+    | ECaseList (target_expr, nil_body, head, tail, cons_body) ->
+        let target_expr, changed = replace_first_expr target replacement target_expr in
+        if changed then (ECaseList (target_expr, nil_body, head, tail, cons_body), true)
+        else
+          let nil_body, changed = replace_first_expr target replacement nil_body in
+          if changed then (ECaseList (target_expr, nil_body, head, tail, cons_body), true)
+          else
+            let cons_body, changed = replace_first_expr target replacement cons_body in
+            (ECaseList (target_expr, nil_body, head, tail, cons_body), changed)
+    | EText body ->
+        let body, changed = replace_first_expr target replacement body in
+        (EText body, changed)
+    | EImage (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EImage (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EImage (a, b), changed)
+    | EButton (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EButton (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EButton (a, b), changed)
+    | EInput (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EInput (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EInput (a, b), changed)
+    | EColumn body ->
+        let body, changed = replace_first_expr target replacement body in
+        (EColumn body, changed)
+    | ERow body ->
+        let body, changed = replace_first_expr target replacement body in
+        (ERow body, changed)
+    | EListView (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EListView (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EListView (a, b), changed)
+    | EWhenView (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EWhenView (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EWhenView (a, b), changed)
+    | ENode (a, b, c) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (ENode (a, b, c), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          if changed then (ENode (a, b, c), true)
+          else
+            let c, changed = replace_first_expr target replacement c in
+            (ENode (a, b, c), changed)
+    | EAttr (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EAttr (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EAttr (a, b), changed)
+    | EOn (a, b) ->
+        let a, changed = replace_first_expr target replacement a in
+        if changed then (EOn (a, b), true)
+        else
+          let b, changed = replace_first_expr target replacement b in
+          (EOn (a, b), changed)
+    | EDone body ->
+        let body, changed = replace_first_expr target replacement body in
+        (EDone body, changed)
+    | EBind (process, name, typ, body) ->
+        let process, changed = replace_first_expr target replacement process in
+        if changed then (EBind (process, name, typ, body), true)
+        else
+          let body, changed = replace_first_expr target replacement body in
+          (EBind (process, name, typ, body), changed)
+    | EBindInfer (process, name, body) ->
+        let process, changed = replace_first_expr target replacement process in
+        if changed then (EBindInfer (process, name, body), true)
+        else
+          let body, changed = replace_first_expr target replacement body in
+          (EBindInfer (process, name, body), changed)
+
+and replace_first_branch target replacement = function
+  | [] -> ([], false)
+  | branch :: rest ->
+      let branch, changed =
+        match branch with
+        | BBool (value, body) ->
+            let body, changed = replace_first_expr target replacement body in
+            (BBool (value, body), changed)
+        | BVariant (constructor, binder, body) ->
+            let body, changed = replace_first_expr target replacement body in
+            (BVariant (constructor, binder, body), changed)
+        | BVariantUnit (constructor, body) ->
+            let body, changed = replace_first_expr target replacement body in
+            (BVariantUnit (constructor, body), changed)
+        | BWildcard body ->
+            let body, changed = replace_first_expr target replacement body in
+            (BWildcard body, changed)
+      in
+      if changed then (branch :: rest, true)
+      else
+        let rest, changed = replace_first_branch target replacement rest in
+        (branch :: rest, changed)
+
+let inline_def patch defs =
+  let inline_name = required_inline_name patch in
+  let target =
+    option_or_fail ("Inline target does not exist: " ^ patch.name) (def_by_name defs patch.name)
+  in
+  let source =
+    option_or_fail ("Inline source does not exist: " ^ inline_name) (def_by_name defs inline_name)
+  in
+  { target with body = rewrite_name_expr inline_name source.body [] target.body }
+
+let extract_def patch defs =
+  let target_name = required_from_name patch in
+  let target =
+    option_or_fail ("Extract source does not exist: " ^ target_name) (def_by_name defs target_name)
+  in
+  if def_by_name defs patch.name <> None then fail ("Extract target already exists: " ^ patch.name);
+  let new_def = required_def patch in
+  let body, changed = replace_first_expr new_def.body (EName new_def.name) target.body in
+  if not changed then fail ("Extract expression not found in: " ^ target_name);
+  (new_def, { target with body })
+
+let validate_harness_source patch =
+  match patch.harness_source with
+  | None -> fail "AddHarness requires source"
+  | Some source ->
+      ignore (Harness.parse source);
+      source
 
 let merge_defs (patch : t) (defs : def list) =
   let exists = def_by_name defs patch.name <> None in
@@ -502,6 +1025,15 @@ let merge_defs (patch : t) (defs : def list) =
       let new_def = required_def patch in
       if exists then fail ("AddDef target already exists: " ^ patch.name);
       (defs @ [ new_def ], new_def.name, None, Some new_def)
+  | AddField ->
+      let old_def =
+        option_or_fail ("AddField target does not exist: " ^ patch.name) (def_by_name defs patch.name)
+      in
+      let new_def = add_record_field patch old_def in
+      ( replace_def defs new_def,
+        new_def.name,
+        None,
+        Some new_def )
   | ReplaceDef ->
       let new_def = required_def patch in
       if not exists then fail ("ReplaceDef target does not exist: " ^ patch.name);
@@ -509,12 +1041,24 @@ let merge_defs (patch : t) (defs : def list) =
         new_def.name,
         None,
         Some new_def )
+  | MigrateType ->
+      let new_def = required_def patch in
+      if exists then
+        (replace_def defs new_def, new_def.name, None, Some new_def)
+      else (defs @ [ new_def ], new_def.name, None, Some new_def)
   | DeleteDef ->
       if not exists then fail ("DeleteDef target does not exist: " ^ patch.name);
       ( List.filter (fun (d : def) -> not (String.equal d.name patch.name)) defs,
         patch.name,
         Some patch.name,
         None )
+  | RemoveField ->
+      let old_def =
+        option_or_fail ("RemoveField target does not exist: " ^ patch.name)
+          (def_by_name defs patch.name)
+      in
+      let new_def = remove_record_field patch old_def in
+      (replace_def defs new_def, new_def.name, None, Some new_def)
   | RenameDef ->
       let new_name = option_or_fail "RenameDef requires newName" patch.new_name in
       let old_def = option_or_fail ("RenameDef target does not exist: " ^ patch.name) (def_by_name defs patch.name) in
@@ -524,6 +1068,17 @@ let merge_defs (patch : t) (defs : def list) =
         new_name,
         Some patch.name,
         Some renamed )
+  | Inline ->
+      let new_def = inline_def patch defs in
+      (replace_def defs new_def, new_def.name, None, Some new_def)
+  | Extract ->
+      let new_def, target_def = extract_def patch defs in
+      (replace_def defs target_def @ [ new_def ], new_def.name, None, Some new_def)
+  | AddHarness ->
+      ignore (validate_harness_source patch);
+      (defs, patch.name, None, None)
+  | AddCapability ->
+      (defs, patch.name, None, None)
 
 let fail_for_patch patch_path index patch msg =
   fail_in (locate patch_path (patch_context index patch)) msg
@@ -658,8 +1213,13 @@ let check store_root patch_path =
           try merge_defs patch defs with Error msg -> fail_for_patch patch_path index patch msg
         in
         let actual_deps =
-          let source_defs = match patch.op with DeleteDef -> before_defs | _ -> defs in
-          Kernel.dependencies_of_defs source_defs target_name |> List.sort_uniq String.compare
+          match patch.op with
+          | AddHarness | AddCapability -> []
+          | AddDef | AddField | ReplaceDef | RemoveField | RenameDef | Inline | Extract
+          | MigrateType ->
+              Kernel.dependencies_of_defs defs target_name |> List.sort_uniq String.compare
+          | DeleteDef ->
+              Kernel.dependencies_of_defs before_defs target_name |> List.sort_uniq String.compare
         in
         let declared_deps = List.sort_uniq String.compare patch.dependencies in
         if actual_deps <> declared_deps then
@@ -718,7 +1278,9 @@ let check store_root patch_path =
           | Some new_def_id ->
               if not (String.equal old_def_id.def_id new_def_id.def_id) then
                 fail "RenameDef changed canonical body hash")
-      | AddDef | ReplaceDef | DeleteDef -> ())
+      | AddDef | AddField | ReplaceDef | DeleteDef | RemoveField | Inline | Extract
+      | AddHarness | AddCapability | MigrateType ->
+          ())
     changes;
   validate_web_patch store_root checked;
   { patches; program; checked; changes }
