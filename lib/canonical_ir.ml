@@ -1276,6 +1276,59 @@ let agent_graph_capability_scopes_json ?source input id =
           (Kernel.json_array agent_graph_capability_scope_to_json scopes);
       ])
 
+let graph_dependents_for_def input def =
+  graph_dependencies input
+  |> List.filter (fun dep ->
+         String.equal dep.graph_dep_name def.graph_def_name
+         || String.equal dep.graph_dep_id def.graph_def_id
+         || String.equal dep.graph_dep_hash def.graph_def_hash)
+
+let agent_graph_definition_notes def deps dependents =
+  [
+    "Definition " ^ def.graph_def_name ^ " has type " ^ def.graph_def_type_canonical;
+    (match deps with
+    | [] -> "No direct definition dependencies"
+    | deps ->
+        "Depends on: "
+        ^ String.concat ", " (List.map (fun dep -> dep.graph_dep_name) deps));
+    (match def.graph_def_capability_scope with
+    | [] -> "Pure definition (no capability scope)"
+    | caps -> "Requires capabilities: " ^ String.concat ", " caps);
+    (match dependents with
+    | [] -> "No graph dependents"
+    | deps -> "Used by: " ^ String.concat ", " (List.map (fun dep -> dep.graph_dep_def_name) deps));
+  ]
+
+let agent_graph_definition_explanation_json ?source input id =
+  let stats = graph_stats input in
+  let def = graph_definition input id in
+  let deps = graph_dependencies_for input id in
+  let dependents = graph_dependents_for_def input def in
+  let scopes =
+    def.graph_def_capability_scope
+    |> List.map (fun cap ->
+           List.filter
+             (fun scope ->
+               String.equal cap scope.graph_scope_capability
+               && String.equal def.graph_def_name scope.graph_scope_def_name)
+             (graph_capability_scopes input))
+    |> List.concat
+  in
+  agent_graph_json ?source "definition-explanation" stats
+    [
+      Kernel.json_field "id" (Kernel.json_string id);
+      Kernel.json_field "definition" (agent_graph_definition_to_json def);
+      Kernel.json_field "typeNode" (agent_graph_node_to_json (graph_node input def.graph_def_type_ref));
+      Kernel.json_field "termNode" (agent_graph_node_to_json (graph_node input def.graph_def_term_ref));
+      Kernel.json_field "dependencies"
+        (Kernel.json_array agent_graph_dependency_to_json deps);
+      Kernel.json_field "dependents"
+        (Kernel.json_array agent_graph_dependency_to_json dependents);
+      Kernel.json_field "capabilityScopes"
+        (Kernel.json_array agent_graph_capability_scope_to_json scopes);
+      Kernel.json_field "notes" (agent_json_string_list (agent_graph_definition_notes def deps dependents));
+    ]
+
 let agent_graph_host_contract_json ?source input =
   let stats = graph_stats input in
   agent_graph_json ?source "host-contract" stats

@@ -52,8 +52,9 @@ let usage () =
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --capability-scopes <graph.json> [nameOrCapRef] | --host-contract <graph.json> | --check-host-contract <graph.json> <contract.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
      \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --host-contract | --check-host-contract <contract.json> | --node <nodeRef> | --def <nameOrDefId>\n\
-     \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>]\n\
-     \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>]\n\
+     \       protoss agent graph <graph.json> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
+     \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
+     \       protoss agent explain <graph.json> <nameOrDefId> | protoss agent explain --store-graph <project-or-store> <graphHash> <nameOrDefId>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
      \       protoss grammar kernel\n\
@@ -998,6 +999,9 @@ let command_agent_graph_query source input = function
       print_string (Protoss.Canonical_ir.agent_graph_node_json ~source input node_ref)
   | [ "--def"; id ] ->
       print_string (Protoss.Canonical_ir.agent_graph_definition_json ~source input id)
+  | [ "--explain"; id ] ->
+      print_string
+        (Protoss.Canonical_ir.agent_graph_definition_explanation_json ~source input id)
   | _ -> usage ()
 
 let command_agent = function
@@ -1011,6 +1015,20 @@ let command_agent = function
   | "graph" :: file :: args ->
       let source = Protoss.Canonical_ir.agent_graph_source "graph-file" file in
       command_agent_graph_query source (Protoss.Store.read_file file) args
+  | [ "explain"; "--store-graph"; project_or_store; graph_hash; id ] ->
+      let store = Protoss.Workspace.store_of_arg project_or_store in
+      let source =
+        Protoss.Canonical_ir.agent_graph_source "store-graph"
+          (project_or_store ^ "#" ^ graph_hash)
+      in
+      print_string
+        (Protoss.Canonical_ir.agent_graph_definition_explanation_json ~source
+           (Protoss.Workspace.graph_store store graph_hash) id)
+  | [ "explain"; file; id ] ->
+      let source = Protoss.Canonical_ir.agent_graph_source "graph-file" file in
+      print_string
+        (Protoss.Canonical_ir.agent_graph_definition_explanation_json ~source
+           (Protoss.Store.read_file file) id)
   | _ -> usage ()
 
 let command_repl () =

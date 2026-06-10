@@ -1219,6 +1219,23 @@ let () =
   assert_equal "agent graph deps filter" "three" (json_string_field "id" agent_deps);
   let agent_dep = List.hd (json_array_field "dependencies" agent_deps) in
   assert_equal "agent graph dep target" "two" (json_string_field "dependsOn" agent_dep);
+  let agent_explain =
+    Json.parse (Canonical_ir.agent_graph_definition_explanation_json dep_graph_json "three")
+  in
+  assert_equal "agent graph explanation query" "definition-explanation"
+    (json_string_field "query" agent_explain);
+  assert_equal "agent graph explanation def" "three"
+    (json_string_field "name" (json_field "definition" agent_explain));
+  assert_equal "agent graph explanation type node" "Type"
+    (json_string_field "kind" (json_field "typeNode" agent_explain));
+  assert_equal "agent graph explanation term node" "Term"
+    (json_string_field "kind" (json_field "termNode" agent_explain));
+  assert_equal "agent graph explanation dependency count" "1"
+    (string_of_int (List.length (json_array_field "dependencies" agent_explain)));
+  assert_true "agent graph explanation notes dependency"
+    (List.exists
+       (fun note -> contains_substring note "Depends on: two")
+       (json_string_array_field "notes" agent_explain));
   let duplicate_ref_checked = check "(def a Nat 1)\n(def b Nat 1)\n(def c Nat b)" in
   let duplicate_ref_graph_json = Canonical_ir.serialize_graph duplicate_ref_checked in
   let duplicate_ref_roundtrip =

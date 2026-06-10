@@ -404,6 +404,9 @@ Preuves de section: commande `protoss duplicates`, `Kernel.def_id`, generation
 de vues via `Workspace.store_graph_source_view`, assertions doublons et vues
 humaines dans `test/test_protoss.ml`; API `Canonical_ir.agent_graph_*_json`,
 commande `protoss agent graph` et assertions "agent graph" dans
+`test/test_protoss.ml`; explications de definitions via
+`Canonical_ir.agent_graph_definition_explanation_json`, commande
+`protoss agent explain` et assertion "agent graph explanation" dans
 `test/test_protoss.ml`.
 
 - [ ] Definir le protocole agent: `AI -> PatchCandidate -> Validator -> Harness -> Commit`.
@@ -414,7 +417,10 @@ commande `protoss agent graph` et assertions "agent graph" dans
   assertions "agent graph" dans `test/test_protoss.ml`.
 - [ ] Fournir generation de migrations assistee.
 - [ ] Fournir synthese de tests assistee.
-- [ ] Fournir explication de definition.
+- [x] Fournir explication de definition.
+  Preuves: `Canonical_ir.agent_graph_definition_explanation_json`, commande
+  `protoss agent explain`, assertion "agent graph explanation" dans
+  `test/test_protoss.ml`.
 - [x] Detecter doublons semantiques.
 - [ ] Factoriser fonctions identiques.
 - [ ] Simuler changements dans un `WorldRef` forke.
