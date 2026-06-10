@@ -405,7 +405,11 @@ listees dans la section "Gates de validation".
   assertions "project lock records policies" et `README.md`.
 - [ ] Analyse de risque `SecretLeakRisk`.
 - [ ] Audit provenance complet.
-- [ ] Tests de negative capabilities par package.
+- [x] Tests de negative capabilities par package.
+  Preuves: `Workspace.read_package_import` rejette une importation dont
+  l'interface publique exige une capability absente du manifest consommateur;
+  assertion "package import reports undeclared capability" dans
+  `test/test_protoss.ml`.
 
 ## 19. Diff, review et Git
 

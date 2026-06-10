@@ -1346,6 +1346,7 @@ type package_import_info = {
   import_lock_hash : string;
   import_interface_hash : string;
   import_contract_hash : string;
+  import_capabilities : string list;
 }
 
 let package_import_manifest manifest (name, path) =
@@ -1406,16 +1407,27 @@ let read_package_import manifest import =
   expect_atom "program-graph-hash" (prepared_graph_hash prepared);
   expect_atom "host-contract-hash" (prepared_host_contract_hash prepared);
   expect_atom "interface-hash" current_interface_hash;
-  let current_contract_hash =
-    package_interface_contract_hash (package_interface_from_items package_ref items)
+  let current_interface = package_interface_from_items package_ref items in
+  let current_contract_hash = package_interface_contract_hash current_interface in
+  let info =
+    {
+      import_name = imported.name;
+      import_ref = package_ref;
+      import_lock_hash = current_lock_hash;
+      import_interface_hash = current_interface_hash;
+      import_contract_hash = current_contract_hash;
+      import_capabilities = current_interface.interface_capabilities;
+    }
   in
-  {
-    import_name = imported.name;
-    import_ref = package_ref;
-    import_lock_hash = current_lock_hash;
-    import_interface_hash = current_interface_hash;
-    import_contract_hash = current_contract_hash;
-  }
+  let missing_capabilities =
+    info.import_capabilities
+    |> List.filter (fun cap -> not (List.exists (String.equal cap) manifest.capabilities))
+  in
+  if missing_capabilities <> [] then
+    fail
+      ("imported package " ^ imported.name ^ " requires undeclared capabilities: "
+     ^ String.concat ", " missing_capabilities);
+  info
 
 let package_imports manifest =
   manifest.package_imports

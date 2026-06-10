@@ -5200,6 +5200,21 @@ let () =
   in
   assert_true "package interface hash includes public capability scope"
     (not (String.equal interface_hash capability_interface_hash));
+  let negative_capability_ws = make_workspace "workspace-negative-capability-import" 8 "r" in
+  let negative_capability_manifest_path =
+    Filename.concat negative_capability_ws "protoss.toml"
+  in
+  write_file negative_capability_manifest_path
+    (Store.read_file negative_capability_manifest_path
+    ^ "package_imports = [\"workspace-a=" ^ capability_interface_ws
+    ^ "\"]\npackage_interfaces = [\"workspace-a=" ^ capability_interface_hash ^ "\"]\n");
+  let negative_capability_manifest = Workspace.parse_manifest negative_capability_ws in
+  (try
+     ignore (Workspace.write_package negative_capability_manifest);
+     fail "package import requiring undeclared capability should reject"
+   with Workspace.Error msg ->
+     assert_true "package import reports undeclared capability"
+       (contains_substring msg "requires undeclared capabilities: Clock.read"));
   let dot_before_drift = snapshot (Filename.concat ws_a ".protoss") in
   let math_path = Filename.concat ws_a "src/math.protoss" in
   let math_before = Store.read_file math_path in
