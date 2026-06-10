@@ -5214,10 +5214,14 @@ let () =
   let todo_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
   (* Each web slice materializes its own todo project: the example sources
      plus a pinned manifest, built deterministically, so slices stay
-     independent processes (same pattern as rebuild_workspace_a). *)
+     independent processes (same pattern as rebuild_workspace_a). Only src/
+     is copied — CLI runs leave a git-ignored .protoss store in the example
+     tree, and inheriting it would make the suite depend on (and trust)
+     unversioned local state. *)
   let make_todo () =
     let todo = temp_dir "web-todo" in
-    copy_tree todo_src todo;
+    ensure_dir todo;
+    copy_tree (Filename.concat todo_src "src") (Filename.concat todo "src");
     write_file (Filename.concat todo "protoss.toml")
       ("name = \"todo-web-alpha-test\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
       ^ stdlib_path
@@ -5662,7 +5666,11 @@ let () =
   let rt_stdlib = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let rt_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
   let rt_project = temp_dir "runtime-todo" in
-  copy_tree rt_src rt_project;
+  (* Copy src/ only: the example tree in _build is read-only and may carry a
+     git-ignored .protoss store from CLI runs; the manifest is written fresh
+     below (same hermeticity rule as the web slices). *)
+  ensure_dir rt_project;
+  copy_tree (Filename.concat rt_src "src") (Filename.concat rt_project "src");
   write_file (Filename.concat rt_project "protoss.toml")
     ("name = \"todo-runtime-alpha\"\nversion = \"0.1.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
     ^ rt_stdlib

@@ -19,7 +19,8 @@ invariant in detail. Consult it before assuming a feature does or doesn't exist.
 ```sh
 dune build                       # compile
 dune runtest --force             # fast smoke suite (test/smoke.ml, ~seconds)
-dune build @fulltest --force     # everything: core + self-host + stdlib + integration, in parallel
+dune build @fulltest             # everything: correct without --force (rules declare fixture deps)
+dune build @fulltest --force     # same, but always rerun (~10 s)
 dune exec protoss -- <args>      # run the CLI (see README for the full command list)
 ```
 
@@ -28,14 +29,20 @@ dune exec protoss -- <args>      # run the CLI (see README for the full command 
   `@coretest` (always-on core), `@selftest` (PROTOSS_RUN_SELF_HOST_TESTS),
   `@stdlibtest` (PROTOSS_RUN_STDLIB_TESTS), `@integrationtest` (PROTOSS_RUN_INTEGRATION_TESTS,
   itself split by PROTOSS_INTEGRATION_PART into `@integrationtest-workspace`,
-  `@integrationtest-web`, `@integrationtest-runtime`; the workspace part is sliced once more
-  by PROTOSS_WORKSPACE_PART into `@integrationtest-workspace-project`/`-consumer`/`-corruption`,
-  where the consumer/corruption slices rebuild the workspace-a chain deterministically instead
-  of sharing state). `@fulltest` aggregates the leaf aliases so dune runs them as parallel
-  processes. Default `dune runtest` only runs the quick smoke suite — run `@fulltest --force`
-  before declaring kernel/runtime/workspace changes safe. Test temp files must be pid-qualified
-  (see `temp_dir`/`patch_file`): sections run concurrently and race on fixed temp paths
-  otherwise.
+  `@integrationtest-web`, `@integrationtest-runtime`). The workspace part is sliced by
+  PROTOSS_WORKSPACE_PART (`-project`/`-consumer`/`-corruption`) and the web part by
+  PROTOSS_WEB_PART (`-app`/`-patches`/`-audit`); slices rebuild their fixture projects
+  deterministically instead of sharing state, and unknown slice names fail loudly.
+  `@fulltest` aggregates per-section aliases as parallel processes: the workspace part runs
+  whole (its tests use a mini stdlib written by the test, so it is sub-second), the web slices
+  stay split (each rebuilds the todo app against the full prelude — that is where full-prelude
+  build/audit coverage lives). Test rules declare their fixture deps (`test-fixtures` alias),
+  so plain `dune build @fulltest` is correct: no-op when nothing changed, rerun on fixture or
+  binary changes. Run it before declaring kernel/runtime/workspace changes safe. Test temp
+  files must be pid-qualified (see `temp_dir`/`patch_file`): sections run concurrently and
+  race on fixed temp paths otherwise. Tests must copy only example `src/` trees (never whole
+  example dirs): fixtures live read-only in _build once declared as deps, and CLI runs may
+  leave git-ignored `.protoss` stores that the suite must not inherit.
 - Compilation is fast (~1-2 s incremental); the slow part is *running* tests, because the
   interpreted self-hosted frontend (prelude evaluation) dominates. Keep cache-key hashing and
   other bookkeeping out of the evaluator's hot path (see `Runtime.eval_app`) — work that only
@@ -43,6 +50,13 @@ dune exec protoss -- <args>      # run the CLI (see README for the full command 
 - `kernel.ml` has a **frozen inferred `kernel.mli`** so body-only edits (including new private
   helpers) don't recompile every dependent module; when adding public kernel API, add its
   signature to `kernel.mli` too (the compiler error dictates it).
+- Expensive whole-program kernel outputs are memoized twice: few-slot caches by *physical
+  identity* (one checked program flowing through build/lock/package), and by *content hash*
+  (`check_program` keyed on the digest of the marshaled AST; node graph / graph fields /
+  graph content hash keyed on the canonical program hash) because audit/patch/locked flows
+  re-load byte-identical programs under fresh identities. Determinism makes content keys
+  sound: same canonical hash ⇒ byte-identical artifacts. Only successful checks are cached;
+  failures keep their exact error behavior.
 - SHA-256 dispatches to a hardware-accelerated C stub on macOS (`protoss_sha256_stubs.c`,
   CommonCrypto) and falls back to the pure-OCaml `Hashcons.digest_pure` elsewhere; both are
   asserted bit-identical in the core tests. The same stub file exposes `Store.try_clone`

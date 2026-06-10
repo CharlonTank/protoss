@@ -12,22 +12,42 @@
  (alias runtest)
  (action (run ./smoke.exe)))
 
+; Every test_protoss section reads fixtures from the source tree (stdlib
+; prelude, examples, patches), so the rules declare them through this alias:
+; plain `dune build @fulltest` (without --force) is then correct — a no-op
+; when nothing changed, a targeted rerun when a fixture or the binary
+; changes. Generated .protoss stores are deliberately not dependencies: the
+; suite only copies example src/ trees.
+(alias
+ (name test-fixtures)
+ (deps
+  %{workspace_root}/stdlib/prelude.protoss
+  (glob_files %{workspace_root}/examples/*.protoss)
+  (glob_files %{workspace_root}/examples/self_host/*.protoss)
+  (source_tree %{workspace_root}/examples/web/todo_app/src)
+  %{workspace_root}/examples/web/todo_app/protoss.toml
+  (source_tree %{workspace_root}/patches)))
+
 (rule
  (alias coretest)
+ (deps (alias test-fixtures))
  (action (run ./test_protoss.exe)))
 
 (rule
  (alias selftest)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_SELF_HOST_TESTS 1
           (run ./test_protoss.exe))))
 
 (rule
  (alias stdlibtest)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_STDLIB_TESTS 1
           (run ./test_protoss.exe))))
 
 (rule
  (alias integrationtest)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (run ./test_protoss.exe))))
 
@@ -37,6 +57,7 @@
 ; one process.
 (rule
  (alias integrationtest-workspace)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (run ./test_protoss.exe)))))
@@ -48,6 +69,7 @@
 ; @integrationtest-workspace still runs every slice in one process.
 (rule
  (alias integrationtest-workspace-project)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (setenv PROTOSS_WORKSPACE_PART project
@@ -55,6 +77,7 @@
 
 (rule
  (alias integrationtest-workspace-consumer)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (setenv PROTOSS_WORKSPACE_PART consumer
@@ -62,6 +85,7 @@
 
 (rule
  (alias integrationtest-workspace-corruption)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (setenv PROTOSS_WORKSPACE_PART corruption
@@ -69,6 +93,7 @@
 
 (rule
  (alias integrationtest-web)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (run ./test_protoss.exe)))))
@@ -80,6 +105,7 @@
 ; every slice in one process.
 (rule
  (alias integrationtest-web-app)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (setenv PROTOSS_WEB_PART app
@@ -87,6 +113,7 @@
 
 (rule
  (alias integrationtest-web-patches)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (setenv PROTOSS_WEB_PART patches
@@ -94,6 +121,7 @@
 
 (rule
  (alias integrationtest-web-audit)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (setenv PROTOSS_WEB_PART audit
@@ -101,6 +129,7 @@
 
 (rule
  (alias integrationtest-runtime)
+ (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART runtime
            (run ./test_protoss.exe)))))
@@ -109,6 +138,9 @@
 ; processes in parallel (wall clock = slowest section instead of their sum).
 ; Each section re-runs the always-on core assertions; sections are isolated
 ; through per-pid temp dirs, so concurrent runs do not collide.
+; The workspace part runs whole (mini-stdlib keeps it under a second); its
+; per-slice aliases remain available for targeted reruns. The web slices stay
+; split: they are the long pole, and each rebuilds its own todo project.
 (alias
  (name fulltest)
  (deps
@@ -116,9 +148,7 @@
   (alias coretest)
   (alias selftest)
   (alias stdlibtest)
-  (alias integrationtest-workspace-project)
-  (alias integrationtest-workspace-consumer)
-  (alias integrationtest-workspace-corruption)
+  (alias integrationtest-workspace)
   (alias integrationtest-web-app)
   (alias integrationtest-web-patches)
   (alias integrationtest-web-audit)
