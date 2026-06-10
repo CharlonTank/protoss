@@ -57,6 +57,9 @@ let usage () =
 let parse_and_check file =
   Protoss.Loader.check_file file
 
+let is_canonical_file file =
+  match Filename.extension file with ".ptc" | ".ptb" -> true | _ -> false
+
 let find_entry args =
   let rec loop = function
     | "--entry" :: name :: rest -> (name, rest)
@@ -97,7 +100,10 @@ let protect f =
   | Sys_error msg -> print_error "system error" msg
 
 let command_parse file =
-  let p = Protoss.Parser.parse_file file in
+  let p =
+    if is_canonical_file file then Protoss.Loader.parse_file file
+    else Protoss.Parser.parse_file file
+  in
   Printf.printf "Program: %d definitions\n" (List.length p.Protoss.Ast.defs);
   (match p.module_name with Some name -> Printf.printf "Module: %s\n" name | None -> ());
   (match p.exports with

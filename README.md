@@ -139,6 +139,7 @@ Compatibility commands from earlier MVPs still work:
 
 ```sh
 dune exec protoss -- parse examples/basic.protoss
+dune exec protoss -- parse examples/basic.ptc
 dune exec protoss -- check examples/basic.pt
 dune exec protoss -- check examples/basic.ptc
 dune exec protoss -- check examples/basic.ptb
