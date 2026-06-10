@@ -858,7 +858,13 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 - [ ] Toutes les cases ci-dessus sont cochees.
 - [ ] Chaque case cochee pointe vers test, fixture, doc ou commande probante.
-- [ ] Les formats `.pt`, `.ptc`, `.ptb` sont implementes et round-trippes.
+- [x] Les formats `.pt`, `.ptc`, `.ptb` sont implementes et round-trippes.
+  Preuves: `Loader.check_file`, `Canonical_binary.checked_to_binary`,
+  `docs/canonical-formats.md`, fixtures `examples/basic.pt`,
+  `examples/basic.ptc`, `examples/basic.ptb`, assertions ".pt source hashes as
+  .protoss source", ".ptc fixture matches canonical serialization", ".ptb
+  fixture matches canonical binary serialization" et ".pt projection parses with
+  same hash" dans `test/test_protoss.ml`.
 - [x] Le serveur MCP est utilisable par un client MCP standard.
   Preuves: `Mcp_server.handle_message`, `Mcp_server.tools`, protocole
   `2025-11-25`, assertions "mcp initialize protocol", "mcp exposes ..." et
