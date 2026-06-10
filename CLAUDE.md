@@ -128,5 +128,7 @@ helpers, plus self-hosted Sexp/Json/Protoss parsers written in Protoss itself).
 - Error messages carry `path:line:column` locations; preserve that when adding error paths.
 - Public CLI errors are prefixed through `public_error.ml`; add or reuse a stable catalog code when
   exposing a new user-visible error family, and keep `protoss explain --list` useful.
+- When checking a box in `protoss-spec.md`, add a local `Preuves:` block or section-level proof
+  marker and run `dune exec protoss -- spec check protoss-spec.md`.
 - `examples/` holds `.protoss` fixtures used by tests; `patches/` holds JSON patch fixtures.
 - Editor support (syntax highlighting, go-to-definition) lives in `editors/cursor/protoss-syntax`.

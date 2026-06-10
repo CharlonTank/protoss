@@ -53,6 +53,7 @@ let usage () =
      \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --host-contract | --check-host-contract <contract.json> | --node <nodeRef> | --def <nameOrDefId>\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
+     \       protoss spec check [protoss-spec.md]\n\
      \       protoss bench build <project>\n\
      \       protoss cache stats|list <dir>\n\
      \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats|gc [args]";
@@ -938,6 +939,13 @@ let command_explain = function
   | [ code ] -> print_endline (Protoss.Public_error.explain code)
   | _ -> usage ()
 
+let command_spec = function
+  | [ "check" ] ->
+      print_string (Protoss.Spec_audit.report_text (Protoss.Spec_audit.check_file "protoss-spec.md"))
+  | [ "check"; file ] ->
+      print_string (Protoss.Spec_audit.report_text (Protoss.Spec_audit.check_file file))
+  | _ -> usage ()
+
 (* ---- Self-hosted frontend bridge ----------------------------------------
    Runs the Protoss-implemented frontend (stdlib/prelude.protoss) through the
    normal evaluator: the target source is spliced into a driver definition that
@@ -1310,6 +1318,7 @@ let () =
       | "graph" :: args -> command_graph args
       | [ "repl" ] -> command_repl ()
       | "explain" :: args -> command_explain args
+      | "spec" :: args -> command_spec args
       | "bench" :: args -> command_bench args
       | "cache" :: args -> command_cache args
       | "store" :: args -> command_store args

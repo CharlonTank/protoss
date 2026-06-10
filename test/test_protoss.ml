@@ -210,6 +210,18 @@ let () =
        "examples/bad.protoss:1:1: unterminated list");
   assert_equal "CLI web errors keep explicit web code" "WEB007"
     (Public_error.code_for_cli_kind "web error" "WEB007 view message mismatch");
+  let spec_report =
+    Spec_audit.report
+      "## Demo\n\nPreuves de section: test/test_protoss.ml\n- [x] Done item\n- [ ] Pending item\n"
+  in
+  assert_equal "spec audit checked count" "1" (string_of_int spec_report.checked_count);
+  assert_equal "spec audit accepts section evidence" "0"
+    (string_of_int (List.length spec_report.missing));
+  let spec_missing = Spec_audit.report "## Demo\n\n- [x] Missing proof\n" in
+  assert_equal "spec audit reports missing evidence" "1"
+    (string_of_int (List.length spec_missing.missing));
+  assert_true "spec audit report names missing line"
+    (contains_substring (Spec_audit.report_text spec_missing) "line 3");
   assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
 let expect_parse_error input =

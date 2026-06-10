@@ -47,6 +47,7 @@ What works now:
 - Runtime `let` bindings are evaluated as memoized thunks: an unused RHS is not forced, and repeated uses share the first forced value.
 - Pure persistent evaluation cache entries use `EvalKey = H("protoss.eval.v1", DefId, ArgsHash, RuntimePolicy)` for nullary definitions; `ArgsHash` is the canonical no-args hash and `RuntimePolicy` records the runtime version, cache scope, stdlib fast-path setting, and active capability scope. Definition and application cache keys include that policy, so different runtime or capability policies write separate content-addressed entries.
 - Process evaluation keys use `H("protoss.process.eval.v1", DefId, WorldRef, CapScope, RuntimePolicy)` and `protoss run` prints the `ProcessEvalKey` for completed or suspended process entries.
+- `protoss spec check [protoss-spec.md]` audits checked TODO items and fails when a checked item lacks local or section-level proof markers.
 - Web patch validation checks `init/update/view`; Model shape changes require a pure `migrate_v1_v2`.
 - `dune runtest` runs a fast smoke suite for parser/checker/hash/normalization/cache/process/patch rollback. Longer suites are explicit: `dune build @coretest`, `dune build @integrationtest`, `dune build @stdlibtest`, `dune build @selftest`, or `dune build @fulltest` (aggregates the per-section aliases — the whole workspace part plus the three web slices `@integrationtest-web-app`/`-patches`/`-audit` — and runs them as parallel processes; per-slice workspace aliases `@integrationtest-workspace-project`/`-consumer`/`-corruption` remain for targeted reruns). Test rules declare their fixture dependencies, so plain `dune build @fulltest` without `--force` is correct and a no-op when nothing changed.
 
@@ -88,6 +89,7 @@ dune exec protoss -- capabilities --project examples/web/todo_app
 dune exec protoss -- duplicates examples/basic.protoss
 dune exec protoss -- duplicates --project examples/web/todo_app
 dune exec protoss -- termination examples/basic.protoss main
+dune exec protoss -- spec check protoss-spec.md
 
 dune exec protoss -- ledger inspect <WorldRefOrEventRef>
 dune exec protoss -- ledger replay <WorldRef>

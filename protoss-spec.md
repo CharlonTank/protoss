@@ -24,16 +24,26 @@ listees dans la section "Gates de validation".
 
 ## 0. Spec, suivi et ergonomie repo
 
+Preuves de section: `protoss-spec.md`, `lib/spec_audit.ml`,
+`protoss spec check`, assertions `spec audit ...` dans `test/test_protoss.ml`.
+
 - [x] Avoir une specification centrale dans le depot.
 - [x] Renommer la specification en `protoss-spec.md`, le chemin demande.
 - [x] Transformer la specification en TODO exploitable.
-- [ ] Ajouter une commande ou un script de verification qui echoue si une case
+- [x] Ajouter une commande ou un script de verification qui echoue si une case
   marquee done n'a plus de test ou de preuve documentaire.
+  Preuves: `lib/spec_audit.ml`, commande `protoss spec check
+  protoss-spec.md`, assertions `spec audit ...` dans `test/test_protoss.ml`.
 - [ ] Synchroniser `README.md`, `CLAUDE.md` et ce TODO quand une fonctionnalite
   change de statut.
 - [ ] Documenter pour chaque case l'emplacement de son test principal.
 
 ## 1. Vision et modele de source de verite
+
+Preuves de section: `lib/ast.ml`, `lib/kernel.ml`, `lib/canonical_ir.ml`,
+`lib/store.ml`, `lib/workspace.ml`, commandes `protoss graph`,
+`protoss store`, `protoss compare`, assertions graphe/store/workspace dans
+`test/test_protoss.ml`.
 
 - [x] Representer les programmes comme AST type puis graphe canonique.
 - [x] Donner des identites de contenu stables aux definitions (`DefId`).
@@ -52,6 +62,10 @@ listees dans la section "Gates de validation".
 
 ## 2. Noms, extensions et formats officiels
 
+Preuves de section: `lib/parser.ml`, `lib/canonical_binary.ml`,
+`docs/canonical-formats.md`, `examples/basic.pt`, `examples/basic.ptc`,
+`examples/basic.ptb`, assertions `.pt/.ptc/.ptb` dans `test/test_protoss.ml`.
+
 - [x] Conserver `.protoss` comme syntaxe source actuelle du prototype.
 - [x] Produire `program.canon` comme texte canonique interne.
 - [x] Produire `program.graph.json` et des objets `graphs/<hash>.graph.json`.
@@ -67,6 +81,10 @@ listees dans la section "Gates de validation".
 - [x] Documenter la version du format canonique binaire.
 
 ## 3. Syntaxe humaine Protoss/H
+
+Preuves de section: `lib/parser.ml`, `lib/surface_syntax.ml`,
+`examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`, assertions
+Elm-like et modules humains dans `test/test_protoss.ml`.
 
 - [x] Parser un sous-ensemble Elm-like avec signatures `name : Type`.
 - [x] Parser les definitions `name = expr` et `name arg = expr`.
@@ -110,6 +128,10 @@ listees dans la section "Gates de validation".
 
 ## 4. Syntaxe canonique Protoss/C et graphe
 
+Preuves de section: `lib/kernel.ml`, `lib/canonical_ir.ml`,
+`lib/canonical_binary.ml`, `docs/canonical-formats.md`, assertions canon,
+graphe JSON, migration et `.ptc` dans `test/test_protoss.ml`.
+
 - [x] Parser une syntaxe S-expression non ambigue pour le prototype.
 - [x] Emettre un `program.canon` deterministe.
 - [x] Canonicaliser les aliases avant hashing.
@@ -125,6 +147,10 @@ listees dans la section "Gates de validation".
 - [x] Ajouter des tests golden `.ptc`.
 
 ## 5. Noyau semantique total
+
+Preuves de section: `lib/kernel.ml`, `lib/typechecker.ml`,
+`lib/normalizer.ml`, `lib/runtime.ml`, fixtures `examples/recursive*.protoss`,
+assertions recursion, alpha-stabilite et normalisation dans `test/test_protoss.ml`.
 
 - [x] Implementer le lambda-calcul type central.
 - [x] Implementer `Var`, `Lam`, `App`, `Let`, `Pi`, records, projections et data.
@@ -149,6 +175,10 @@ listees dans la section "Gates de validation".
   assertion "termination explanation" et `README.md`.
 
 ## 6. Evaluation, cache et memoisation
+
+Preuves de section: `lib/runtime.ml`, commandes `protoss eval`, `protoss nf`,
+`protoss run`, `protoss cache list`, assertions cache/eval/lazy let dans
+`test/test_protoss.ml` et `README.md`.
 
 - [x] Evaluer les programmes purs via CLI (`eval`, `nf`, `run` selon le cas).
 - [x] Interpreter les graphes charges directement sans reparsing texte.
@@ -177,6 +207,10 @@ listees dans la section "Gates de validation".
 
 ## 7. Effets, Process et monde
 
+Preuves de section: `lib/runtime.ml`, `lib/ledger.ml`, `lib/web.ml`,
+`examples/ask_human.protoss`, `examples/effect_sensors.protoss`, assertions
+Process/ledger/web runtime dans `test/test_protoss.ml`.
+
 - [x] Modeliser les effets explicites avec `Process`.
 - [x] Supporter `done`, `bind` et `request`.
 - [x] Supporter `AskHuman`, `HttpGet`, `ReadClock`, `SaveLocal`, `LoadLocal`,
@@ -202,6 +236,10 @@ listees dans la section "Gates de validation".
 
 ## 8. Ledger
 
+Preuves de section: `lib/ledger.ml`, commandes `protoss ledger ...`,
+assertions ledger inspect/replay/diff/fork/merge/metadata dans
+`test/test_protoss.ml` et `README.md`.
+
 - [x] Enregistrer les requetes et reprises dans un ledger.
 - [x] Produire `WorldRef` et `EventRef` deterministes.
 - [x] Inspecter, rejouer et differ les ledgers.
@@ -220,6 +258,11 @@ listees dans la section "Gates de validation".
 
 ## 9. Capabilities et secrets
 
+Preuves de section: `lib/kernel.ml`, `lib/canonical_ir.ml`,
+`lib/workspace.ml`, commande `protoss capabilities`, assertions capabilities,
+scope refs, package negative capabilities et SecretLeakRisk dans
+`test/test_protoss.ml`.
+
 - [x] Declarer des capabilities sur `defcap` et `defpolycap`.
 - [x] Comparer scope declare et scope infere.
 - [x] Propager les scopes de capabilities dans le graphe.
@@ -236,6 +279,11 @@ listees dans la section "Gates de validation".
 - [x] Exposer une commande d'audit des capabilities par root.
 
 ## 10. Modules, imports et packages
+
+Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
+`examples/modules/*.protoss`, `examples/workspace`, commandes `protoss project
+...`, assertions imports, packages, lock/interface et drift dans
+`test/test_protoss.ml`.
 
 - [x] Supporter `(module Name)` et `(export symbol ...)`.
 - [x] Qualifier definitions et aliases par module.
@@ -259,6 +307,10 @@ listees dans la section "Gates de validation".
 - [ ] Ajouter registre local/global de packages.
 
 ## 11. Patches, diff et edition MCP-first
+
+Preuves de section: `lib/patch.ml`, `lib/patch_audit.ml`,
+`lib/workspace.ml`, fixtures `patches/*.json`, commandes `protoss patch ...`
+et `protoss diff`, assertions patch/diff/audit dans `test/test_protoss.ml`.
 
 - [x] Appliquer des patches JSON atomiques sur store.
 - [x] Verifier les patches avant insertion.
@@ -306,6 +358,10 @@ listees dans la section "Gates de validation".
 
 ## 13. IA comme acteur natif
 
+Preuves de section: commande `protoss duplicates`, `Kernel.def_id`, generation
+de vues via `Workspace.store_graph_source_view`, assertions doublons et vues
+humaines dans `test/test_protoss.ml`.
+
 - [ ] Definir le protocole agent: `AI -> PatchCandidate -> Validator -> Harness -> Commit`.
 - [ ] Fournir une API d'exploration du graphe pour agents.
 - [ ] Fournir generation de migrations assistee.
@@ -319,6 +375,11 @@ listees dans la section "Gates de validation".
 - [ ] Interdire aux agents l'ecriture directe du programme canonique.
 
 ## 14. Self-hosting
+
+Preuves de section: `stdlib/prelude.protoss`, `docs/self-hosting.md`,
+`docs/self-hosted-typechecker.md`, `conformance/self_host`, commandes
+`protoss self ...`, assertions self parse/fmt/resolve/deps/capabilities/static
+et typecheck dans `test/test_protoss.ml`.
 
 - [x] Fournir un parseur S-expression/Protoss partiellement ecrit en Protoss.
 - [x] Fournir formatter self-hosted accessible par CLI.
@@ -345,6 +406,10 @@ listees dans la section "Gates de validation".
 
 ## 15. Compilation et backends
 
+Preuves de section: `lib/web.ml`, `examples/web/todo_app`, commandes
+`protoss project build ... --target web`, `protoss web build`, assertions web
+bundle deterministe dans `test/test_protoss.ml`.
+
 - [x] Interpreter le graphe canonique pour web `view` et `update`.
 - [x] Produire bundles web deterministes.
 - [x] Inclure `index.html`, `protoss-runtime.js`, `protoss-app.json`,
@@ -361,6 +426,11 @@ listees dans la section "Gates de validation".
 
 ## 16. UI et architecture applicative
 
+Preuves de section: `lib/web.ml`, `examples/web/todo_app/src/app.protoss`,
+fixtures `patches/web/*.json`, commande `protoss app check`, assertions app
+contract, runtime browser payload et UI/message mismatch dans
+`test/test_protoss.ml`.
+
 - [x] Verifier les apps web par convention `init`, `update`, `view`.
 - [x] Supporter `View msg`.
 - [x] Supporter `text`, `image`, `button`, `input`, `column`, `row`, `list`,
@@ -374,6 +444,10 @@ listees dans la section "Gates de validation".
 - [ ] Ajouter examples humains Protoss/H complets pour apps web.
 
 ## 17. Erreurs et diagnostics
+
+Preuves de section: `lib/public_error.ml`, `bin/main.ml`, commandes
+`protoss explain ...`, assertions erreurs publiques, localisation et absence
+d'exceptions brutes dans `test/test_protoss.ml`, `README.md` et `CLAUDE.md`.
 
 - [x] Distinguer erreurs de syntaxe, typecheck, patch et audit dans les commandes.
 - [x] Ajouter locations `path:line:column` pour erreurs S-expression.
@@ -398,6 +472,11 @@ listees dans la section "Gates de validation".
 - [x] Ajouter helpers `Result` pour erreurs metier dans les examples.
 
 ## 18. Securite
+
+Preuves de section: `lib/kernel.ml`, `lib/workspace.ml`, `lib/web.ml`,
+`lib/patch_audit.ml`, assertions capabilities, imports hashes, rendu HTML,
+package policies, SecretLeakRisk et negative capabilities dans
+`test/test_protoss.ml`.
 
 - [x] Pas d'IO implicite pour les programmes Protoss.
 - [x] Capabilities explicites pour effets supportes.
@@ -425,6 +504,10 @@ listees dans la section "Gates de validation".
 
 ## 19. Diff, review et Git
 
+Preuves de section: `lib/workspace.ml`, `lib/patch.ml`, commandes
+`protoss diff`, `protoss patch from-diff`, `protoss patch review`, assertions
+diff/patch review et chemins structurels dans `test/test_protoss.ml`.
+
 - [x] Produire diff structurel entre stores.
 - [x] Produire patch JSON depuis diff.
 - [x] Representer Git comme mecanisme export/push du prototype actuel.
@@ -446,6 +529,10 @@ listees dans la section "Gates de validation".
   `/harness/**/*.pth`.
 
 ## 20. Roadmap d'execution
+
+Preuves de section: les cases roadmap cochees recapitulant des sections
+anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
+`docs/`, `examples/` et des commandes CLI citees dans ces sections.
 
 ### v0.1 - Core pur
 
