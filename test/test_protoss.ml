@@ -373,6 +373,12 @@ let () =
   let elm_like_user_name, _ = Runtime.normalize_def elm_like "userName" in
   assert_equal "Elm-like field access normalizes" "\"Ada\""
     (Runtime.value_to_string elm_like_user_name);
+  let elm_like_renamed_user_name, _ = Runtime.normalize_def elm_like "renamedUserName" in
+  assert_equal "Elm-like record update field normalizes" "\"Grace\""
+    (Runtime.value_to_string elm_like_renamed_user_name);
+  let elm_like_renamed_user_active, _ = Runtime.normalize_def elm_like "renamedUserActive" in
+  assert_equal "Elm-like record update preserves fields" "true"
+    (Runtime.value_to_string elm_like_renamed_user_active);
   let elm_like_numbers, _ = Runtime.normalize_def elm_like "numbers" in
   assert_equal "Elm-like list literal normalizes" "[1, 2, 3]"
     (Runtime.value_to_string elm_like_numbers);
@@ -1440,6 +1446,24 @@ let () =
     "(def p (Record (name String)) (record (name \"Ada\")))\n\
      (def bad Nat (letRecord p (count) count))";
   expect_check_error "(def bad Nat (letRecord 1 (count) count))";
+  let record_update =
+    check
+      "(def p (Record (active Bool) (name String)) (record (active true) (name \"Ada\")))\n\
+       (def updated (Record (active Bool) (name String)) (recordUpdate p (name \"Grace\")))\n\
+       (def out Bool (get updated active))"
+  in
+  let record_update_out, _ = Runtime.normalize_def record_update "out" in
+  assert_equal "recordUpdate preserves fields" "true"
+    (Runtime.value_to_string record_update_out);
+  assert_true "recordUpdate is surface-only canonical syntax"
+    (not (contains_substring (Kernel.serialize_checked_program record_update) "recordUpdate"));
+  expect_parse_error
+    "(def p (Record (name String)) (record (name \"Ada\")))\n\
+     (def bad (Record (name String)) (recordUpdate p (name \"Grace\") (name \"Ada\")))";
+  expect_check_error
+    "(def p (Record (name String)) (record (name \"Ada\")))\n\
+     (def bad (Record (name String)) (recordUpdate p (missing \"Grace\")))";
+  expect_check_error "(def bad Nat (recordUpdate 1 (count 2)))";
 
   let named_model =
     check

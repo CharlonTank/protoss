@@ -416,6 +416,13 @@ let rec expand_expr_types recursive_names aliases vars = function
   | ERecord fields ->
       ERecord
         (sort_fields (List.map (fun (n, e) -> (n, expand_expr_types recursive_names aliases vars e)) fields))
+  | ERecordUpdate (record, updates) ->
+      ERecordUpdate
+        ( expand_expr_types recursive_names aliases vars record,
+          sort_fields
+            (List.map
+               (fun (n, e) -> (n, expand_expr_types recursive_names aliases vars e))
+               updates) )
   | EField (e, field) -> EField (expand_expr_types recursive_names aliases vars e, field)
   | EVariant (t, con, e) ->
       EVariant (expand_type recursive_names aliases vars [] t, con, expand_expr_types recursive_names aliases vars e)
@@ -552,6 +559,8 @@ let collect_deps defs =
         let binders = List.map snd fields in
         expr (binders @ bound) (expr bound acc record) body
     | ERecord fields -> List.fold_left (fun a (_, e) -> expr bound a e) acc fields
+    | ERecordUpdate (record, updates) ->
+        List.fold_left (fun a (_, e) -> expr bound a e) (expr bound acc record) updates
     | EField (e, _) -> expr bound acc e
     | EVariant (_, _, e) | EVariantInferred (_, e) -> expr bound acc e
     | EInst (n, _) ->
@@ -694,6 +703,8 @@ let rec expr_names = function
   | ELetRecord (record, fields, body) ->
       expr_names record @ List.map snd fields @ expr_names body
   | ERecord fields -> List.concat_map (fun (_, e) -> expr_names e) fields
+  | ERecordUpdate (record, updates) ->
+      expr_names record @ List.concat_map (fun (_, e) -> expr_names e) updates
   | EField (e, _) -> expr_names e
   | EVariant (_, _, e) | EVariantInferred (_, e) -> expr_names e
   | EInst (name, _) -> [ name ]
@@ -740,6 +751,18 @@ let desugar_let_record ctx record fields body =
       fields body
   in
   ELet (record_name, record, body)
+
+let fresh_record_update_name ctx record updates =
+  let taken =
+    List.map fst ctx.locals @ List.map fst ctx.globals @ expr_names record
+    @ List.concat_map (fun (_, e) -> expr_names e) updates
+    |> List.sort_uniq String.compare
+  in
+  let rec loop i =
+    let candidate = "__record" ^ string_of_int i in
+    if List.exists (String.equal candidate) taken then loop (i + 1) else candidate
+  in
+  loop 0
 
 let rec subst_type args = function
   | TUnit -> TUnit
@@ -1059,6 +1082,7 @@ let rec infer ctx = function
              ^ ", expression " ^ string_of_expr e))
         fields;
       TRecord (sort_fields (List.map (fun (n, t, _) -> (n, t)) fields))
+  | ERecordUpdate (record, updates) -> infer_record_update ctx record updates
   | EField (e, field) -> (
       match unfold_type ctx (infer ctx e) with
       | TRecord fields -> (
@@ -1230,6 +1254,26 @@ let rec infer ctx = function
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
 
+and infer_record_update ctx record updates =
+  if updates = [] then fail "recordUpdate requires at least one field";
+  let record_ty = infer ctx record in
+  match unfold_type ctx record_ty with
+  | TRecord fields ->
+      List.iter
+        (fun (name, expr) ->
+          match assoc_opt name fields with
+          | None -> fail ("unknown record update field: " ^ name)
+          | Some expected ->
+              let actual = infer ctx expr in
+              require_type_expr expected actual ("record update " ^ name) expr;
+              if contains_process_type actual then
+                fail
+                  ("Process used as pure record update field " ^ name ^ ": got "
+                 ^ string_of_typ actual ^ ", expression " ^ string_of_expr expr))
+        updates;
+      record_ty
+  | t -> fail ("record update on non-record: " ^ string_of_typ t)
+
 and infer_fold_list_step ctx xs item_ty result_ty step =
   let expected = TFun (item_ty, TFun (result_ty, result_ty)) in
   let infer_structural_step item actual_item_ty acc actual_acc_ty body =
@@ -1338,6 +1382,7 @@ let rec infer_elab ctx expr =
       in
       (TRecord (sort_fields (List.map (fun (n, t, _) -> (n, t)) fields)),
        ERecord (sort_fields (List.map (fun (n, _, e) -> (n, e)) fields)))
+  | ERecordUpdate (record, updates) -> elaborate_record_update ctx record updates
   | EField (e, field) -> (
       let t, e = infer_elab ctx e in
       match unfold_type ctx t with
@@ -1513,6 +1558,34 @@ let rec infer_elab ctx expr =
           | TProcess _ -> (body_ty, EBind (p, x, a, body))
           | t -> fail ("bind body must return Process, got " ^ string_of_typ t))
       | t -> fail ("bind on non-process: " ^ string_of_typ t))
+
+and elaborate_record_update ctx record updates =
+  if updates = [] then fail "recordUpdate requires at least one field";
+  let record_ty, record = infer_elab ctx record in
+  match unfold_type ctx record_ty with
+  | TRecord fields ->
+      let updates =
+        List.map
+          (fun (name, expr) ->
+            match assoc_opt name fields with
+            | None -> fail ("unknown record update field: " ^ name)
+            | Some expected ->
+                let _, expr = check_elab ctx expected expr in
+                (name, expr))
+          (sort_fields updates)
+      in
+      let record_name = fresh_record_update_name ctx record updates in
+      let rebuilt =
+        ERecord
+          (List.map
+             (fun (name, _) ->
+               match assoc_opt name updates with
+               | Some expr -> (name, expr)
+               | None -> (name, EField (EName record_name, name)))
+             (sort_fields fields))
+      in
+      (record_ty, ELet (record_name, record, rebuilt))
+  | t -> fail ("record update on non-record: " ^ string_of_typ t)
 
 and check_elab ctx expected expr =
   match (unfold_type ctx expected, expr) with
@@ -1920,6 +1993,7 @@ let rec canonical_expr env = function
   | ELetRecord _ -> fail "unelaborated record destructuring in canonicalization"
   | ERecord fields ->
       CRecord (sort_fields (List.map (fun (n, e) -> (n, canonical_expr env e)) fields))
+  | ERecordUpdate _ -> fail "unelaborated record update in canonicalization"
   | EField (e, field) -> CField (canonical_expr env e, field)
   | EVariant (t, con, e) -> CVariant (t, con, canonical_expr env e)
   | EVariantInferred (con, _) -> fail ("unelaborated variant constructor in canonicalization: " ^ con)

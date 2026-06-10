@@ -532,24 +532,53 @@ and parse_atom_expr st =
   | None -> fail "expected expression atom"
 
 and parse_record_expr st =
-  let rec fields acc =
+  let rec literal_fields acc =
     match peek st with
     | Some RBrace ->
         ignore (take st);
         Sexp.List (Sexp.Atom "record" :: List.rev acc)
     | Some Comma ->
         ignore (take st);
-        fields acc
+        literal_fields acc
     | Some (Ident name) ->
         ignore (take st);
         expect st Equals;
         let expr = parse_expr st in
         (match peek st with Some Comma -> ignore (take st) | _ -> ());
-        fields (Sexp.List [ Sexp.Atom name; expr ] :: acc)
+        literal_fields (Sexp.List [ Sexp.Atom name; expr ] :: acc)
     | Some tok -> fail ("invalid record field: " ^ token_name tok)
     | None -> fail "unterminated record expression"
   in
-  fields []
+  let rec update_fields acc =
+    match peek st with
+    | Some RBrace ->
+        if acc = [] then fail "record update requires at least one field";
+        ignore (take st);
+        List.rev acc
+    | Some Comma ->
+        ignore (take st);
+        update_fields acc
+    | Some (Ident name) ->
+        ignore (take st);
+        expect st Equals;
+        let expr = parse_expr st in
+        (match peek st with Some Comma -> ignore (take st) | _ -> ());
+        update_fields (Sexp.List [ Sexp.Atom name; expr ] :: acc)
+    | Some tok -> fail ("invalid record update field: " ^ token_name tok)
+    | None -> fail "unterminated record update"
+  in
+  match peek st with
+  | Some RBrace -> literal_fields []
+  | _ ->
+      let start = st.pos in
+      let base = parse_expr st in
+      (match peek st with
+      | Some Pipe ->
+          ignore (take st);
+          Sexp.List (Sexp.Atom "recordUpdate" :: base :: update_fields [])
+      | _ ->
+          st.pos <- start;
+          literal_fields [])
 
 and parse_list_expr st =
   let rec elems acc =

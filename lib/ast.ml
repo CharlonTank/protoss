@@ -35,6 +35,7 @@ type expr =
   | ELetAnnot of string * typ * expr * expr
   | ELetRecord of expr * (string * string) list * expr
   | ERecord of (string * expr) list
+  | ERecordUpdate of expr * (string * expr) list
   | EField of expr * string
   | EVariant of typ * string * expr
   | EVariantInferred of string * expr
@@ -223,6 +224,13 @@ let rec string_of_expr_with_params params = function
           (List.map
              (fun (n, e) -> "(" ^ n ^ " " ^ string_of_expr_with_params params e ^ ")")
              (sort_fields fields))
+      ^ ")"
+  | ERecordUpdate (record, updates) ->
+      "(recordUpdate " ^ string_of_expr_with_params params record ^ " "
+      ^ String.concat " "
+          (List.map
+             (fun (n, e) -> "(" ^ n ^ " " ^ string_of_expr_with_params params e ^ ")")
+             (sort_fields updates))
       ^ ")"
   | EField (e, field) -> "(get " ^ string_of_expr_with_params params e ^ " " ^ field ^ ")"
   | EVariant (t, con, e) ->

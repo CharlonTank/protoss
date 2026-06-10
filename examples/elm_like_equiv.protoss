@@ -51,6 +51,18 @@
 (def userName String
   (get user name))
 
+(def renamedUser User
+  (let (__record0 user)
+    (record
+      (active (get __record0 active))
+      (name "Grace"))))
+
+(def renamedUserName String
+  (get renamedUser name))
+
+(def renamedUserActive Bool
+  (get renamedUser active))
+
 (def numbers (List Nat)
   (Cons 1 (Cons 2 (Cons 3 Nil))))
 

@@ -233,6 +233,8 @@ let rec parse_expr = function
       in
       ensure_unique "record field" (List.map fst fields);
       ERecord (sort_fields fields)
+  | Sexp.List (Sexp.Atom "recordUpdate" :: record :: updates) ->
+      ERecordUpdate (parse_expr record, parse_record_update_fields updates)
   | Sexp.List (Sexp.Atom "tuple" :: elems) ->
       ERecord (sort_fields (tuple_fields (List.map parse_expr elems)))
   | Sexp.List [ Sexp.Atom "get"; e; Sexp.Atom field ] -> EField (parse_expr e, field)
@@ -307,6 +309,19 @@ let rec parse_expr = function
   | Sexp.List [] -> fail "empty expression list"
   | Sexp.List (f :: args) ->
       List.fold_left (fun acc arg -> EApp (acc, parse_expr arg)) (parse_expr f) args
+
+and parse_record_update_fields = function
+  | [] -> fail "recordUpdate requires at least one field"
+  | updates ->
+      let fields =
+        List.map
+          (function
+            | Sexp.List [ Sexp.Atom n; e ] -> (n, parse_expr e)
+            | x -> fail ("invalid recordUpdate field: " ^ Sexp.to_string x))
+          updates
+      in
+      ensure_unique "recordUpdate field" (List.map fst fields);
+      sort_fields fields
 
 and parse_match_expr scrut branches =
   match parse_match_tuple scrut branches with
@@ -523,6 +538,13 @@ let rec qualify_expr local_defs local_types type_params bound = function
            (List.map
               (fun (n, e) -> (n, qualify_expr local_defs local_types type_params bound e))
               fields))
+  | ERecordUpdate (record, updates) ->
+      ERecordUpdate
+        ( qualify_expr local_defs local_types type_params bound record,
+          sort_fields
+            (List.map
+               (fun (n, e) -> (n, qualify_expr local_defs local_types type_params bound e))
+               updates) )
   | EField (e, field) -> EField (qualify_expr local_defs local_types type_params bound e, field)
   | EVariant (t, con, e) ->
       EVariant

@@ -57,6 +57,18 @@ userName : String
 userName =
     user.name
 
+renamedUser : User
+renamedUser =
+    { user | name = "Grace" }
+
+renamedUserName : String
+renamedUserName =
+    renamedUser.name
+
+renamedUserActive : Bool
+renamedUserActive =
+    renamedUser.active
+
 numbers : List Nat
 numbers =
     [ 1

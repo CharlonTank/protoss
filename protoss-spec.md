@@ -91,7 +91,9 @@ listees dans la section "Gates de validation".
 - [ ] Supporter les imports humains `import X exposing (...)`.
 - [ ] Supporter les declarations de capabilities en syntaxe humaine.
 - [ ] Supporter les effets `Process { cap } A` en syntaxe humaine.
-- [ ] Supporter les record updates humains `{ model | x = y }`.
+- [x] Supporter les record updates humains `{ model | x = y }`.
+  Preuves: `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`,
+  `test/test_protoss.ml` assertions "Elm-like record update" et `README.md`.
 - [ ] Supporter les comparaisons et booleens de surface necessaires aux exemples.
 - [ ] Ajouter un formatter Protoss/H idempotent pour toute la grammaire.
 
