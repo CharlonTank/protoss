@@ -849,7 +849,15 @@ let self_string_cache_key ~prelude ~fn ~source =
    ^ Protoss.Kernel.hash_string prelude ^ "\nfn=" ^ fn ^ "\nsource="
    ^ Protoss.Kernel.hash_string source ^ "\n")
 
+let self_checked_prelude_cache_key ~prelude =
+  Protoss.Kernel.hash_string
+    ("self-checked-prelude-v1\nbinary=" ^ self_binary_digest () ^ "\nprelude="
+   ^ Protoss.Kernel.hash_string prelude ^ "\n")
+
 let self_cache_path key = Filename.concat (self_cache_root ()) (key ^ ".txt")
+
+let self_checked_prelude_cache_path key =
+  Filename.concat (self_cache_root ()) (key ^ ".checked")
 
 let self_driver_checked_from_prelude ~prelude ~typ driver_expr =
   let driver = prelude ^ "\n(def __self_result " ^ typ ^ " (" ^ driver_expr ^ "))\n" in
@@ -859,15 +867,31 @@ let self_driver_checked ~typ driver_expr =
   self_driver_checked_from_prelude ~prelude:(read_source (prelude_path ())) ~typ
     driver_expr
 
-let self_eval_with_prelude ~prelude ~typ driver_expr =
-  let checked = self_driver_checked_from_prelude ~prelude ~typ driver_expr in
-  let value, _ = Protoss.Runtime.eval_entry checked "__self_result" in
-  (checked, value)
-
 let self_eval ~typ driver_expr =
   let checked = self_driver_checked ~typ driver_expr in
   let value, _ = Protoss.Runtime.eval_entry checked "__self_result" in
   (checked, value)
+
+let self_apply_string_with_prelude ~prelude fn source =
+  let checked =
+    let cache_key = self_checked_prelude_cache_key ~prelude in
+    let cache_path = self_checked_prelude_cache_path cache_key in
+    let build () = Protoss.Parser.parse_string prelude |> Protoss.Kernel.check_program in
+    if self_cache_enabled () && Sys.file_exists cache_path then
+      try Marshal.from_string (Protoss.Store.read_file cache_path) 0
+      with _ ->
+        let checked = build () in
+        Protoss.Store.write_file_atomic cache_path (Marshal.to_string checked []);
+        checked
+    else
+      let checked = build () in
+      if self_cache_enabled () then
+        Protoss.Store.write_file_atomic cache_path (Marshal.to_string checked []);
+      checked
+  in
+  let fn_value, _ = Protoss.Runtime.eval_entry ~stdlib_fast_paths:true checked fn in
+  (checked, Protoss.Runtime.apply ~stdlib_fast_paths:true checked fn_value
+              (Protoss.Runtime.VString source))
 
 (* String report produced by a Protoss [String -> String] frontend function. *)
 let self_string fn file =
@@ -878,7 +902,7 @@ let self_string fn file =
   if self_cache_enabled () && Sys.file_exists cache_path then Protoss.Store.read_file cache_path
   else
     let _, value =
-      self_eval_with_prelude ~prelude ~typ:"String" (fn ^ " " ^ Protoss.Ast.quote source)
+      self_apply_string_with_prelude ~prelude fn source
     in
     let text =
       match value with

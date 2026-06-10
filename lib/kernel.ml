@@ -13,12 +13,21 @@ let hash_string = Hashcons.hash
 let builtin_types =
   [
     ("succ", TFun (TNat, TNat));
+    ("prim.Nat.add", TFun (TNat, TFun (TNat, TNat)));
+    ("prim.Nat.mul", TFun (TNat, TFun (TNat, TNat)));
+    ("prim.Nat.pred", TFun (TNat, TNat));
+    ("prim.Nat.sub", TFun (TNat, TFun (TNat, TNat)));
     ("prim.Nat.eq", TFun (TNat, TFun (TNat, TBool)));
+    ("prim.Nat.lte", TFun (TNat, TFun (TNat, TBool)));
+    ("prim.Nat.lt", TFun (TNat, TFun (TNat, TBool)));
+    ("prim.Nat.gte", TFun (TNat, TFun (TNat, TBool)));
+    ("prim.Nat.gt", TFun (TNat, TFun (TNat, TBool)));
     ("prim.Nat.toString", TFun (TNat, TString));
     ("prim.String.concat", TFun (TString, TFun (TString, TString)));
     ("prim.String.eq", TFun (TString, TFun (TString, TBool)));
     ("prim.String.length", TFun (TString, TNat));
     ("prim.String.slice", TFun (TString, TFun (TNat, TFun (TNat, TString))));
+    ("prim.String.charAt", TFun (TString, TFun (TNat, TVariant [ ("None", TUnit); ("Some", TString) ])));
   ]
 
 let builtin_names = List.map fst builtin_types

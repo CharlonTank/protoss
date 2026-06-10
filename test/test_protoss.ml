@@ -6046,7 +6046,7 @@ let () =
   let checked = Parser.parse_string (Buffer.contents driver) |> Kernel.check_program in
   List.iter
     (fun (name, verify) ->
-      let v, _ = Runtime.normalize_def checked name in
+      let v, _ = Runtime.normalize_def ~stdlib_fast_paths:true checked name in
       let got =
         match v with
         | Runtime.VString s -> s

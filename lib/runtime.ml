@@ -55,6 +55,7 @@ type eval_state = {
   cache_scope : string;
   mutable trace : string list;
   trace_cache : bool;
+  stdlib_fast_paths : bool;
   mutable recur_stack : recur_frame list;
   mutable cap_scope : string list;
 }
@@ -412,6 +413,47 @@ let eval_with_cap_scope st caps f =
   st.cap_scope <- merge_caps st.cap_scope caps;
   Fun.protect ~finally:(fun () -> st.cap_scope <- previous) f
 
+let maybe_type typ = TVariant (sort_fields [ ("None", TUnit); ("Some", typ) ])
+
+let pair_type key_typ value_typ = TNamed ("Pair", [ key_typ; value_typ ])
+
+let primitive_poly_value name args =
+  match (name, args) with
+  | "List.map", [ _; out_typ ] -> Some (VClosure (out_typ, Kernel.CGlobal "prim.List.map", [], []))
+  | "List.length", [ _ ] -> Some (VClosure (TUnit, Kernel.CGlobal "prim.List.length", [], []))
+  | "List.append", [ item_typ ] ->
+      Some (VClosure (item_typ, Kernel.CGlobal "prim.List.append", [], []))
+  | "List.reverse", [ item_typ ] ->
+      Some (VClosure (item_typ, Kernel.CGlobal "prim.List.reverse", [], []))
+  | "List.any", [ _ ] -> Some (VClosure (TUnit, Kernel.CGlobal "prim.List.any", [], []))
+  | "List.all", [ _ ] -> Some (VClosure (TUnit, Kernel.CGlobal "prim.List.all", [], []))
+  | "List.member", [ _ ] -> Some (VClosure (TUnit, Kernel.CGlobal "prim.List.member", [], []))
+  | "List.find", [ item_typ ] ->
+      Some (VClosure (item_typ, Kernel.CGlobal "prim.List.find", [], []))
+  | "Assoc.empty", [ key_typ; value_typ ] -> Some (VList (pair_type key_typ value_typ, []))
+  | "Assoc.insert", [ key_typ; value_typ ] ->
+      Some (VClosure (pair_type key_typ value_typ, Kernel.CGlobal "prim.Assoc.insert", [], []))
+  | "Assoc.get", [ _; value_typ ] ->
+      Some (VClosure (value_typ, Kernel.CGlobal "prim.Assoc.get", [], []))
+  | "Assoc.contains", [ _; _ ] ->
+      Some (VClosure (TUnit, Kernel.CGlobal "prim.Assoc.contains", [], []))
+  | "Assoc.keys", [ key_typ; _ ] ->
+      Some (VClosure (key_typ, Kernel.CGlobal "prim.Assoc.keys", [], []))
+  | "Assoc.values", [ _; value_typ ] ->
+      Some (VClosure (value_typ, Kernel.CGlobal "prim.Assoc.values", [], []))
+  | _ -> None
+
+let record_field field = function
+  | VRecord fields -> (
+      match Kernel.assoc_opt field fields with
+      | Some value -> value
+      | None -> fail ("runtime record missing field: " ^ field))
+  | value -> fail ("expected record while reading field " ^ field ^ ", got " ^ value_to_string value)
+
+let expect_bool context = function
+  | VBool value -> value
+  | value -> fail (context ^ " returned non-Bool runtime value: " ^ value_to_string value)
+
 let rec nth_env env i =
   match (env, i) with
   | v :: _, 0 -> v
@@ -429,22 +471,36 @@ let rec eval_cterm st env = function
       else if
         List.exists (String.equal n)
           [
+            "prim.Nat.add";
+            "prim.Nat.mul";
+            "prim.Nat.pred";
+            "prim.Nat.sub";
             "prim.Nat.eq";
+            "prim.Nat.lte";
+            "prim.Nat.lt";
+            "prim.Nat.gte";
+            "prim.Nat.gt";
             "prim.Nat.toString";
             "prim.String.concat";
             "prim.String.eq";
             "prim.String.length";
             "prim.String.slice";
+            "prim.String.charAt";
           ]
       then VClosure (TUnit, Kernel.CGlobal n, [], [])
       else eval_def st n
   | Kernel.CInst (n, args) -> (
       match def_by_ref st.checked n with
       | None -> fail ("unknown polymorphic definition at runtime: " ^ n)
-      | Some d ->
-          let canonical = Kernel.parse_serialized_def d.canonical in
-          eval_with_cap_scope st d.capabilities (fun () ->
-              eval_cterm st [] (Kernel.subst_type_in_cterm args canonical.cbody)))
+      | Some d -> (
+          match
+            if st.stdlib_fast_paths then primitive_poly_value d.def.name args else None
+          with
+          | Some value -> value
+          | None ->
+              let canonical = Kernel.parse_serialized_def d.canonical in
+              eval_with_cap_scope st d.capabilities (fun () ->
+                  eval_cterm st [] (Kernel.subst_type_in_cterm args canonical.cbody))))
   | Kernel.CLambda (t, body) -> VClosure (t, body, env, st.cap_scope)
   | Kernel.CApp (f, arg) ->
       let fv = eval_cterm st env f in
@@ -612,44 +668,166 @@ and expect_attr = function
 
 and eval_app st fv av =
   let compute () =
-    match fv with
-    | VBuiltinSucc -> (
+    match (fv, av) with
+    | VBuiltinSucc, _ -> (
         match av with
         | VNat n -> VNat (n + 1)
         | v -> fail ("builtin on " ^ value_to_string v))
-    | VClosure (_, Kernel.CGlobal "prim.Nat.eq", closure_env, _) -> (
+    | VClosure (_, Kernel.CGlobal "prim.Nat.add", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.add", [ av ], [])
+        | [ VNat a ], VNat b -> VNat (a + b)
+        | _ -> fail "prim.Nat.add expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.mul", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.mul", [ av ], [])
+        | [ VNat a ], VNat b -> VNat (a * b)
+        | _ -> fail "prim.Nat.mul expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.pred", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat n -> VNat (max 0 (n - 1))
+        | _ -> fail "prim.Nat.pred expects Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.sub", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.sub", [ av ], [])
+        | [ VNat a ], VNat b -> VNat (max 0 (a - b))
+        | _ -> fail "prim.Nat.sub expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.eq", closure_env, _), _ -> (
         match (closure_env, av) with
         | [], VNat _ -> VClosure (TNat, Kernel.CGlobal "prim.Nat.eq", [ av ], [])
         | [ VNat a ], VNat b -> VBool (a = b)
         | _ -> fail "prim.Nat.eq expects Nat Nat")
-    | VClosure (_, Kernel.CGlobal "prim.Nat.toString", closure_env, _) -> (
+    | VClosure (_, Kernel.CGlobal "prim.Nat.lte", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TBool, Kernel.CGlobal "prim.Nat.lte", [ av ], [])
+        | [ VNat a ], VNat b -> VBool (a <= b)
+        | _ -> fail "prim.Nat.lte expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.lt", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TBool, Kernel.CGlobal "prim.Nat.lt", [ av ], [])
+        | [ VNat a ], VNat b -> VBool (a < b)
+        | _ -> fail "prim.Nat.lt expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.gte", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TBool, Kernel.CGlobal "prim.Nat.gte", [ av ], [])
+        | [ VNat a ], VNat b -> VBool (a >= b)
+        | _ -> fail "prim.Nat.gte expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.gt", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VNat _ -> VClosure (TBool, Kernel.CGlobal "prim.Nat.gt", [ av ], [])
+        | [ VNat a ], VNat b -> VBool (a > b)
+        | _ -> fail "prim.Nat.gt expects Nat Nat")
+    | VClosure (_, Kernel.CGlobal "prim.Nat.toString", closure_env, _), _ -> (
         match (closure_env, av) with
         | [], VNat n -> VString (string_of_int n)
         | _ -> fail "prim.Nat.toString expects Nat")
-    | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env, _) -> (
+    | VClosure (_, Kernel.CGlobal "prim.String.concat", closure_env, _), _ -> (
         match (closure_env, av) with
         | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.concat", [ av ], [])
         | [ VString a ], VString b -> VString (a ^ b)
         | _ -> fail "prim.String.concat expects String String")
-    | VClosure (_, Kernel.CGlobal "prim.String.eq", closure_env, _) -> (
+    | VClosure (_, Kernel.CGlobal "prim.String.eq", closure_env, _), _ -> (
         match (closure_env, av) with
         | [], VString _ -> VClosure (TString, Kernel.CGlobal "prim.String.eq", [ av ], [])
         | [ VString a ], VString b -> VBool (String.equal a b)
         | _ -> fail "prim.String.eq expects String String")
-    | VClosure (_, Kernel.CGlobal "prim.String.length", closure_env, _) -> (
+    | VClosure (_, Kernel.CGlobal "prim.String.length", closure_env, _), _ -> (
         match (closure_env, av) with
         | [], VString s -> VNat (String_prim.length s)
         | _ -> fail "prim.String.length expects String")
-    | VClosure (_, Kernel.CGlobal "prim.String.slice", closure_env, _) -> (
+    | VClosure (_, Kernel.CGlobal "prim.String.slice", closure_env, _), _ -> (
         match (closure_env, av) with
         | [], VString _ -> VClosure (TNat, Kernel.CGlobal "prim.String.slice", [ av ], [])
         | [ VString _ ], VNat _ ->
             VClosure (TNat, Kernel.CGlobal "prim.String.slice", closure_env @ [ av ], [])
         | [ VString s; VNat start ], VNat count -> VString (String_prim.slice s start count)
         | _ -> fail "prim.String.slice expects String Nat Nat")
-    | VClosure (_, body, closure_env, cap_scope) ->
+    | VClosure (_, Kernel.CGlobal "prim.String.charAt", closure_env, _), _ -> (
+        match (closure_env, av) with
+        | [], VString _ -> VClosure (TNat, Kernel.CGlobal "prim.String.charAt", [ av ], [])
+        | [ VString s ], VNat index ->
+            if index < 0 || index >= String_prim.length s then
+              VVariant (maybe_type TString, "None", VUnit)
+            else VVariant (maybe_type TString, "Some", VString (String_prim.slice s index 1))
+        | _ -> fail "prim.String.charAt expects String Nat")
+    | VClosure (_, Kernel.CGlobal "prim.List.length", [], _), VList (_, xs) ->
+        VNat (List.length xs)
+    | VClosure (item_typ, Kernel.CGlobal "prim.List.append", [], _), VList (_, xs) ->
+        VClosure (item_typ, Kernel.CGlobal "prim.List.append", [ VList (item_typ, xs) ], [])
+    | VClosure (item_typ, Kernel.CGlobal "prim.List.append", [ VList (_, xs) ], _), VList (_, ys)
+      ->
+        VList (item_typ, xs @ ys)
+    | VClosure (item_typ, Kernel.CGlobal "prim.List.reverse", [], _), VList (_, xs) ->
+        VList (item_typ, List.rev xs)
+    | VClosure (out_typ, Kernel.CGlobal "prim.List.map", [], _), VList (_, xs) ->
+        VClosure (out_typ, Kernel.CGlobal "prim.List.map", [ VList (TUnit, xs) ], [])
+    | VClosure (out_typ, Kernel.CGlobal "prim.List.map", [ VList (_, xs) ], _), fn ->
+        VList (out_typ, List.map (fun item -> eval_app st fn item) xs)
+    | VClosure (_, Kernel.CGlobal "prim.List.any", [], _), VList (_, xs) ->
+        VClosure (TUnit, Kernel.CGlobal "prim.List.any", [ VList (TUnit, xs) ], [])
+    | VClosure (_, Kernel.CGlobal "prim.List.any", [ VList (_, xs) ], _), pred ->
+        VBool (List.exists (fun item -> expect_bool "List.any predicate" (eval_app st pred item)) xs)
+    | VClosure (_, Kernel.CGlobal "prim.List.all", [], _), VList (_, xs) ->
+        VClosure (TUnit, Kernel.CGlobal "prim.List.all", [ VList (TUnit, xs) ], [])
+    | VClosure (_, Kernel.CGlobal "prim.List.all", [ VList (_, xs) ], _), pred ->
+        VBool (List.for_all (fun item -> expect_bool "List.all predicate" (eval_app st pred item)) xs)
+    | VClosure (_, Kernel.CGlobal "prim.List.member", [], _), eq ->
+        VClosure (TUnit, Kernel.CGlobal "prim.List.member", [ eq ], [])
+    | VClosure (_, Kernel.CGlobal "prim.List.member", [ eq ], _), value ->
+        VClosure (TUnit, Kernel.CGlobal "prim.List.member", [ eq; value ], [])
+    | VClosure (_, Kernel.CGlobal "prim.List.member", [ eq; value ], _), VList (_, xs) ->
+        VBool
+          (List.exists
+             (fun item -> expect_bool "List.member equality" (eval_app st (eval_app st eq item) value))
+             xs)
+    | VClosure (item_typ, Kernel.CGlobal "prim.List.find", [], _), VList (_, xs) ->
+        VClosure (item_typ, Kernel.CGlobal "prim.List.find", [ VList (item_typ, xs) ], [])
+    | VClosure (item_typ, Kernel.CGlobal "prim.List.find", [ VList (_, xs) ], _), pred -> (
+        match
+          List.find_opt (fun item -> expect_bool "List.find predicate" (eval_app st pred item)) xs
+        with
+        | Some item -> VVariant (maybe_type item_typ, "Some", item)
+        | None -> VVariant (maybe_type item_typ, "None", VUnit))
+    | VClosure (pair_typ, Kernel.CGlobal "prim.Assoc.insert", [], _), key ->
+        VClosure (pair_typ, Kernel.CGlobal "prim.Assoc.insert", [ key ], [])
+    | VClosure (pair_typ, Kernel.CGlobal "prim.Assoc.insert", [ key ], _), value ->
+        VClosure (pair_typ, Kernel.CGlobal "prim.Assoc.insert", [ key; value ], [])
+    | VClosure (pair_typ, Kernel.CGlobal "prim.Assoc.insert", [ key; value ], _), VList (_, entries)
+      ->
+        VList (pair_typ, VRecord [ ("first", key); ("second", value) ] :: entries)
+    | VClosure (value_typ, Kernel.CGlobal "prim.Assoc.get", [], _), eq ->
+        VClosure (value_typ, Kernel.CGlobal "prim.Assoc.get", [ eq ], [])
+    | VClosure (value_typ, Kernel.CGlobal "prim.Assoc.get", [ eq ], _), key ->
+        VClosure (value_typ, Kernel.CGlobal "prim.Assoc.get", [ eq; key ], [])
+    | VClosure (value_typ, Kernel.CGlobal "prim.Assoc.get", [ eq; key ], _), VList (_, entries)
+      -> (
+        match
+          List.find_opt
+            (fun entry ->
+              let entry_key = record_field "first" entry in
+              expect_bool "Assoc.get equality" (eval_app st (eval_app st eq entry_key) key))
+            entries
+        with
+        | Some entry -> VVariant (maybe_type value_typ, "Some", record_field "second" entry)
+        | None -> VVariant (maybe_type value_typ, "None", VUnit))
+    | VClosure (_, Kernel.CGlobal "prim.Assoc.contains", [], _), eq ->
+        VClosure (TUnit, Kernel.CGlobal "prim.Assoc.contains", [ eq ], [])
+    | VClosure (_, Kernel.CGlobal "prim.Assoc.contains", [ eq ], _), key ->
+        VClosure (TUnit, Kernel.CGlobal "prim.Assoc.contains", [ eq; key ], [])
+    | VClosure (_, Kernel.CGlobal "prim.Assoc.contains", [ eq; key ], _), VList (_, entries) ->
+        VBool
+          (List.exists
+             (fun entry ->
+               let entry_key = record_field "first" entry in
+               expect_bool "Assoc.contains equality" (eval_app st (eval_app st eq entry_key) key))
+             entries)
+    | VClosure (key_typ, Kernel.CGlobal "prim.Assoc.keys", [], _), VList (_, entries) ->
+        VList (key_typ, List.map (record_field "first") entries)
+    | VClosure (value_typ, Kernel.CGlobal "prim.Assoc.values", [], _), VList (_, entries) ->
+        VList (value_typ, List.map (record_field "second") entries)
+    | VClosure (_, body, closure_env, cap_scope), _ ->
         eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (av :: closure_env) body)
-    | v -> fail ("application of non-function runtime value: " ^ value_to_string v)
+    | v, _ -> fail ("application of non-function runtime value: " ^ value_to_string v)
   in
   match app_cache_key st fv av with
   | None ->
@@ -719,7 +897,7 @@ let shared_caches checked =
       shared_caches_memo := Some (checked, dc, ac);
       (dc, ac)
 
-let state ?(trace_cache = false) ?cache_dir ?cache_scope checked =
+let state ?(trace_cache = false) ?(stdlib_fast_paths = false) ?cache_dir ?cache_scope checked =
   let scope =
     match cache_scope with Some scope -> scope | None -> program_cache_scope checked
   in
@@ -735,21 +913,24 @@ let state ?(trace_cache = false) ?cache_dir ?cache_scope checked =
     cache_scope = scope;
     trace = [];
     trace_cache;
+    stdlib_fast_paths;
     recur_stack = [];
     cap_scope = [];
   }
 
-let eval_entry ?(trace_cache = false) ?cache_dir ?cache_scope checked entry =
-  let st = state ~trace_cache ?cache_dir ?cache_scope checked in
+let eval_entry ?(trace_cache = false) ?(stdlib_fast_paths = false) ?cache_dir ?cache_scope checked
+    entry =
+  let st = state ~trace_cache ~stdlib_fast_paths ?cache_dir ?cache_scope checked in
   let value = eval_def st entry in
   (value, List.rev st.trace)
 
-let apply checked f arg =
-  let st = state checked in
+let apply ?(stdlib_fast_paths = false) checked f arg =
+  let st = state ~stdlib_fast_paths checked in
   eval_app st f arg
 
-let normalize_def ?(trace_cache = false) ?cache_dir ?cache_scope checked name =
-  eval_entry ~trace_cache ?cache_dir ?cache_scope checked name
+let normalize_def ?(trace_cache = false) ?(stdlib_fast_paths = false) ?cache_dir ?cache_scope checked
+    name =
+  eval_entry ~trace_cache ~stdlib_fast_paths ?cache_dir ?cache_scope checked name
 
 let normalize_all checked =
   List.map

@@ -371,12 +371,12 @@
 (def Nat.add (-> Nat (-> Nat Nat))
   (lambda (a Nat)
     (lambda (b Nat)
-      (foldNat a b (lambda (x Nat) (succ x))))))
+      ((prim.Nat.add a) b))))
 
 (def Nat.mul (-> Nat (-> Nat Nat))
   (lambda (a Nat)
     (lambda (b Nat)
-      (foldNat a 0 (lambda (acc Nat) ((Nat.add b) acc))))))
+      ((prim.Nat.mul a) b))))
 
 (def Nat.eqNat (-> Nat (-> Nat Bool))
   (lambda (a Nat)
@@ -389,19 +389,12 @@
 
 (def Nat.pred (-> Nat Nat)
   (lambda (n Nat)
-    (get
-      (foldNat n
-        (record (previous 0) (current 0))
-        (lambda (state (Record (previous Nat) (current Nat)))
-          (record
-            (previous (get state current))
-            (current (succ (get state current))))))
-      previous)))
+    (prim.Nat.pred n)))
 
 (def Nat.sub (-> Nat (-> Nat Nat))
   (lambda (a Nat)
     (lambda (b Nat)
-      (foldNat b a (lambda (acc Nat) (Nat.pred acc))))))
+      ((prim.Nat.sub a) b))))
 
 (def Bool.not (-> Bool Bool)
   (lambda (b Bool)
@@ -420,22 +413,22 @@
 (def Nat.lte (-> Nat (-> Nat Bool))
   (lambda (a Nat)
     (lambda (b Nat)
-      ((Nat.eqNat ((Nat.sub a) b)) 0))))
+      ((prim.Nat.lte a) b))))
 
 (def Nat.lt (-> Nat (-> Nat Bool))
   (lambda (a Nat)
     (lambda (b Nat)
-      ((Bool.and ((Nat.lte a) b)) (Bool.not ((Nat.eqNat a) b))))))
+      ((prim.Nat.lt a) b))))
 
 (def Nat.gte (-> Nat (-> Nat Bool))
   (lambda (a Nat)
     (lambda (b Nat)
-      ((Nat.lte b) a))))
+      ((prim.Nat.gte a) b))))
 
 (def Nat.gt (-> Nat (-> Nat Bool))
   (lambda (a Nat)
     (lambda (b Nat)
-      ((Nat.lt b) a))))
+      ((prim.Nat.gt a) b))))
 
 (def String.empty String "")
 
@@ -482,9 +475,7 @@
 (def String.charAt (-> String (-> Nat (Maybe String)))
   (lambda (value String)
     (lambda (index Nat)
-      (case ((Nat.lt index) (String.length value))
-        (true (variant Some (((String.slice value) index) 1)))
-        (false (variant None unit))))))
+      ((prim.String.charAt value) index))))
 
 (def String.isEmpty (-> String Bool)
   (lambda (value String)
@@ -5653,6 +5644,14 @@
     (lambda (subst (Assoc String TypeExpr))
       (((Protoss.tcSubstTypeFuel 64) typ) subst))))
 
+(def Protoss.tcSubstTypes
+  (-> (List TypeExpr) (-> (Assoc String TypeExpr) (List TypeExpr)))
+  (lambda (types (List TypeExpr))
+    (lambda (subst (Assoc String TypeExpr))
+      (((inst List.map TypeExpr TypeExpr) types)
+        (lambda (typ TypeExpr)
+          ((Protoss.tcSubstType typ) subst))))))
+
 (def Protoss.tcInstError
   (-> String (-> String (Result TypeError TypeExpr)))
   (lambda (summary String)
@@ -6314,29 +6313,25 @@
                                     substWithArgs)
                               (Err err (variant Err err))
                               (Ok typeArgs
-                                (case (((Protoss.tcInstantiateType name) scheme) typeArgs)
-                                  (Err err (variant Err err))
-                                  (Ok instantiated
-                                    (case ((((Protoss.tcPolyTakeArgTypes args) typeEnv)
-                                            name)
-                                            instantiated)
-                                      (Err err (variant Err err))
-                                      (Ok instantiatedShape
-                                        (case (((Protoss.tcTypeEq typeEnv) expected)
-                                                (get instantiatedShape result))
-                                          (false
-                                            ((((Protoss.tcMismatch Protoss.tcNoDef)
-                                              expected)
-                                              (get instantiatedShape result))
-                                              name))
-                                          (true
-                                            (case ((((Protoss.tcRunExpectedArgChecks argChecks)
-                                                    typeEnv)
-                                                    termEnv)
-                                                    (get instantiatedShape argTypes))
-                                              (Err err (variant Err err))
-                                              (Ok checkedArgs
-                                                (Protoss.tcOk expected)))))))))))))))))))))))))
+                                (let (instantiatedArgTypes (List TypeExpr)
+                                  ((Protoss.tcSubstTypes (get shape argTypes)) substWithArgs))
+                                  (let (instantiatedResult TypeExpr
+                                    ((Protoss.tcSubstType (get shape result)) substWithArgs))
+                                    (case (((Protoss.tcTypeEq typeEnv) expected)
+                                            instantiatedResult)
+                                      (false
+                                        ((((Protoss.tcMismatch Protoss.tcNoDef)
+                                          expected)
+                                          instantiatedResult)
+                                          name))
+                                      (true
+                                        (case ((((Protoss.tcRunExpectedArgChecks argChecks)
+                                                typeEnv)
+                                                termEnv)
+                                                instantiatedArgTypes)
+                                          (Err err (variant Err err))
+                                          (Ok checkedArgs
+                                            (Protoss.tcOk expected)))))))))))))))))))))))
 
 (def Protoss.tcCheckPolySplitApplyAs
   (-> TypeEnv (-> TermEnv (-> TypeExpr (-> String (-> TypeScheme
@@ -6393,45 +6388,38 @@
                                                 substWithArgs)
                                           (Err err (variant Err err))
                                           (Ok typeArgs
-                                            (case (((Protoss.tcInstantiateType name) scheme)
-                                                    typeArgs)
-                                              (Err err (variant Err err))
-                                              (Ok instantiated
-                                                (case ((((Protoss.tcPolyTakeArgTypes prefixArgs)
-                                                        typeEnv)
-                                                        name)
-                                                        instantiated)
-                                                  (Err err (variant Err err))
-                                                  (Ok instantiatedPrefixShape
-                                                    (case ((((Protoss.tcPolyTakeArgTypes suffixArgs)
-                                                            typeEnv)
-                                                            name)
-                                                            (get instantiatedPrefixShape result))
-                                                      (Err err (variant Err err))
-                                                      (Ok instantiatedSuffixShape
-                                                        (case (((Protoss.tcTypeEq typeEnv) expected)
-                                                                (get instantiatedSuffixShape result))
-                                                          (false
-                                                            ((((Protoss.tcMismatch Protoss.tcNoDef)
-                                                              expected)
-                                                              (get instantiatedSuffixShape result))
-                                                              name))
-                                                          (true
-                                                            (case ((((Protoss.tcRunExpectedArgChecks
-                                                                      prefixChecks)
-                                                                    typeEnv)
-                                                                    termEnv)
-                                                                    (get instantiatedPrefixShape argTypes))
-                                                              (Err err (variant Err err))
-                                                              (Ok checkedPrefix
-                                                                (case ((((Protoss.tcRunExpectedArgChecks
-                                                                          suffixChecks)
-                                                                        typeEnv)
-                                                                        termEnv)
-                                                                        (get instantiatedSuffixShape argTypes))
-                                                                  (Err err (variant Err err))
-                                                                  (Ok checkedSuffix
-                                                                    (Protoss.tcOk expected)))))))))))))))))))))))))))))))))))
+                                            (let (instantiatedPrefixArgTypes (List TypeExpr)
+                                              ((Protoss.tcSubstTypes (get prefixShape argTypes))
+                                                substWithArgs))
+                                              (let (instantiatedSuffixArgTypes (List TypeExpr)
+                                                ((Protoss.tcSubstTypes (get suffixShape argTypes))
+                                                  substWithArgs))
+                                                (let (instantiatedResult TypeExpr
+                                                  ((Protoss.tcSubstType (get suffixShape result))
+                                                    substWithArgs))
+                                                  (case (((Protoss.tcTypeEq typeEnv) expected)
+                                                          instantiatedResult)
+                                                    (false
+                                                      ((((Protoss.tcMismatch Protoss.tcNoDef)
+                                                        expected)
+                                                        instantiatedResult)
+                                                        name))
+                                                    (true
+                                                      (case ((((Protoss.tcRunExpectedArgChecks
+                                                                prefixChecks)
+                                                              typeEnv)
+                                                              termEnv)
+                                                              instantiatedPrefixArgTypes)
+                                                        (Err err (variant Err err))
+                                                        (Ok checkedPrefix
+                                                          (case ((((Protoss.tcRunExpectedArgChecks
+                                                                    suffixChecks)
+                                                                  typeEnv)
+                                                                  termEnv)
+                                                                  instantiatedSuffixArgTypes)
+                                                            (Err err (variant Err err))
+                                                            (Ok checkedSuffix
+                                                              (Protoss.tcOk expected))))))))))))))))))))))))))))))))
 
 (def Protoss.tcCheckPolyApplyInferArgsAs
   (-> TypeEnv (-> TermEnv (-> TypeExpr (-> String (-> TypeScheme
@@ -6469,29 +6457,25 @@
                                   substWithArgs)
                             (Err err (variant Err err))
                             (Ok typeArgs
-                              (case (((Protoss.tcInstantiateType name) scheme) typeArgs)
-                                (Err err (variant Err err))
-                                (Ok instantiated
-                                  (case ((((Protoss.tcPolyTakeArgTypes args) typeEnv)
-                                          name)
-                                          instantiated)
-                                    (Err err (variant Err err))
-                                    (Ok instantiatedShape
-                                      (case (((Protoss.tcTypeEq typeEnv) expected)
-                                              (get instantiatedShape result))
-                                        (false
-                                          ((((Protoss.tcMismatch Protoss.tcNoDef)
-                                            expected)
-                                            (get instantiatedShape result))
-                                            name))
-                                        (true
-                                          (case ((((Protoss.tcRunInferredArgChecks args)
-                                                  typeEnv)
-                                                  termEnv)
-                                                  (get instantiatedShape argTypes))
-                                            (Err err (variant Err err))
-                                            (Ok checkedArgs
-                                              (Protoss.tcOk expected)))))))))))))))))))))))
+                              (let (instantiatedArgTypes (List TypeExpr)
+                                ((Protoss.tcSubstTypes (get shape argTypes)) substWithArgs))
+                                (let (instantiatedResult TypeExpr
+                                  ((Protoss.tcSubstType (get shape result)) substWithArgs))
+                                  (case (((Protoss.tcTypeEq typeEnv) expected)
+                                          instantiatedResult)
+                                    (false
+                                      ((((Protoss.tcMismatch Protoss.tcNoDef)
+                                        expected)
+                                        instantiatedResult)
+                                        name))
+                                    (true
+                                      (case ((((Protoss.tcRunInferredArgChecks args)
+                                              typeEnv)
+                                              termEnv)
+                                              instantiatedArgTypes)
+                                        (Err err (variant Err err))
+                                        (Ok checkedArgs
+                                          (Protoss.tcOk expected)))))))))))))))))))))
   )
 
 (def Protoss.tcPair (-> String (-> TypeExpr (Pair String TypeExpr)))
@@ -6515,12 +6499,21 @@
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "String.append") ((Protoss.tcFun Protoss.tcString) ((Protoss.tcFun Protoss.tcString) Protoss.tcString)))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "String.eqString") ((Protoss.tcFun Protoss.tcString) ((Protoss.tcFun Protoss.tcString) Protoss.tcBool)))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "String.length") ((Protoss.tcFun Protoss.tcString) Protoss.tcNat))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.add") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcNat)))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.mul") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcNat)))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.pred") ((Protoss.tcFun Protoss.tcNat) Protoss.tcNat))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.sub") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcNat)))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.eq") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcBool)))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.lte") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcBool)))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.lt") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcBool)))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.gte") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcBool)))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.gt") ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcFun Protoss.tcNat) Protoss.tcBool)))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.Nat.toString") ((Protoss.tcFun Protoss.tcNat) Protoss.tcString))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.String.concat") ((Protoss.tcFun Protoss.tcString) ((Protoss.tcFun Protoss.tcString) Protoss.tcString)))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.String.eq") ((Protoss.tcFun Protoss.tcString) ((Protoss.tcFun Protoss.tcString) Protoss.tcBool)))
       (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.String.length") ((Protoss.tcFun Protoss.tcString) Protoss.tcNat))
-      (Nil (Pair String TypeExpr)))))))))))))))))))))
+      (Cons (Pair String TypeExpr) ((Protoss.tcPair "prim.String.charAt") ((Protoss.tcFun Protoss.tcString) ((Protoss.tcFun Protoss.tcNat) ((Protoss.tcApplyType "Maybe") (Cons TypeExpr Protoss.tcString (Nil TypeExpr))))))
+      (Nil (Pair String TypeExpr))))))))))))))))))))))))))))))
     (polyTerms (inst Assoc.empty String TypeScheme))))
 
 (def TypeEnv.addDecl (-> TypeEnv (-> Decl TypeEnv))
