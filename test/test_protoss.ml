@@ -1590,6 +1590,30 @@ let () =
     (Kernel.hash_program defrec_variant);
   let tree_size, _ = Runtime.normalize_def defrec_variant "out" in
   assert_equal "defrec Variant normalization" "2" (Runtime.value_to_string tree_size);
+  let nested_tree_rec =
+    check
+      ("(variant DeepTree \
+          (DeepLeaf Nat) \
+          (DeepNode (Record (children (Record (left DeepTree) (right DeepTree))) (label String))))\n\
+        (def deepLeaf DeepTree (variant DeepLeaf 1))\n\
+        (def deepTree DeepTree \
+          (variant DeepNode \
+            (record \
+              (children (record (left deepLeaf) (right (variant DeepLeaf 2)))) \
+              (label \"root\"))))\n\
+        (def add (-> Nat (-> Nat Nat)) \
+          (lambda (a Nat) (lambda (b Nat) (foldNat a b (lambda (x Nat) (succ x))))))\n\
+        (defrec deepSize (-> DeepTree Nat) \
+          (variant value) \
+          (DeepLeaf n 1) \
+          (DeepNode node \
+            ((add (recur (get (get node children) left))) \
+              (recur (get (get node children) right)))))\n\
+        (def deepOut Nat (deepSize deepTree))")
+  in
+  let nested_tree_size, _ = Runtime.normalize_def nested_tree_rec "deepOut" in
+  assert_equal "defrec nested record subterm recursion" "2"
+    (Runtime.value_to_string nested_tree_size);
   let forest_rec_base =
     "(variant Forest \
        (Leaf Nat) \

@@ -203,7 +203,10 @@ assertions recursion, alpha-stabilite et normalisation dans `test/test_protoss.m
   Preuves: `Kernel.executable_grammar_text`, commande
   `protoss grammar kernel`, assertions "kernel executable grammar ..." dans
   `test/test_protoss.ml` et `README.md`.
-- [ ] Supporter la recursion bien fondee au-dela de Nat/List/Variant directs.
+- [x] Supporter la recursion bien fondee au-dela de Nat/List/Variant directs.
+  Preuves: `Kernel.direct_recur_terms_for_value` parcourt recursivement les
+  champs record imbriques, `README.md`, assertion "defrec nested record
+  subterm recursion" dans `test/test_protoss.ml`.
 - [ ] Supporter tailles statiques pour terminaison.
 - [ ] Supporter coinduction productive.
 - [ ] Supporter automates explicitement productifs.

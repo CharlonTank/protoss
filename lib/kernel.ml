@@ -861,14 +861,14 @@ let rec expr_equal a b =
   | EField (a, fa), EField (b, fb) -> String.equal fa fb && expr_equal a b
   | _ -> false
 
-let direct_recur_terms_for_value ctx target value value_ty =
+let rec direct_recur_terms_for_value ctx target value value_ty =
   let base = if equal_typ target value_ty then [ value ] else [] in
   match unfold_type ctx value_ty with
   | TRecord fields ->
       base
       @ (fields
-        |> List.filter_map (fun (field, field_ty) ->
-               if equal_typ target field_ty then Some (EField (value, field)) else None))
+        |> List.concat_map (fun (field, field_ty) ->
+               direct_recur_terms_for_value ctx target (EField (value, field)) field_ty))
   | _ -> base
 
 let direct_recur_terms ctx target payload_name payload_ty =
