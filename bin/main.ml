@@ -10,7 +10,7 @@ let usage () =
     "usage: protoss parse|check|nf|hash <file> | protoss check|nf|hash --graph <graph.json>\n\
      \       protoss check|nf|hash --store-graph <project-or-store> <graphHash>\n\
      \       protoss canon <file> | protoss canon --ptb <file> | protoss canon --graph <file> | protoss canon --from-graph <graph.json> | protoss canon --migrate-graph <graph.json>\n\
-     \       protoss convert --to pt|ptc|ptb <file>\n\
+     \       protoss convert [--from-graph] --to pt|ptc|ptb <file>\n\
      \       protoss compare <file-a> <file-b> | protoss compare --graph <graph-a.json> <graph-b.json> | protoss compare --project <project-a> <project-b>\n\
      \       protoss capabilities <file> | protoss capabilities --project <project>\n\
      \       protoss duplicates <file> | protoss duplicates --project <project>\n\
@@ -290,12 +290,18 @@ let command_canon_from_graph file =
 let command_canon_migrate_graph file =
   print_string (Protoss.Canonical_ir.migrate_graph (Protoss.Store.read_file file))
 
-let command_convert = function
-  | [ "--to"; "pt"; file ] ->
-      let checked = parse_and_check file in
+let print_conversion target checked =
+  match target with
+  | "pt" ->
       print_string (Protoss.Ast.string_of_program checked.Protoss.Kernel.program)
-  | [ "--to"; "ptc"; file ] -> command_canon file
-  | [ "--to"; "ptb"; file ] -> command_canon_ptb file
+  | "ptc" -> print_endline (canonical_program checked)
+  | "ptb" -> print_string (Protoss.Canonical_binary.checked_to_binary checked)
+  | _ -> usage ()
+
+let command_convert = function
+  | [ "--to"; target; file ] -> print_conversion target (parse_and_check file)
+  | [ "--from-graph"; "--to"; target; file ] ->
+      print_conversion target (checked_graph file)
   | _ -> usage ()
 
 let command_eval file args =

@@ -88,6 +88,7 @@ dune exec protoss -- fmt --check examples/web/todo_app/src/app.protoss
 dune exec protoss -- convert --to pt examples/basic.ptc > /tmp/basic.pt
 dune exec protoss -- convert --to ptc examples/basic.pt > /tmp/basic.ptc
 dune exec protoss -- convert --to ptb examples/basic.ptc > /tmp/basic.ptb
+dune exec protoss -- convert --from-graph --to pt /tmp/basic.protoss.graph.json > /tmp/basic-from-graph.pt
 dune exec protoss -- graph examples/web/todo_app --out graph.json
 dune exec protoss -- graph examples/web/todo_app --dot graph.dot
 dune exec protoss -- graph --stats graph.json

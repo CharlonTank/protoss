@@ -265,7 +265,7 @@ listees dans la section "Gates de validation".
 - [ ] Factoriser fonctions identiques.
 - [ ] Simuler changements dans un `WorldRef` forke.
 - [ ] Comparer deux branches par harness.
-- [ ] Generer des vues humaines lisibles depuis le graphe.
+- [x] Generer des vues humaines lisibles depuis le graphe.
 - [ ] Interdire aux agents l'ecriture directe du programme canonique.
 
 ## 14. Self-hosting
