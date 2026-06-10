@@ -2067,9 +2067,36 @@ let () =
   let diff = check "(def two Nat (succ 2))" in
   assert_true "different terms must hash differently" (Kernel.hash_program norm <> Kernel.hash_program diff);
 
+  let lazy_unused =
+    check
+      "(def main Nat \
+       (let (unused Nat (foldNat 1000 0 (lambda (acc Nat) (succ acc)))) 0))"
+  in
+  let lazy_unused_value, lazy_unused_trace =
+    Runtime.normalize_def ~trace_cache:true lazy_unused "main"
+  in
+  assert_equal "lazy let unused result" "0" (Runtime.value_to_string lazy_unused_value);
+  assert_true "lazy let creates thunk"
+    (List.exists (String.equal "thunk let") lazy_unused_trace);
+  assert_true "lazy let does not force unused RHS"
+    (not (List.exists (String.equal "force let") lazy_unused_trace));
+  let lazy_shared =
+    check "(def main Nat (let (x Nat (succ 41)) ((prim.Nat.add x) x)))"
+  in
+  let lazy_shared_value, lazy_shared_trace =
+    Runtime.normalize_def ~trace_cache:true lazy_shared "main"
+  in
+  let force_count =
+    List.fold_left
+      (fun count line -> if String.equal line "force let" then count + 1 else count)
+      0 lazy_shared_trace
+  in
+  assert_equal "lazy let shared value" "84" (Runtime.value_to_string lazy_shared_value);
+  assert_equal "lazy let shared thunk forces once" "1" (string_of_int force_count);
+
   let memo =
     check "(def inc (-> Nat Nat) (lambda (x Nat) (succ x)))\n\
-           (def b Nat (let (x (inc 41)) (let (y (inc 41)) y)))"
+           (def b Nat (let (x (inc 41)) (let (y (inc 41)) ((prim.Nat.add x) y))))"
   in
   let _, trace = Runtime.eval_entry ~trace_cache:true memo "b" in
   assert_true "memo trace should contain cache hit"

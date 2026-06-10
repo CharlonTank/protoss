@@ -87,6 +87,7 @@ let app_check project =
 let type_to_json typ = json_string (string_of_typ typ)
 
 let rec value_to_json = function
+  | Runtime.VThunk thunk -> value_to_json (Runtime.force_value (Runtime.VThunk thunk))
   | Runtime.VUnit -> json_obj [ json_field "tag" (json_string "Unit") ]
   | Runtime.VBool b ->
       json_obj [ json_field "tag" (json_string "Bool"); json_field "value" (if b then "true" else "false") ]
@@ -125,6 +126,7 @@ let rec value_to_json = function
         ]
 
 and message_to_json = function
+  | Runtime.VThunk thunk -> message_to_json (Runtime.force_value (Runtime.VThunk thunk))
   | Runtime.VVariant (_, con, payload) ->
       json_obj
         [

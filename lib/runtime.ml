@@ -18,6 +18,12 @@ type value =
   | VBuiltinSucc
   | VProcessDone of value
   | VProcessRequest of suspended
+  | VThunk of thunk
+
+and thunk = {
+  mutable thunk_value : value option;
+  thunk_eval : unit -> value;
+}
 
 and suspended = {
   req : req;
@@ -42,6 +48,16 @@ and continuation =
   | KDone
   | KBind of continuation * Kernel.cterm * value list * string list
 
+let rec force_value = function
+  | VThunk thunk -> (
+      match thunk.thunk_value with
+      | Some value -> force_value value
+      | None ->
+          let value = thunk.thunk_eval () in
+          thunk.thunk_value <- Some value;
+          force_value value)
+  | value -> value
+
 type recur_frame = {
   (* Serializing the fold node and its full environment is expensive and only
      observable through cache keys (persistent cache / tracing), so it is
@@ -64,6 +80,7 @@ type eval_state = {
 }
 
 let rec value_to_string = function
+  | VThunk thunk -> value_to_string (force_value (VThunk thunk))
   | VUnit -> "unit"
   | VBool true -> "true"
   | VBool false -> "false"
@@ -104,6 +121,7 @@ and vattr_to_string = function
   | VOn (event, msg) -> "(on " ^ Ast.quote event ^ " " ^ value_to_string msg ^ ")"
 
 let rec value_to_cache_key = function
+  | VThunk thunk -> value_to_cache_key (force_value (VThunk thunk))
   | VUnit -> "(Unit)"
   | VBool b -> "(Bool " ^ string_of_bool b ^ ")"
   | VNat n -> "(Nat " ^ string_of_int n ^ ")"
@@ -218,6 +236,7 @@ let rec consume_cache_value budget value =
   else
     let budget = budget - 1 in
     match value with
+    | VThunk thunk -> consume_cache_value budget (force_value (VThunk thunk))
     | VUnit | VBool _ | VNat _ | VBuiltinSucc -> Some budget
     | VString s -> if String.length s > 1024 then None else Some budget
     | VList (_, xs) -> consume_list consume_cache_value budget xs
@@ -276,6 +295,17 @@ let app_cache_key st fv av =
 
 let trace st line = if st.trace_cache then st.trace <- line :: st.trace
 
+let rec force_value_traced st = function
+  | VThunk thunk -> (
+      match thunk.thunk_value with
+      | Some value -> force_value_traced st value
+      | None ->
+          trace st "force let";
+          let value = thunk.thunk_eval () in
+          thunk.thunk_value <- Some value;
+          force_value_traced st value)
+  | value -> value
+
 let has_prefix prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
@@ -286,6 +316,7 @@ let strip_prefix prefix s =
   else None
 
 let rec cache_value_to_canonical = function
+  | VThunk thunk -> cache_value_to_canonical (force_value (VThunk thunk))
   | VUnit -> Some "(Unit)"
   | VBool true -> Some "(Bool true)"
   | VBool false -> Some "(Bool false)"
@@ -511,10 +542,10 @@ let expect_bool context = function
   | VBool value -> value
   | value -> fail (context ^ " returned non-Bool runtime value: " ^ value_to_string value)
 
-let rec nth_env env i =
+let rec nth_env st env i =
   match (env, i) with
-  | v :: _, 0 -> v
-  | _ :: rest, n when n > 0 -> nth_env rest (n - 1)
+  | v :: _, 0 -> force_value_traced st v
+  | _ :: rest, n when n > 0 -> nth_env st rest (n - 1)
   | _ -> fail ("unbound canonical variable #" ^ string_of_int i)
 
 let rec eval_cterm st env = function
@@ -522,7 +553,7 @@ let rec eval_cterm st env = function
   | Kernel.CBool b -> VBool b
   | Kernel.CNat n -> VNat n
   | Kernel.CString s -> VString s
-  | Kernel.CVar i -> nth_env env i
+  | Kernel.CVar i -> nth_env st env i
   | Kernel.CGlobal n -> (
       match n with
       | "succ" -> VBuiltinSucc
@@ -550,8 +581,22 @@ let rec eval_cterm st env = function
       let av = eval_cterm st env arg in
       eval_app st fv av
   | Kernel.CLet (e, body) ->
-      let v = eval_cterm st env e in
-      eval_cterm st (v :: env) body
+      trace st "thunk let";
+      let recur_stack = st.recur_stack in
+      let cap_scope = st.cap_scope in
+      let thunk_eval () =
+        let previous_recur_stack = st.recur_stack in
+        let previous_cap_scope = st.cap_scope in
+        st.recur_stack <- recur_stack;
+        st.cap_scope <- cap_scope;
+        Fun.protect
+          ~finally:(fun () ->
+            st.recur_stack <- previous_recur_stack;
+            st.cap_scope <- previous_cap_scope)
+          (fun () -> eval_cterm st env e)
+      in
+      let thunk = VThunk { thunk_value = None; thunk_eval } in
+      eval_cterm st (thunk :: env) body
   | Kernel.CRecord fields ->
       VRecord (sort_fields (List.map (fun (n, e) -> (n, eval_cterm st env e)) fields))
   | Kernel.CField (e, field) -> (
@@ -994,6 +1039,7 @@ let normalize_all checked =
     checked.Kernel.defs
 
 let rec value_to_canonical = function
+  | VThunk thunk -> value_to_canonical (force_value (VThunk thunk))
   | VUnit -> "(Unit)"
   | VBool true -> "(Bool true)"
   | VBool false -> "(Bool false)"

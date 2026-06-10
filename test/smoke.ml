@@ -96,7 +96,7 @@ let () =
   let memo =
     check
       "(def inc (-> Nat Nat) (lambda (x Nat) (succ x)))\n\
-       (def b Nat (let (x (inc 41)) (let (y (inc 41)) y)))"
+       (def b Nat (let (x (inc 41)) (let (y (inc 41)) ((prim.Nat.add x) y))))"
   in
   let _, trace = Runtime.eval_entry ~trace_cache:true memo "b" in
   assert_true "memo cache hit"

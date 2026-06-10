@@ -157,7 +157,9 @@ listees dans la section "Gates de validation".
 - [x] Memoiser certains resultats noyau par hash de contenu.
 - [ ] Implementer une evaluation lazy call-by-need avec partage explicite.
 - [ ] Ajouter des annotations `strict`.
-- [ ] Prouver par test qu'un let non force n'evalue pas son RHS.
+- [x] Prouver par test qu'un let non force n'evalue pas son RHS.
+  Preuves: `Runtime.VThunk`/`force let` trace dans `lib/runtime.ml`,
+  assertions "lazy let" dans `test/test_protoss.ml` et `README.md`.
 - [ ] Implementer `EvalKey = H("protoss.eval.v1", DefId, ArgsHash, RuntimePolicy)`
   pour les evaluations pures.
 - [x] Ajouter un cache d'evaluation pure persistent.
