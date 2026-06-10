@@ -618,6 +618,7 @@ let rec expr_type_refs = function
   | ELambda (_, t, body) -> type_refs t @ expr_type_refs body
   | ELambdaInfer (_, body) -> expr_type_refs body
   | EApp (f, x) -> expr_type_refs f @ expr_type_refs x
+  | EStrict e -> expr_type_refs e
   | ELet (_, e, body) -> expr_type_refs e @ expr_type_refs body
   | ELetAnnot (_, t, e, body) -> type_refs t @ expr_type_refs e @ expr_type_refs body
   | ELetRecord (record, _, body) -> expr_type_refs record @ expr_type_refs body

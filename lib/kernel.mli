@@ -176,6 +176,7 @@ type cterm =
   | CGlobal of string
   | CLambda of Ast.typ * cterm
   | CApp of cterm * cterm
+  | CStrict of cterm
   | CLet of cterm * cterm
   | CRecord of (string * cterm) list
   | CField of cterm * string

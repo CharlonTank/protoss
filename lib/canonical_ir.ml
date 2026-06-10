@@ -142,6 +142,7 @@ let rec term_of_graph_json obj =
         (type_of_graph_json (json_field "paramType" obj), term_of_graph_json (json_field "body" obj))
   | "App" ->
       Kernel.CApp (term_of_graph_json (json_field "fn" obj), term_of_graph_json (json_field "arg" obj))
+  | "Strict" -> Kernel.CStrict (term_of_graph_json (json_field "value" obj))
   | "Let" ->
       Kernel.CLet
         (term_of_graph_json (json_field "value" obj), term_of_graph_json (json_field "body" obj))

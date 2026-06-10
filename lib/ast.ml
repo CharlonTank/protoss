@@ -31,6 +31,7 @@ type expr =
   | ELambda of string * typ * expr
   | ELambdaInfer of string * expr
   | EApp of expr * expr
+  | EStrict of expr
   | ELet of string * expr * expr
   | ELetAnnot of string * typ * expr * expr
   | ELetRecord of expr * (string * string) list * expr
@@ -203,6 +204,7 @@ let rec string_of_expr_with_params params = function
       "(lambda " ^ x ^ " " ^ string_of_expr_with_params params body ^ ")"
   | EApp (f, x) ->
       "(" ^ string_of_expr_with_params params f ^ " " ^ string_of_expr_with_params params x ^ ")"
+  | EStrict e -> "(strict " ^ string_of_expr_with_params params e ^ ")"
   | ELet (x, e, body) ->
       "(let (" ^ x ^ " " ^ string_of_expr_with_params params e ^ ") "
       ^ string_of_expr_with_params params body ^ ")"

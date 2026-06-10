@@ -207,8 +207,13 @@ Preuves de section: `lib/runtime.ml`, commandes `protoss eval`, `protoss nf`,
 - [x] Charger depuis `--graph` et `--store-graph`.
 - [x] Memoiser certains resultats noyau par identite physique.
 - [x] Memoiser certains resultats noyau par hash de contenu.
-- [ ] Implementer une evaluation lazy call-by-need avec partage explicite.
-- [ ] Ajouter des annotations `strict`.
+- [x] Implementer une evaluation lazy call-by-need avec partage explicite.
+  Preuves: `Runtime.VThunk`, `Runtime.force_value_traced`, partage mutable
+  `thunk_value`, assertions "lazy let" dans `test/test_protoss.ml`.
+- [x] Ajouter des annotations `strict`.
+  Preuves: `Ast.EStrict`, `Kernel.CStrict`, tag graphe `Strict`,
+  `Runtime.CLet (CStrict ...)`, assertions "strict ..." dans
+  `test/test_protoss.ml` et `README.md`.
 - [x] Prouver par test qu'un let non force n'evalue pas son RHS.
   Preuves: `Runtime.VThunk`/`force let` trace dans `lib/runtime.ml`,
   assertions "lazy let" dans `test/test_protoss.ml` et `README.md`.

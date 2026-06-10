@@ -215,6 +215,7 @@ let rec parse_expr = function
       (match parse_lambda_binding binding with
       | `Annotated (x, ty) -> ELambda (x, ty, parse_expr body)
       | `Inferred x -> ELambdaInfer (x, parse_expr body))
+  | Sexp.List [ Sexp.Atom "strict"; e ] -> EStrict (parse_expr e)
   | Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom x; e ]; body ] ->
       ELet (x, parse_expr e, parse_expr body)
   | Sexp.List [ Sexp.Atom "let"; Sexp.List [ Sexp.Atom x; ty; e ]; body ] ->
@@ -515,6 +516,7 @@ let rec qualify_expr local_defs local_types type_params bound = function
       EApp
         ( qualify_expr local_defs local_types type_params bound f,
           qualify_expr local_defs local_types type_params bound x )
+  | EStrict e -> EStrict (qualify_expr local_defs local_types type_params bound e)
   | ELet (x, e, body) ->
       ELet
         ( x,

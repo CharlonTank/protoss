@@ -1005,6 +1005,22 @@ let () =
     migrated_current_graph_json;
   let graph_value, _ = Runtime.normalize_def graph_checked "main" in
   assert_equal "canonical graph eval" "2" (Runtime.value_to_string graph_value);
+  let strict_graph = check "(def main Nat (strict (succ 1)))" in
+  let strict_graph_json = Canonical_ir.serialize_graph strict_graph in
+  assert_true "strict canonical serialization"
+    (contains_substring (Kernel.serialize_checked_program strict_graph) "(strict");
+  assert_true "strict graph serialization"
+    (contains_substring strict_graph_json "\"tag\": \"Strict\"");
+  assert_true "strict graph definition describes term"
+    (contains_substring
+       (Canonical_ir.graph_definition strict_graph_json "main").Canonical_ir.graph_def_term_canonical
+       "(strict");
+  assert_equal "strict graph to program roundtrip"
+    (Kernel.serialize_checked_program strict_graph)
+    (Canonical_ir.graph_to_program strict_graph_json);
+  let strict_graph_checked = Canonical_ir.checked_of_graph strict_graph_json in
+  let strict_graph_value, _ = Runtime.normalize_def strict_graph_checked "main" in
+  assert_equal "strict graph eval" "2" (Runtime.value_to_string strict_graph_value);
   let basic_path = find_up (Sys.getcwd ()) "examples/basic.protoss" in
   let basic_invariants = Invariants.check_file basic_path in
   assert_equal "invariants file hash" (Kernel.hash_program (Loader.check_file basic_path))
@@ -2098,6 +2114,19 @@ let () =
     (List.exists (String.equal "thunk let") lazy_unused_trace);
   assert_true "lazy let does not force unused RHS"
     (not (List.exists (String.equal "force let") lazy_unused_trace));
+  let strict_unused =
+    check
+      "(def inc (-> Nat Nat) (lambda (x Nat) (succ x)))\n\
+       (def main Nat (let (unused Nat (strict (inc 41))) 0))"
+  in
+  let strict_unused_value, strict_unused_trace =
+    Runtime.normalize_def ~trace_cache:true strict_unused "main"
+  in
+  assert_equal "strict let unused result" "0" (Runtime.value_to_string strict_unused_value);
+  assert_true "strict let forces unused RHS"
+    (List.exists (String.equal "strict let") strict_unused_trace);
+  assert_true "strict let bypasses lazy thunk"
+    (not (List.exists (String.equal "thunk let") strict_unused_trace));
   let lazy_shared =
     check "(def main Nat (let (x Nat (succ 41)) ((prim.Nat.add x) x)))"
   in

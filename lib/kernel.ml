@@ -400,6 +400,7 @@ let rec expand_expr_types recursive_names aliases vars = function
       ELambda (x, expand_type recursive_names aliases vars [] t, expand_expr_types recursive_names aliases vars body)
   | ELambdaInfer (x, body) -> ELambdaInfer (x, expand_expr_types recursive_names aliases vars body)
   | EApp (f, x) -> EApp (expand_expr_types recursive_names aliases vars f, expand_expr_types recursive_names aliases vars x)
+  | EStrict e -> EStrict (expand_expr_types recursive_names aliases vars e)
   | ELet (x, e, body) ->
       ELet (x, expand_expr_types recursive_names aliases vars e, expand_expr_types recursive_names aliases vars body)
   | ELetAnnot (x, t, e, body) ->
@@ -553,6 +554,7 @@ let collect_deps defs =
         else acc
     | ELambda (x, _, body) | ELambdaInfer (x, body) -> expr (x :: bound) acc body
     | EApp (f, x) -> expr bound (expr bound acc f) x
+    | EStrict e -> expr bound acc e
     | ELet (x, e, body) | ELetAnnot (x, _, e, body) ->
         expr (x :: bound) (expr bound acc e) body
     | ELetRecord (record, fields, body) ->
@@ -698,6 +700,7 @@ let rec expr_names = function
   | EName n -> [ n ]
   | ELambda (x, _, body) | ELambdaInfer (x, body) -> x :: expr_names body
   | EApp (f, x) -> expr_names f @ expr_names x
+  | EStrict e -> expr_names e
   | ELet (x, e, body) -> x :: expr_names e @ expr_names body
   | ELetAnnot (x, _, e, body) -> x :: expr_names e @ expr_names body
   | ELetRecord (record, fields, body) ->
@@ -1054,6 +1057,7 @@ let rec infer ctx = function
           require_type_expr a at "application" arg;
           b
       | t -> fail ("application of non-function: " ^ string_of_typ t))
+  | EStrict e -> infer ctx e
   | ELet (x, e, body) ->
       let t = infer ctx e in
       let body_ty = infer (bind_local ctx x t) body in
@@ -1351,6 +1355,9 @@ let rec infer_elab ctx expr =
               let _, arg = check_elab ctx a arg in
               (b, EApp (f, arg))
           | t -> fail ("application of non-function: " ^ string_of_typ t)))
+  | EStrict e ->
+      let typ, e = infer_elab ctx e in
+      (typ, EStrict e)
   | ELet (x, e, body) ->
       let t, e = infer_elab ctx e in
       let body_ty, body = infer_elab (bind_local ctx x t) body in
@@ -1712,6 +1719,9 @@ and check_elab ctx expected expr =
         | t -> fail ("case on unsupported type: " ^ string_of_typ t)
       in
       (expected, ECase (scrut, branches))
+  | _, EStrict e ->
+      let _, e = check_elab ctx expected e in
+      (expected, EStrict e)
   | _ ->
       let actual, expr = infer_elab ctx expr in
       require_type_expr expected actual "expected context" expr;
@@ -1941,6 +1951,7 @@ type cterm =
   | CGlobal of string
   | CLambda of typ * cterm
   | CApp of cterm * cterm
+  | CStrict of cterm
   | CLet of cterm * cterm
   | CRecord of (string * cterm) list
   | CField of cterm * string
@@ -1988,6 +1999,7 @@ let rec canonical_expr env = function
   | ELambda (x, t, body) -> CLambda (t, canonical_expr (x :: env) body)
   | ELambdaInfer _ -> fail "unelaborated unannotated lambda in canonicalization"
   | EApp (f, x) -> CApp (canonical_expr env f, canonical_expr env x)
+  | EStrict e -> CStrict (canonical_expr env e)
   | ELet (x, e, body) -> CLet (canonical_expr env e, canonical_expr (x :: env) body)
   | ELetAnnot _ -> fail "unelaborated annotated let in canonicalization"
   | ELetRecord _ -> fail "unelaborated record destructuring in canonicalization"
@@ -2056,6 +2068,7 @@ let rec cterm_direct_capabilities = function
   | CRequest req -> [ req_capability req ]
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CInst _ | CNil _ -> []
   | CLambda (_, body) -> cterm_direct_capabilities body
+  | CStrict e -> cterm_direct_capabilities e
   | CApp (f, x) | CLet (f, x) | CImage (f, x) | CButton (f, x) | CInput (f, x)
   | CListView (f, x) | CWhenView (f, x) | CAttr (f, x) | COn (f, x) ->
       cterm_direct_capabilities f @ cterm_direct_capabilities x
@@ -2087,6 +2100,7 @@ let rec cterm_global_refs = function
   | CInst (n, _) -> [ n ]
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ | CNil _ -> []
   | CLambda (_, body) -> cterm_global_refs body
+  | CStrict e -> cterm_global_refs e
   | CApp (f, x) | CLet (f, x) | CImage (f, x) | CButton (f, x) | CInput (f, x)
   | CListView (f, x) | CWhenView (f, x) | CAttr (f, x) | COn (f, x) ->
       cterm_global_refs f @ cterm_global_refs x
@@ -2119,6 +2133,7 @@ let rec cterm_to_string = function
   | CGlobal n -> "@" ^ n
   | CLambda (t, body) -> "(lam " ^ type_to_canonical t ^ " " ^ cterm_to_string body ^ ")"
   | CApp (f, x) -> "(app " ^ cterm_to_string f ^ " " ^ cterm_to_string x ^ ")"
+  | CStrict e -> "(strict " ^ cterm_to_string e ^ ")"
   | CLet (e, body) -> "(let " ^ cterm_to_string e ^ " " ^ cterm_to_string body ^ ")"
   | CRecord fields ->
       "(record "
@@ -2203,7 +2218,7 @@ let executable_grammar_text =
       "expr ::= (let binding expr) | (record field*) | (get expr Field)";
       "expr ::= (variant type Constructor expr) | (inst Name type*)";
       "expr ::= (case expr branch*) | (foldNat expr expr expr) | (foldList expr expr expr)";
-      "expr ::= (foldVariant type type expr branch*) | recur";
+      "expr ::= (foldVariant type type expr branch*) | (strict expr) | recur";
       "expr ::= (Nil type) | (Cons type expr expr) | (caseList expr expr Name Name expr)";
       "expr ::= (text expr) | (image expr expr) | (button expr expr) | (input expr expr)";
       "expr ::= (column expr) | (row expr) | (list expr expr) | (when expr expr)";
@@ -2239,6 +2254,7 @@ let rec cterm_to_canonical_v2 def_id_of = function
   | CLambda (t, body) -> "(lam " ^ type_to_canonical t ^ " " ^ cterm_to_canonical_v2 def_id_of body ^ ")"
   | CApp (f, x) ->
       "(app " ^ cterm_to_canonical_v2 def_id_of f ^ " " ^ cterm_to_canonical_v2 def_id_of x ^ ")"
+  | CStrict e -> "(strict " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
   | CLet (e, body) ->
       "(let " ^ cterm_to_canonical_v2 def_id_of e ^ " "
       ^ cterm_to_canonical_v2 def_id_of body ^ ")"
@@ -2509,6 +2525,12 @@ let rec cterm_to_graph_json_via recurse def_id_of = function
           json_field "fn" (recurse f);
           json_field "arg" (recurse arg);
         ]
+  | CStrict e ->
+      json_obj
+        [
+          json_field "tag" (json_string "Strict");
+          json_field "value" (recurse e);
+        ]
   | CLet (e, body) ->
       json_obj
         [
@@ -2731,6 +2753,7 @@ let cterm_node_tag = function
   | CGlobal _ -> "Ref"
   | CLambda _ -> "Lambda"
   | CApp _ -> "App"
+  | CStrict _ -> "Strict"
   | CLet _ -> "Let"
   | CRecord _ -> "Record"
   | CField _ -> "Field"
@@ -2778,6 +2801,7 @@ let cbranch_body_edges_via term_id = function
 let cterm_node_edges_via ~term_id ~type_id = function
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ -> []
   | CLambda (typ, body) -> [ type_id typ; term_id body ]
+  | CStrict value -> [ term_id value ]
   | CApp (f, arg) -> [ term_id f; term_id arg ]
   | CLet (value, body) -> [ term_id value; term_id body ]
   | CRecord fields -> List.map (fun (_, value) -> term_id value) fields
@@ -2916,6 +2940,7 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
     | CBBool (_, body) | CBVariant (_, body) -> add_term body
   and add_term_children = function
     | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CRequest _ -> ()
+    | CStrict value -> add_term value
     | CLambda (typ, body) ->
         add_type typ;
         add_term body
@@ -3102,6 +3127,7 @@ let rec cterm_of_canonical_sexp = function
       CLambda (type_of_canonical_sexp typ, cterm_of_canonical_sexp body)
   | Sexp.List [ Sexp.Atom "app"; f; arg ] ->
       CApp (cterm_of_canonical_sexp f, cterm_of_canonical_sexp arg)
+  | Sexp.List [ Sexp.Atom "strict"; e ] -> CStrict (cterm_of_canonical_sexp e)
   | Sexp.List [ Sexp.Atom "let"; e; body ] ->
       CLet (cterm_of_canonical_sexp e, cterm_of_canonical_sexp body)
   | Sexp.List (Sexp.Atom "record" :: fields) ->
@@ -3306,6 +3332,7 @@ let canonical_surface_expr defs term =
         let x = "__x" ^ string_of_int depth in
         ELambda (x, typ, expr (depth + 1) (x :: env) body)
     | CApp (f, arg) -> EApp (expr depth env f, expr depth env arg)
+    | CStrict value -> EStrict (expr depth env value)
     | CLet (value, body) ->
         let x = "__let" ^ string_of_int depth in
         ELet (x, expr depth env value, expr (depth + 1) (x :: env) body)
@@ -3899,8 +3926,8 @@ let termination_inc_recur c = { c with recur = c.recur + 1 }
 let rec termination_counts_term = function
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CNil _ | CRequest _ ->
       termination_zero
-  | CLambda (_, body) | CField (body, _) | CVariant (_, _, body) | CText body
-  | CColumn body | CRow body | CDone body ->
+  | CLambda (_, body) | CStrict body | CField (body, _) | CVariant (_, _, body)
+  | CText body | CColumn body | CRow body | CDone body ->
       termination_counts_term body
   | CRecur body -> termination_inc_recur (termination_counts_term body)
   | CApp (a, b) | CLet (a, b) | CCons (_, a, b) | CImage (a, b) | CButton (a, b)
@@ -3977,6 +4004,7 @@ let rec shift amount cutoff = function
   | CGlobal n -> CGlobal n
   | CLambda (t, body) -> CLambda (t, shift amount (cutoff + 1) body)
   | CApp (f, x) -> CApp (shift amount cutoff f, shift amount cutoff x)
+  | CStrict e -> CStrict (shift amount cutoff e)
   | CLet (e, body) -> CLet (shift amount cutoff e, shift amount (cutoff + 1) body)
   | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, shift amount cutoff e)) fields)
   | CField (e, field) -> CField (shift amount cutoff e, field)
@@ -4025,6 +4053,7 @@ let rec subst index replacement = function
   | CGlobal n -> CGlobal n
   | CLambda (t, body) -> CLambda (t, subst (index + 1) (shift 1 0 replacement) body)
   | CApp (f, x) -> CApp (subst index replacement f, subst index replacement x)
+  | CStrict e -> CStrict (subst index replacement e)
   | CLet (e, body) -> CLet (subst index replacement e, subst (index + 1) (shift 1 0 replacement) body)
   | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, subst index replacement e)) fields)
   | CField (e, field) -> CField (subst index replacement e, field)
@@ -4090,6 +4119,7 @@ let rec subst_type_in_cterm args = function
   | CGlobal n -> CGlobal n
   | CLambda (t, body) -> CLambda (subst_type args t, subst_type_in_cterm args body)
   | CApp (f, x) -> CApp (subst_type_in_cterm args f, subst_type_in_cterm args x)
+  | CStrict e -> CStrict (subst_type_in_cterm args e)
   | CLet (e, body) -> CLet (subst_type_in_cterm args e, subst_type_in_cterm args body)
   | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, subst_type_in_cterm args e)) fields)
   | CField (e, field) -> CField (subst_type_in_cterm args e, field)
@@ -4171,6 +4201,7 @@ let rec normalize_cterm checked = function
       | CApp (CApp (CGlobal "prim.String.slice", CString s), CNat start), CNat count ->
           CString (String_prim.slice s start count)
       | _ -> CApp (nf, nx))
+  | CStrict e -> normalize_cterm checked e
   | CLet (e, body) -> normalize_cterm checked (subst_top (normalize_cterm checked e) body)
   | CRecord fields ->
       CRecord (sort_fields (List.map (fun (n, e) -> (n, normalize_cterm checked e)) fields))
@@ -4234,6 +4265,7 @@ let rec normalize_cterm checked = function
         | CGlobal n -> CGlobal n
         | CLambda (t, body) -> CLambda (t, rewrite_recur body)
         | CApp (f, x) -> CApp (rewrite_recur f, rewrite_recur x)
+        | CStrict e -> CStrict (rewrite_recur e)
         | CLet (e, body) -> CLet (rewrite_recur e, rewrite_recur body)
         | CRecord fields -> CRecord (List.map (fun (n, e) -> (n, rewrite_recur e)) fields)
         | CField (e, field) -> CField (rewrite_recur e, field)

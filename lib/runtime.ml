@@ -234,8 +234,8 @@ let rec consume_cterm budget term =
     | Kernel.CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CInst _
     | CRequest _ | CNil _ ->
         Some budget
-    | CLambda (_, body) | CField (body, _) | CVariant (_, _, body) | CRecur body
-    | CText body | CColumn body | CRow body | CDone body ->
+    | CLambda (_, body) | CStrict body | CField (body, _) | CVariant (_, _, body)
+    | CRecur body | CText body | CColumn body | CRow body | CDone body ->
         consume_cterm budget body
     | CApp (a, b) | CLet (a, b) | CImage (a, b) | CButton (a, b) | CInput (a, b)
     | CListView (a, b) | CWhenView (a, b) | CAttr (a, b) | COn (a, b)
@@ -609,6 +609,11 @@ let rec eval_cterm st env = function
       let fv = eval_cterm st env f in
       let av = eval_cterm st env arg in
       eval_app st fv av
+  | Kernel.CStrict e -> force_value_traced st (eval_cterm st env e)
+  | Kernel.CLet (Kernel.CStrict e, body) ->
+      trace st "strict let";
+      let value = force_value_traced st (eval_cterm st env e) in
+      eval_cterm st (value :: env) body
   | Kernel.CLet (e, body) ->
       trace st "thunk let";
       let recur_stack = st.recur_stack in
