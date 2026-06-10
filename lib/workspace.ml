@@ -86,6 +86,7 @@ type manifest = {
   store_dir : string;
   cache_dir : string;
   capabilities : string list;
+  policies : string list;
   package_imports : (string * string) list;
   package_interfaces : (string * string) list;
   package_contracts : (string * string) list;
@@ -192,6 +193,7 @@ let parse_manifest root =
     store_dir = string_field "store_dir" ".protoss/store";
     cache_dir = string_field "cache_dir" ".protoss/cache";
     capabilities = array_field "capabilities" [];
+    policies = array_field "policies" [];
     package_imports = array_field "package_imports" [] |> List.map parse_package_import;
     package_interfaces =
       array_field "package_interfaces" [] |> List.map parse_package_interface;
@@ -230,6 +232,7 @@ let init ?(force = false) root =
      store_dir = \".protoss/store\"\n\
      cache_dir = \".protoss/cache\"\n\
      capabilities = []\n\
+     policies = []\n\
      package_imports = []\n\
      package_interfaces = []\n\
      package_contracts = []\n";
@@ -799,6 +802,7 @@ let prepare_build_cache_key (manifest : manifest) (units : unit_load list) =
     @ option_field "manifest.stdlib" stdlib_key
     @ cache_list "manifest.source_dirs" manifest.source_dirs
     @ cache_list "manifest.capabilities" manifest.capabilities
+    @ cache_list "manifest.policies" manifest.policies
     @ [ cache_field "units.count" (string_of_int (List.length units)) ]
     @ List.concat (List.mapi unit_fields units))
   |> Kernel.hash_string
@@ -1451,6 +1455,7 @@ let lock_content manifest prepared =
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_string_list "policies" manifest.policies;
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
       "  "
       ^ lock_pair_list "package-import-locks"
@@ -1569,6 +1574,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
+      "  " ^ lock_string_list "policies" manifest.policies;
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
       "  "
       ^ lock_pair_list "package-import-locks"

@@ -242,7 +242,10 @@ listees dans la section "Gates de validation".
 - [ ] Supporter alias humain vers hash `package@semver`.
 - [ ] Supporter resolution par politique `package@policy`.
 - [ ] Inclure harnesses dans les packages.
-- [ ] Inclure policies dans les packages.
+- [x] Inclure policies dans les packages.
+  Preuves: champ manifest `policies`, entrees `(policies ...)` dans lock et
+  package, assertions "project package records policies" dans
+  `test/test_protoss.ml` et `README.md`.
 - [ ] Ajouter resolver package ecrit en Protoss.
 - [ ] Ajouter registre local/global de packages.
 
@@ -397,7 +400,9 @@ listees dans la section "Gates de validation".
   Preuves: `Runtime.runtime_policy_text`, `Runtime.eval_key_for_def`,
   assertion "runtime policy records capability scope" dans `test/test_protoss.ml`
   et `README.md`.
-- [ ] Policies attachees aux packages.
+- [x] Policies attachees aux packages.
+  Preuves: `Workspace.parse_manifest`, `lock_content`, `package_content`,
+  assertions "project lock records policies" et `README.md`.
 - [ ] Analyse de risque `SecretLeakRisk`.
 - [ ] Audit provenance complet.
 - [ ] Tests de negative capabilities par package.

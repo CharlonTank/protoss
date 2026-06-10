@@ -4523,7 +4523,7 @@ let () =
     write_file (Filename.concat root "protoss.toml")
       ("name = \"" ^ name ^ "\"\nversion = \"0.4.0\"\nentrypoints = [\"src/app.protoss\"]\nstdlib = \""
      ^ mini_stdlib_path
-      ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Human.ask\"]\n");
+      ^ "\"\nsource_dirs = [\"src\"]\nstore_dir = \".protoss/store\"\ncache_dir = \".protoss/cache\"\ncapabilities = [\"Human.ask\"]\npolicies = [\"NoNetworkExceptDeclared\"]\n");
     write_file (Filename.concat root "src/math.protoss")
       ("(def base Nat " ^ string_of_int base_value
      ^ ")\n(def total Nat ((Nat.add base) 40))\n");
@@ -4818,6 +4818,8 @@ let () =
   assert_equal "project lock records host contract hash" store_host_contract_hash
     (sexp_atom_field "host-contract-hash" lock_before);
   assert_true "project lock records source units" (contains_substring lock_before "(source-hash p2:");
+  assert_true "project lock records policies"
+    (contains_substring lock_before "(policies \"NoNetworkExceptDeclared\")");
   assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
   let lock_path_again, lock_hash_again = Workspace.write_lock manifest_a in
   assert_equal "project lock deterministic path" lock_path lock_path_again;
@@ -4862,6 +4864,8 @@ let () =
     (contains_substring package_content lock_hash);
   assert_true "project package records interface hash"
     (contains_substring package_content "(interface-hash p2:");
+  assert_true "project package records policies"
+    (contains_substring package_content "(policies \"NoNetworkExceptDeclared\")");
   assert_true "project package records public interface"
     (contains_substring package_content "(interface ");
   let interface_hash = sexp_atom_field "interface-hash" package_content in
