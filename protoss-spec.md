@@ -147,7 +147,10 @@ Elm-like, modules humains et "human official grammar" dans
   exemples (`==`, `/=`, `<`, `<=`, `>`, `>=`, `not`, `&&`, `||`).
   Preuves: `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`,
   `test/test_protoss.ml` assertions "Elm-like Nat equality" et `README.md`.
-- [ ] Ajouter un formatter Protoss/H idempotent pour toute la grammaire.
+- [x] Ajouter un formatter Protoss/H idempotent pour toute la grammaire.
+  Preuves: `Ast.string_of_program`, commande `protoss fmt [--check] <file>`,
+  assertion "Protoss/H formatter full grammar idempotent" dans
+  `test/test_protoss.ml`, `README.md`.
 
 ## 4. Syntaxe canonique Protoss/C et graphe
 

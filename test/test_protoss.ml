@@ -461,6 +461,28 @@ let () =
   let basic_pt_projection = Ast.string_of_program basic_protoss.Kernel.program in
   assert_equal ".pt projection parses with same hash" (Kernel.hash_program basic_protoss)
     (Kernel.hash_program (check basic_pt_projection));
+  let formatter_full_source =
+    "(module Demo.App)\n\
+     (import \"prelude.protoss\")\n\
+     (export Count Pair Tree id askName count main)\n\
+     (capabilities Human.ask)\n\
+     (type Count Nat)\n\
+     (record Pair (params A B) (first A) (second B))\n\
+     (variant Tree (params A) (Leaf A) (Node (Tree A)))\n\
+     (defpoly id (params A) (-> A A) (lambda (x A) x))\n\
+     (defcap askName (capabilities Human.ask) (Process String) (Human.ask \"Name?\"))\n\
+     (defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))\n\
+     (def main Nat (count 2))"
+  in
+  let formatter_once = Ast.string_of_program (Parser.parse_string formatter_full_source) in
+  let formatter_twice = Ast.string_of_program (Parser.parse_string formatter_once) in
+  assert_equal "Protoss/H formatter full grammar idempotent" formatter_once formatter_twice;
+  assert_true "Protoss/H formatter keeps module"
+    (contains_substring formatter_once "(module Demo.App)");
+  assert_true "Protoss/H formatter keeps Process type"
+    (contains_substring formatter_once "(Process String)");
+  assert_true "Protoss/H formatter keeps capability request"
+    (contains_substring formatter_once "(Human.ask \"Name?\")");
   let preservation_progression =
     Loader.check_file preservation_progression_path
   in
