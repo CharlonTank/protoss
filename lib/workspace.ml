@@ -793,6 +793,15 @@ type git_blame_ledger = {
   git_blame_entries : git_blame_entry list;
 }
 
+type layout_export = {
+  layout_root : string;
+  layout_lock_path : string;
+  layout_view_paths : string list;
+  layout_cache_path : string;
+  layout_harness_path : string;
+  layout_universe_root : string;
+}
+
 type prepared_build = {
   units : unit_load list;
   checked : Kernel.checked;
@@ -1849,6 +1858,75 @@ let write_lock_prepared manifest prepared =
   let content = lock_content manifest prepared in
   write_file path content;
   (path, Kernel.hash_string content)
+
+let replace_suffix suffix replacement path =
+  if has_suffix suffix path then
+    String.sub path 0 (String.length path - String.length suffix) ^ replacement
+  else path ^ replacement
+
+let project_source_files manifest =
+  let source_files =
+    manifest.source_dirs
+    |> List.map (path_in_project manifest)
+    |> List.concat_map collect_source_files
+  in
+  let entrypoints = List.map (path_in_project manifest) manifest.entrypoints in
+  sort_uniq (source_files @ entrypoints)
+
+let layout_view_path out rel_source =
+  let rel =
+    if has_suffix ".protoss" rel_source then replace_suffix ".protoss" ".pt" rel_source
+    else if has_suffix ".pt" rel_source then rel_source
+    else rel_source ^ ".pt"
+  in
+  Filename.concat (Filename.concat out "views") rel
+
+let export_layout ?out manifest =
+  let out =
+    match out with
+    | Some path -> path_in_project manifest path
+    | None -> Filename.concat (Filename.concat manifest.root ".protoss") "export-layout"
+  in
+  let build_result = build manifest in
+  let lock_path, _ = write_lock manifest in
+  ensure_dir out;
+  let layout_lock_path = Filename.concat out "protoss.lock" in
+  write_file layout_lock_path (read_file lock_path);
+  let layout_view_paths =
+    project_source_files manifest
+    |> List.map (fun source ->
+           let rel = cache_project_path manifest source in
+           let target = layout_view_path out rel in
+           ensure_dir (Filename.dirname target);
+           write_file target (Ast.string_of_program (Parser.parse_file source));
+           target)
+  in
+  let layout_cache_path = Filename.concat (Filename.concat out "cache") "program.ptb" in
+  ensure_dir (Filename.dirname layout_cache_path);
+  write_file layout_cache_path (Canonical_binary.checked_to_binary build_result.checked);
+  let layout_harness_path = Filename.concat (Filename.concat out "harness") "_empty.pth" in
+  ensure_dir (Filename.dirname layout_harness_path);
+  write_file layout_harness_path "protoss-harness-layout-v1\nharnesses=0\n";
+  {
+    layout_root = out;
+    layout_lock_path;
+    layout_view_paths;
+    layout_cache_path;
+    layout_harness_path;
+    layout_universe_root = build_result.universe_root;
+  }
+
+let layout_export_text layout =
+  String.concat "\n"
+    [
+      "Layout " ^ layout.layout_root;
+      "UniverseRoot " ^ layout.layout_universe_root;
+      "Lock " ^ layout.layout_lock_path;
+      "Cache " ^ layout.layout_cache_path;
+      "Harness " ^ layout.layout_harness_path;
+      "Views " ^ string_of_int (List.length layout.layout_view_paths);
+      "";
+    ]
 
 let check_lock manifest =
   let path = lock_path manifest in

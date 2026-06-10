@@ -571,8 +571,12 @@ diff/patch review et chemins structurels dans `test/test_protoss.ml`.
   Preuves: `Workspace.write_git_blame_ledger`, commande `protoss git blame`,
   fichiers `.protoss/provenance/git-blame/*.ledger`, assertion "git blame
   ledger records line commits" dans `test/test_protoss.ml`, `README.md`.
-- [ ] Exporter layout `/protoss.lock`, `/views/**/*.pt`, `/cache/**/*.ptb`,
+- [x] Exporter layout `/protoss.lock`, `/views/**/*.pt`, `/cache/**/*.ptb`,
   `/harness/**/*.pth`.
+  Preuves: `Workspace.export_layout`, commande `protoss project
+  export-layout`, assertions "layout export writes protoss.lock", "layout
+  export writes pt views", "layout export ptb cache round trips" et "layout
+  export writes harness layout" dans `test/test_protoss.ml`, `README.md`.
 
 ## 20. Roadmap d'execution
 

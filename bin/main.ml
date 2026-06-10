@@ -32,7 +32,7 @@ let usage () =
      \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
      \       protoss self typecheck <file> [--json] | type-of <file> --entry <name> | compare-typecheck <file>\n\
      \       protoss self fmt [--check] <file>\n\
-     \       protoss project init|check|build|lock|package|interface [project] [--stats|--locked|--check [interface.json]|--json]\n\
+     \       protoss project init|check|build|lock|package|interface|export-layout [project] [--stats|--locked|--check [interface.json]|--json|--out <dir>]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref] | protoss patch review <patch.json>\n\
      \       protoss patch from-diff <store-a> <store-b>\n\
@@ -661,6 +661,23 @@ let command_project_interface args =
       if json then print_string (Protoss.Workspace.package_interface_json manifest)
       else print_string (Protoss.Workspace.package_interface_text manifest)
 
+let parse_project_export_layout_args args =
+  let rec loop out paths = function
+    | [] -> (out, List.rev paths)
+    | "--out" :: dir :: rest -> loop (Some dir) paths rest
+    | x :: _ when is_flag x -> usage ()
+    | x :: rest -> loop out (x :: paths) rest
+  in
+  match loop None [] args with
+  | out, [] -> (out, ".")
+  | out, [ root ] -> (out, root)
+  | _ -> usage ()
+
+let command_project_export_layout args =
+  let out, root = parse_project_export_layout_args args in
+  let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
+  print_string (Protoss.Workspace.layout_export_text (Protoss.Workspace.export_layout ?out manifest))
+
 let command_project = function
   | "init" :: args ->
       let root = project_arg args in
@@ -675,6 +692,7 @@ let command_project = function
   | "lock" :: args -> command_project_lock args
   | "package" :: args -> command_project_package args
   | "interface" :: args -> command_project_interface args
+  | "export-layout" :: args -> command_project_export_layout args
   | _ -> usage ()
 
 let command_app = function

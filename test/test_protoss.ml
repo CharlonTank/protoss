@@ -4778,6 +4778,21 @@ let () =
   assert_true "git blame ledger records line commits"
     (List.length git_blame_ledger.Workspace.git_blame_entries > 0
     && contains_substring git_blame_content ("commit=" ^ git_mapping.git_commit));
+  let layout_out = Filename.concat git_map_ws "portable-layout" in
+  let layout = Workspace.export_layout ~out:layout_out git_map_manifest in
+  assert_true "layout export writes protoss.lock"
+    (Sys.file_exists layout.Workspace.layout_lock_path
+    && contains_substring (Store.read_file layout.layout_lock_path) "protoss-lock-v1");
+  assert_true "layout export writes pt views"
+    (List.exists
+       (fun path -> Filename.basename path = "app.pt" && Sys.file_exists path)
+       layout.layout_view_paths);
+  assert_equal "layout export ptb cache round trips"
+    (Kernel.hash_program (Canonical_binary.checked_of_binary (Store.read_file layout.layout_cache_path)))
+    (Workspace.build git_map_manifest).Workspace.build_id;
+  assert_true "layout export writes harness layout"
+    (Sys.file_exists layout.layout_harness_path
+    && contains_substring (Store.read_file layout.layout_harness_path) "harnesses=0");
   let ws_a = make_workspace "workspace-a" 2 "x" in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";

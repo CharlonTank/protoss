@@ -28,6 +28,8 @@ patch-provenance records; latest patch verification must keep program hash and r
 `protoss git map [project]` writes `.protoss/git.map`; `protoss git blame [project] <file>`
 writes `.protoss/provenance/git-blame/*.ledger`. Keep both deterministic and derived from
 `Workspace.write_git_mapping`.
+`project export-layout [project] [--out <dir>]` writes the portable layout contract
+(`protoss.lock`, `views/**/*.pt`, `cache/program.ptb`, `harness/_empty.pth`).
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.
