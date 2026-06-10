@@ -16,8 +16,9 @@ lock/package flows must keep their `universe-root` field in sync with that store
 Policy names are executable, not just descriptor text: for example
 `NoNetworkExceptDeclared` requires `Http.*` and `Server.*` capabilities to be present in manifest
 `capabilities`.
-Package aliases are local manifest entries (`package_aliases = ["name@semver=path"]`) and must
-validate the imported package name/version before resolving to the locked package hash.
+Package aliases are local manifest entries (`package_aliases = ["name@semver=path"]` or
+`package_policy_aliases = ["name@policy=path"]`) and must validate the imported package
+name/version or advertised policy before resolving to the locked package hash.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

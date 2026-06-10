@@ -312,7 +312,11 @@ Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
   resolution dans `Workspace.package_import_manifest`, champs
   `package-aliases` des locks/packages, assertions "package alias ..." dans
   `test/test_protoss.ml` et `README.md`.
-- [ ] Supporter resolution par politique `package@policy`.
+- [x] Supporter resolution par politique `package@policy`.
+  Preuves: champ manifest `package_policy_aliases = ["name@policy=path"]`,
+  validation de policy dans `Workspace.package_import_manifest`, champs
+  `package-policy-aliases` des locks/packages, assertions
+  "package policy alias ..." dans `test/test_protoss.ml` et `README.md`.
 - [ ] Inclure harnesses dans les packages.
 - [x] Inclure policies dans les packages.
   Preuves: champ manifest `policies`, entrees `(policies ...)` dans lock et

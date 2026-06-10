@@ -88,6 +88,7 @@ type manifest = {
   capabilities : string list;
   policies : string list;
   package_aliases : (string * string) list;
+  package_policy_aliases : (string * string) list;
   package_imports : (string * string) list;
   package_interfaces : (string * string) list;
   package_contracts : (string * string) list;
@@ -147,6 +148,8 @@ let parse_package_import s = parse_manifest_pair "package import" s
 
 let parse_package_alias s = parse_manifest_pair "package alias" s
 
+let parse_package_policy_alias s = parse_manifest_pair "package policy alias" s
+
 let parse_package_interface s = parse_manifest_pair "package interface constraint" s
 
 let parse_package_contract s = parse_manifest_pair "package contract constraint" s
@@ -198,6 +201,8 @@ let parse_manifest root =
     capabilities = array_field "capabilities" [];
     policies = array_field "policies" [];
     package_aliases = array_field "package_aliases" [] |> List.map parse_package_alias;
+    package_policy_aliases =
+      array_field "package_policy_aliases" [] |> List.map parse_package_policy_alias;
     package_imports = array_field "package_imports" [] |> List.map parse_package_import;
     package_interfaces =
       array_field "package_interfaces" [] |> List.map parse_package_interface;
@@ -238,6 +243,7 @@ let init ?(force = false) root =
      capabilities = []\n\
      policies = []\n\
      package_aliases = []\n\
+     package_policy_aliases = []\n\
      package_imports = []\n\
      package_interfaces = []\n\
      package_contracts = []\n";
@@ -833,6 +839,7 @@ let prepare_build_cache_key (manifest : manifest) (units : unit_load list) =
     @ cache_list "manifest.capabilities" manifest.capabilities
     @ cache_list "manifest.policies" manifest.policies
     @ cache_pairs "manifest.package_aliases" manifest.package_aliases
+    @ cache_pairs "manifest.package_policy_aliases" manifest.package_policy_aliases
     @ [ cache_field "units.count" (string_of_int (List.length units)) ]
     @ List.concat (List.mapi unit_fields units))
   |> Kernel.hash_string
@@ -960,6 +967,7 @@ let universe_root_content manifest prepared world_refs =
     [
       lock_pair_list "package-imports" manifest.package_imports;
       lock_pair_list "package-aliases" manifest.package_aliases;
+      lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
       lock_pair_list "package-interfaces" manifest.package_interfaces;
       lock_pair_list "package-contracts" manifest.package_contracts;
     ]
@@ -1487,15 +1495,31 @@ let package_alias manifest target =
   manifest.package_aliases
   |> List.find_opt (fun (alias, _) -> String.equal alias target)
 
+let package_policy_alias manifest target =
+  manifest.package_policy_aliases
+  |> List.find_opt (fun (alias, _) -> String.equal alias target)
+
 let package_alias_name_version alias =
   match split_once '@' alias with
   | Some (name, version) when trim name <> "" && trim version <> "" ->
       Some (trim name, trim version)
   | _ -> None
 
+let package_alias_name_policy alias =
+  match split_once '@' alias with
+  | Some (name, policy) when trim name <> "" && trim policy <> "" ->
+      Some (trim name, trim policy)
+  | _ -> None
+
 let package_import_manifest manifest (name, path) =
   let alias = package_alias manifest path in
-  let path = match alias with Some (_, alias_path) -> alias_path | None -> path in
+  let policy_alias = package_policy_alias manifest path in
+  let path =
+    match (alias, policy_alias) with
+    | Some (_, alias_path), _ -> alias_path
+    | None, Some (_, alias_path) -> alias_path
+    | None, None -> path
+  in
   let root = project_root (normalize_path manifest.root path) in
   let imported = parse_manifest root in
   if not (String.equal imported.name name) then
@@ -1514,8 +1538,22 @@ let package_import_manifest manifest (name, path) =
              ^ imported.name)
           else if not (String.equal expected_version imported.version) then
             fail
-              ("package alias version mismatch for " ^ imported.name ^ ": expected "
+             ("package alias version mismatch for " ^ imported.name ^ ": expected "
              ^ expected_version ^ ", got " ^ imported.version)));
+  (match policy_alias with
+  | None -> ()
+  | Some (alias_name, _) -> (
+      match package_alias_name_policy alias_name with
+      | None -> fail ("package policy alias must be package@policy: " ^ alias_name)
+      | Some (expected_name, expected_policy) ->
+          if not (String.equal expected_name imported.name) then
+            fail
+              ("package policy alias name mismatch: expected " ^ expected_name ^ ", got "
+             ^ imported.name)
+          else if not (List.exists (String.equal expected_policy) imported.policies) then
+            fail
+              ("package policy alias mismatch for " ^ imported.name ^ ": missing policy "
+             ^ expected_policy)));
   imported
 
 let read_package_import manifest import =
@@ -1632,6 +1670,7 @@ let lock_content manifest prepared =
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
       "  " ^ lock_string_list "policies" manifest.policies;
       "  " ^ lock_pair_list "package-aliases" manifest.package_aliases;
+      "  " ^ lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
       "  "
       ^ lock_pair_list "package-import-locks"
@@ -1754,6 +1793,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
       "  " ^ lock_string_list "policies" manifest.policies;
       "  " ^ lock_pair_list "package-aliases" manifest.package_aliases;
+      "  " ^ lock_pair_list "package-policy-aliases" manifest.package_policy_aliases;
       "  " ^ lock_pair_list "package-imports" (List.map (fun i -> (i.import_name, i.import_ref)) imports);
       "  "
       ^ lock_pair_list "package-import-locks"
@@ -1889,6 +1929,7 @@ let package_check_cache_key manifest source_key import_keys package_ref content 
         ]
        @ cache_list "imports" import_keys
        @ cache_pairs "manifest.package_aliases" manifest.package_aliases
+       @ cache_pairs "manifest.package_policy_aliases" manifest.package_policy_aliases
        @ cache_pairs "manifest.package_imports" manifest.package_imports
        @ cache_pairs "manifest.package_interfaces" manifest.package_interfaces
        @ cache_pairs "manifest.package_contracts" manifest.package_contracts))

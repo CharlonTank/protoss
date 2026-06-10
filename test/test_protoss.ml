@@ -5242,6 +5242,37 @@ let () =
      assert_true "package semver alias mismatch reports version"
        (contains_substring msg
           "package alias version mismatch for workspace-a: expected 9.9.9, got 0.4.0"));
+  let policy_alias_ws = make_workspace "workspace-consumer-policy-alias" 7 "c" in
+  let policy_alias_manifest_path = Filename.concat policy_alias_ws "protoss.toml" in
+  let policy_alias_manifest_base = Store.read_file policy_alias_manifest_path in
+  write_file policy_alias_manifest_path
+    (policy_alias_manifest_base ^ "package_policy_aliases = [\"workspace-a@NoNetworkExceptDeclared="
+   ^ ws_a
+   ^ "\"]\npackage_imports = [\"workspace-a=workspace-a@NoNetworkExceptDeclared\"]\npackage_interfaces = [\"workspace-a="
+   ^ interface_hash ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash
+   ^ "\"]\n");
+  let policy_alias_manifest = Workspace.parse_manifest policy_alias_ws in
+  let policy_alias_package = Workspace.write_package policy_alias_manifest in
+  let policy_alias_package_content = Store.read_file policy_alias_package.package_path in
+  assert_true "package policy alias records alias"
+    (contains_substring policy_alias_package_content
+       ("workspace-a@NoNetworkExceptDeclared=" ^ ws_a));
+  assert_true "package policy alias resolves imported package ref"
+    (contains_substring policy_alias_package_content ("workspace-a=" ^ package_a.package_ref));
+  let policy_alias_bad_ws = make_workspace "workspace-consumer-policy-alias-bad" 7 "d" in
+  let policy_alias_bad_manifest_path = Filename.concat policy_alias_bad_ws "protoss.toml" in
+  write_file policy_alias_bad_manifest_path
+    (Store.read_file policy_alias_bad_manifest_path
+   ^ "package_policy_aliases = [\"workspace-a@RequiresGpu=" ^ ws_a
+   ^ "\"]\npackage_imports = [\"workspace-a=workspace-a@RequiresGpu\"]\n");
+  let policy_alias_bad_manifest = Workspace.parse_manifest policy_alias_bad_ws in
+  (try
+     ignore (Workspace.write_package policy_alias_bad_manifest);
+     fail "package policy alias mismatch should reject"
+   with Workspace.Error msg ->
+     assert_true "package policy alias mismatch reports policy"
+       (contains_substring msg
+          "package policy alias mismatch for workspace-a: missing policy RequiresGpu"));
   trace_test "integration:consumer-package:alias";
   let consumer_package_invariants = Invariants.check_package consumer_ws in
   trace_test "integration:consumer-package:invariants";
