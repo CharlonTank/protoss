@@ -12,7 +12,7 @@ canonical graph and hash**. Preserving that property is the central design const
 change that makes equivalent sources hash differently, or that introduces non-determinism, as a bug.
 Workspace builds also write a deterministic `UniverseRoot` (`universe.root` plus
 `universe.root.content`) over package metadata, defs, types, harness slots, policies, and world refs;
-lock/package flows must keep their `universe-root` field in sync with that store root.
+audit, locked build, lock, and package flows must reject stale `universe-root` state.
 Policy names are executable, not just descriptor text: for example
 `NoNetworkExceptDeclared` requires `Http.*` and `Server.*` capabilities to be present in manifest
 `capabilities`.

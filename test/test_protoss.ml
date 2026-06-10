@@ -4733,6 +4733,17 @@ let () =
   assert_true "project store roots" (String.length (Workspace.roots_store build_a.store) > 0);
   assert_equal "project audit" "Audit OK\n" (Workspace.audit manifest_a);
   trace_test "integration:workspace-a:audit";
+  let universe_root_corrupt_root = temp_dir "workspace-universe-root-corrupt" in
+  copy_tree ws_a universe_root_corrupt_root;
+  let universe_root_corrupt_manifest = Workspace.parse_manifest universe_root_corrupt_root in
+  let universe_root_corrupt_store = Workspace.store_root universe_root_corrupt_manifest in
+  write_file (Workspace.universe_root_path universe_root_corrupt_store) "p2:bad\n";
+  (try
+     ignore (Workspace.audit universe_root_corrupt_manifest);
+     fail "audit should reject stale universe root"
+   with Workspace.Error msg ->
+     assert_true "project audit rejects stale universe root"
+       (contains_substring msg "universe root mismatch"));
   let patch_audit_ws = make_workspace "workspace-patch-audit" 5 "p" in
   let patch_audit_manifest = Workspace.parse_manifest patch_audit_ws in
   let patch_audit_build = Workspace.build patch_audit_manifest in
@@ -4962,6 +4973,17 @@ let () =
   assert_true "project lock records policies"
     (contains_substring lock_before "(policies \"NoNetworkExceptDeclared\")");
   assert_equal "project lock check hash" lock_hash (Workspace.check_lock manifest_a);
+  write_file lock_path (replace_once lock_before build_a.universe_root "p2:bad-universe-root");
+  (try
+     ignore (Workspace.check_lock manifest_a);
+     fail "project lock check should reject stale universe root"
+   with Workspace.Error _ -> ());
+  write_file lock_path (replace_once lock_before build_a.universe_root "p2:bad-universe-root");
+  (try
+     ignore (Workspace.build_locked manifest_a);
+     fail "locked build should reject stale universe root"
+   with Workspace.Error _ -> ());
+  write_file lock_path lock_before;
   let lock_path_again, lock_hash_again = Workspace.write_lock manifest_a in
   assert_equal "project lock deterministic path" lock_path lock_path_again;
   assert_equal "project lock deterministic hash" lock_hash lock_hash_again;
@@ -5020,6 +5042,22 @@ let () =
     (contains_substring package_content "(type-canonical ");
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
+  let package_universe_root_outdated =
+    replace_once package_content build_a.universe_root "p2:bad-universe-root"
+  in
+  let package_universe_root_outdated_ref = Kernel.hash_string package_universe_root_outdated in
+  let package_universe_root_outdated_path =
+    Filename.concat (Workspace.packages_dir manifest_a)
+      (Workspace.sanitize_id package_universe_root_outdated_ref ^ ".package")
+  in
+  write_file package_universe_root_outdated_path package_universe_root_outdated;
+  write_file (Workspace.package_current_path manifest_a)
+    (package_universe_root_outdated_ref ^ "\n");
+  (try
+     ignore (Workspace.check_package manifest_a);
+     fail "package check should reject stale universe root"
+   with Workspace.Error _ -> ());
+  write_file (Workspace.package_current_path manifest_a) (package_a.package_ref ^ "\n");
   let package_checked = Workspace.check_package manifest_a in
   trace_test "integration:package-a:checked";
   assert_equal "project package check ref" package_a.package_ref package_checked.package_ref;

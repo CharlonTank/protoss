@@ -2704,6 +2704,28 @@ let audit_host_contract store checked =
     fail ("content-addressed host contract mismatch: " ^ object_path);
   ignore (Canonical_ir.check_graph_host_contract graph_json stored)
 
+let audit_universe_root manifest store =
+  let prepared = prepare_build manifest in
+  let expected_content = universe_root_content manifest prepared (read_world_refs store) in
+  let expected_root = universe_root_of_content expected_content in
+  let root_path = universe_root_path store in
+  if not (Sys.file_exists root_path) then fail "missing universe root: universe.root";
+  let stored_root = trim (read_file root_path) in
+  if not (String.equal stored_root expected_root) then
+    fail ("universe root mismatch: expected " ^ expected_root ^ ", got " ^ stored_root);
+  let content_path = universe_root_content_path store in
+  if not (Sys.file_exists content_path) then
+    fail "missing universe root content: universe.root.content";
+  let stored_content = trim (read_file content_path) in
+  if not (String.equal stored_content expected_content) then
+    fail "universe root content mismatch: universe.root.content";
+  let content_root = universe_root_of_content stored_content in
+  if not (String.equal content_root stored_root) then
+    fail
+      ("universe root content hash mismatch: expected " ^ stored_root ^ ", got "
+     ^ content_root);
+  expected_root
+
 let audit_program_canonical store checked =
   let path = Filename.concat store "program.canon" in
   if not (Sys.file_exists path) then fail "missing canonical program: program.canon";
@@ -2742,6 +2764,7 @@ let audit manifest =
   audit_program_canonical store checked;
   let current_graph_hash = audit_program_graph store checked in
   audit_host_contract store checked;
+  ignore (audit_universe_root manifest store);
   audit_all_store_graphs store current_graph_hash;
   List.iter
     (fun (cd : Kernel.checked_def) ->

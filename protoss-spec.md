@@ -58,7 +58,12 @@ Preuves de section: `lib/ast.ml`, `lib/kernel.ml`, `lib/canonical_ir.ml`,
   et `universe.root.content`, champs `universe-root` des locks/packages,
   assertions "project universe root ..." dans `test/test_protoss.ml` et
   `README.md`.
-- [ ] Faire du `UniverseRoot` la source de verite de toutes les commandes projet.
+- [x] Faire du `UniverseRoot` la source de verite de toutes les commandes projet.
+  Preuves: `Workspace.audit_universe_root`, `check_lock`, `build_locked`,
+  `check_package`, assertions "project audit rejects stale universe root",
+  "project lock check should reject stale universe root", "locked build should
+  reject stale universe root" et "package check should reject stale universe
+  root" dans `test/test_protoss.ml`, `README.md`.
 - [x] Ajouter un store global partage entre projets pour l'interning des noeuds.
   Preuves: `Store.global_store_root`, `Store.put_object`, variable
   `PROTOSS_GLOBAL_STORE`, assertion "global store writes shared object" dans
