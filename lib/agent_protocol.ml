@@ -13,6 +13,8 @@ let guard_format = "protoss-agent-write-guard-v1"
 
 let factor_format = "protoss-factor-identical-v1"
 
+let candidate_comparison_format = "protoss-agent-candidate-comparison-v1"
+
 let json_string_list xs = Kernel.json_array Kernel.json_string xs
 
 let sort_uniq_strings xs = List.sort_uniq String.compare xs
@@ -323,6 +325,78 @@ let factor_identical_json checked =
         (Kernel.json_string "protoss patch check <store> <patch.json>");
       Kernel.json_field "commitCommand"
         (Kernel.json_string "protoss agent commit <store> <patch.json>");
+    ]
+  ^ "\n"
+
+type candidate_check = {
+  candidate_label : string;
+  candidate_patch : string;
+  candidate_valid : bool;
+  candidate_result : string;
+  candidate_program_hash : string;
+  candidate_changes : int;
+  candidate_diagnostic : string;
+}
+
+let check_candidate store label patch =
+  try
+    let checked = Patch.check store patch in
+    {
+      candidate_label = label;
+      candidate_patch = patch;
+      candidate_valid = true;
+      candidate_result = Patch.describe_checked checked;
+      candidate_program_hash = Kernel.hash_program checked.Patch.checked;
+      candidate_changes = List.length checked.Patch.changes;
+      candidate_diagnostic = "";
+    }
+  with Patch.Error msg ->
+    {
+      candidate_label = label;
+      candidate_patch = patch;
+      candidate_valid = false;
+      candidate_result = "";
+      candidate_program_hash = "";
+      candidate_changes = 0;
+      candidate_diagnostic = msg;
+    }
+
+let candidate_json candidate =
+  Kernel.json_obj
+    [
+      Kernel.json_field "label" (Kernel.json_string candidate.candidate_label);
+      Kernel.json_field "patch" (Kernel.json_string candidate.candidate_patch);
+      Kernel.json_field "valid" (Kernel.json_bool candidate.candidate_valid);
+      Kernel.json_field "result" (Kernel.json_string candidate.candidate_result);
+      Kernel.json_field "programHash" (Kernel.json_string candidate.candidate_program_hash);
+      Kernel.json_field "changes" (string_of_int candidate.candidate_changes);
+      Kernel.json_field "diagnostic" (Kernel.json_string candidate.candidate_diagnostic);
+    ]
+
+let comparison_decision left right =
+  match (left.candidate_valid, right.candidate_valid) with
+  | true, false -> ("left", "left-valid-right-invalid", false)
+  | false, true -> ("right", "right-valid-left-invalid", false)
+  | false, false -> ("tie", "both-invalid", false)
+  | true, true
+    when String.equal left.candidate_program_hash right.candidate_program_hash ->
+      ("tie", "same-program-hash", false)
+  | true, true -> ("tie", "both-valid-distinct-results", true)
+
+let compare_candidates_json store patch_left patch_right =
+  let left = check_candidate store "left" patch_left in
+  let right = check_candidate store "right" patch_right in
+  let recommendation, reason, requires_harness = comparison_decision left right in
+  Kernel.json_obj
+    [
+      Kernel.json_field "format" (Kernel.json_string candidate_comparison_format);
+      Kernel.json_field "protocol" (Kernel.json_string format);
+      Kernel.json_field "stage" (Kernel.json_string "Validator");
+      Kernel.json_field "store" (Kernel.json_string store);
+      Kernel.json_field "recommendation" (Kernel.json_string recommendation);
+      Kernel.json_field "reason" (Kernel.json_string reason);
+      Kernel.json_field "requiresHarness" (Kernel.json_bool requires_harness);
+      Kernel.json_field "candidates" (Kernel.json_array candidate_json [ left; right ]);
     ]
   ^ "\n"
 

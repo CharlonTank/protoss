@@ -4344,6 +4344,40 @@ let () =
   assert_equal "agent factor identical keeps dependent duplicate" "a,b,c"
     (String.concat "," factor_after_names);
 
+  let compare_store = temp_dir "candidate-comparison" in
+  let compare_left =
+    patch_file "protoss-compare-left.json"
+      "{ \"op\":\"AddDef\", \"name\":\"one\", \"deps\":[], \"type\":\"Nat\", \"expr\":1 }"
+  in
+  let compare_right =
+    patch_file "protoss-compare-right.json"
+      "{ \"op\":\"AddDef\", \"name\":\"bad\", \"deps\":[], \"type\":\"Nat\", \"expr\":true }"
+  in
+  let compare_before = snapshot compare_store in
+  let comparison =
+    Json.parse (Agent_protocol.compare_candidates_json compare_store compare_left compare_right)
+  in
+  assert_equal "agent candidate comparison format"
+    "protoss-agent-candidate-comparison-v1"
+    (json_string_field "format" comparison);
+  assert_equal "agent candidate comparison recommendation" "left"
+    (json_string_field "recommendation" comparison);
+  assert_equal "agent candidate comparison reason" "left-valid-right-invalid"
+    (json_string_field "reason" comparison);
+  assert_true "agent candidate comparison does not require harness"
+    (not (json_bool_field "requiresHarness" comparison));
+  let compared = json_array_field "candidates" comparison in
+  let compared_left = List.nth compared 0 in
+  let compared_right = List.nth compared 1 in
+  assert_true "agent candidate comparison left valid"
+    (json_bool_field "valid" compared_left);
+  assert_true "agent candidate comparison right invalid"
+    (not (json_bool_field "valid" compared_right));
+  assert_true "agent candidate comparison invalid diagnostic"
+    (contains_substring (json_string_field "diagnostic" compared_right) "definition bad");
+  assert_true "agent candidate comparison check is read-only"
+    (snapshot compare_store = compare_before);
+
   let patch_audit_path store ref =
     Filename.concat (Filename.concat store "patches") (ref ^ ".patch")
   in

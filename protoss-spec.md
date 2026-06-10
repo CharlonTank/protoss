@@ -706,7 +706,10 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 - [ ] Tests de proprietes.
 - [ ] Generation de tests par IA.
 - [ ] Validation de patches par harness.
-- [ ] Comparaison de candidats.
+- [x] Comparaison de candidats.
+  Preuves: `Agent_protocol.compare_candidates_json`, commande
+  `protoss agent compare-candidates`, assertion "agent candidate comparison"
+  dans `test/test_protoss.ml`, `README.md`.
 - [ ] Benchmarks content-addressed.
 
 ### v1.0 - Self-hosted
