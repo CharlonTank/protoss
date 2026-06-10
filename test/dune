@@ -31,9 +31,39 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (run ./test_protoss.exe))))
 
+; The integration section dominates the suite, so it is further split into
+; independent parts (workspace/packages, web, runtime store) selected by
+; PROTOSS_INTEGRATION_PART; plain @integrationtest still runs all of them in
+; one process.
 (rule
- (alias fulltest)
- (action (setenv PROTOSS_RUN_STDLIB_TESTS 1
-          (setenv PROTOSS_RUN_SELF_HOST_TESTS 1
-           (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
-            (run ./test_protoss.exe))))))
+ (alias integrationtest-workspace)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART workspace
+           (run ./test_protoss.exe)))))
+
+(rule
+ (alias integrationtest-web)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART web
+           (run ./test_protoss.exe)))))
+
+(rule
+ (alias integrationtest-runtime)
+ (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
+          (setenv PROTOSS_INTEGRATION_PART runtime
+           (run ./test_protoss.exe)))))
+
+; fulltest aggregates the per-section aliases so dune runs them as separate
+; processes in parallel (wall clock = slowest section instead of their sum).
+; Each section re-runs the always-on core assertions; sections are isolated
+; through per-pid temp dirs, so concurrent runs do not collide.
+(alias
+ (name fulltest)
+ (deps
+  (alias runtest)
+  (alias coretest)
+  (alias selftest)
+  (alias stdlibtest)
+  (alias integrationtest-workspace)
+  (alias integrationtest-web)
+  (alias integrationtest-runtime)))

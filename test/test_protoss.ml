@@ -1,5 +1,12 @@
 open Protoss
 
+(* Batch-tool GC tuning: a large minor heap and a relaxed space overhead cut
+   GC time substantially on allocation-heavy canonicalization/eval workloads.
+   Purely a time/memory trade-off; no observable behavior change. *)
+let () =
+  Gc.set
+    { (Gc.get ()) with Gc.minor_heap_size = 8 * 1024 * 1024; Gc.space_overhead = 200 }
+
 let fail msg = raise (Failure msg)
 
 let assert_true msg b = if not b then fail msg
@@ -79,6 +86,17 @@ let json_string_array_field name obj =
 let json_string_array_literal xs =
   "[" ^ String.concat ", " (List.map Ast.quote xs) ^ "]"
 
+(* The integration suite is split into independent parts so the fulltest alias
+   can run them as parallel processes; PROTOSS_INTEGRATION_PART selects one
+   (unset = run every part, preserving the single-process behavior). *)
+let run_integration_tests = Sys.getenv_opt "PROTOSS_RUN_INTEGRATION_TESTS" = Some "1"
+
+let integration_part name =
+  run_integration_tests
+  && (match Sys.getenv_opt "PROTOSS_INTEGRATION_PART" with
+      | None -> true
+      | Some part -> String.equal part name)
+
 let () =
   assert_equal "sha256 empty digest"
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -86,6 +104,21 @@ let () =
   assert_equal "content address hash prefix"
     "p2:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     (Hashcons.hash "abc");
+  (* Padding boundaries: last-chunk handling is the delicate part of the
+     streaming digest (63 = max single-block payload, 64 = empty tail block,
+     65 = one spilled byte, 128 = chunk-aligned multi-block message). *)
+  assert_equal "sha256 padding boundary 63"
+    "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"
+    (Hashcons.digest (String.make 63 'a'));
+  assert_equal "sha256 padding boundary 64"
+    "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
+    (Hashcons.digest (String.make 64 'a'));
+  assert_equal "sha256 padding boundary 65"
+    "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0"
+    (Hashcons.digest (String.make 65 'a'));
+  assert_equal "sha256 padding boundary 128"
+    "6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e"
+    (Hashcons.digest (String.make 128 'a'));
   let utf8_sample = "A" ^ "\195\169" ^ "\240\157\132\158" in
   assert_equal "string primitive utf8 length" "3" (string_of_int (String_prim.length utf8_sample));
   assert_equal "string primitive utf8 slice" "\195\169" (String_prim.slice utf8_sample 1 1);
@@ -172,7 +205,12 @@ let rec count_files root =
   else 1
 
 let patch_file name content =
-  let path = Filename.concat (Filename.get_temp_dir_name ()) name in
+  (* Pid-qualified: suite sections run as parallel processes and would race on
+     fixed temp paths otherwise (the file name stays last for error matching). *)
+  let path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (string_of_int (Unix.getpid ()) ^ "-" ^ name)
+  in
   write_file path content;
   path
 
@@ -4075,7 +4113,7 @@ let () =
   assert_equal "store dedupe hash" h1 h2;
   assert_true "store dedupe object count" (List.length (Store.list_objects dedupe_store) = 1);
 
-  if Sys.getenv_opt "PROTOSS_RUN_INTEGRATION_TESTS" = Some "1" then (
+  if integration_part "workspace" then (
   trace_test "integration:start";
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
@@ -5064,8 +5102,10 @@ let () =
   (try
      ignore (Workspace.audit corrupt_manifest);
      fail "audit should reject corrupt store"
-   with Workspace.Error _ | Kernel.Error _ -> ());
+   with Workspace.Error _ | Kernel.Error _ -> ()));
 
+  if integration_part "web" then (
+  let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let todo_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
   let todo = temp_dir "web-todo" in
   copy_tree todo_src todo;
@@ -5483,8 +5523,9 @@ let () =
   (try
      ignore (Runtime.parse_suspended "(protoss-runtime-v2 (suspended (request ReadClock)))");
      fail "invalid resume suspension should be rejected"
-   with Kernel.Error _ -> ());
+   with Kernel.Error _ -> ()));
 
+  if integration_part "runtime" then (
   trace_test "integration:runtime-store";
   (* -- Runtime Store Foundation -------------------------------------------- *)
   let rt_stdlib = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
@@ -5563,8 +5604,9 @@ let () =
     (contains_substring (Runtime_store.audit rt_project) "Runtime audit OK");
   assert_true "runtime reset keeps a single world"
     (Array.length (Sys.readdir rt_worlds) = 1);
-  trace_test "integration:done"
-  ) else
+  trace_test "integration:done");
+
+  if not run_integration_tests then
     print_endline "integration tests skipped (set PROTOSS_RUN_INTEGRATION_TESTS=1)";
 
   print_endline "protoss tests ok"

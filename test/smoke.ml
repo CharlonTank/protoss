@@ -1,5 +1,12 @@
 open Protoss
 
+(* Batch-tool GC tuning: a large minor heap and a relaxed space overhead cut
+   GC time substantially on allocation-heavy canonicalization/eval workloads.
+   Purely a time/memory trade-off; no observable behavior change. *)
+let () =
+  Gc.set
+    { (Gc.get ()) with Gc.minor_heap_size = 8 * 1024 * 1024; Gc.space_overhead = 200 }
+
 let fail msg = raise (Failure msg)
 
 let assert_true msg b = if not b then fail msg
@@ -91,7 +98,8 @@ let () =
   expect_check_error "(def askName (Process String) (Human.ask \"Name?\"))";
 
   let store = temp_dir "patch" in
-  let valid_patch = Filename.concat (Filename.get_temp_dir_name ()) "protoss-smoke-valid-patch.json" in
+  let valid_patch = Filename.concat (Filename.get_temp_dir_name ())
+      (string_of_int (Unix.getpid ()) ^ "-protoss-smoke-valid-patch.json") in
   write_file valid_patch
     "{ \"op\":\"AddDef\", \"name\":\"two\", \"deps\":[], \"type\":\"Nat\", \"expr\":[\"succ\",1] }";
   ignore (Patch.apply store valid_patch);
@@ -100,7 +108,8 @@ let () =
   assert_equal "patch valid accepted" "2" (Runtime.value_to_string two);
 
   let before = snapshot store in
-  let invalid_patch = Filename.concat (Filename.get_temp_dir_name ()) "protoss-smoke-invalid-patch.json" in
+  let invalid_patch = Filename.concat (Filename.get_temp_dir_name ())
+      (string_of_int (Unix.getpid ()) ^ "-protoss-smoke-invalid-patch.json") in
   write_file invalid_patch
     "{ \"op\":\"AddDef\", \"name\":\"bad\", \"deps\":[], \"type\":\"Nat\", \"expr\":true }";
   (try
