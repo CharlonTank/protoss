@@ -100,7 +100,12 @@ let protect f =
   | Unix.Unix_error (err, fn, arg) ->
       print_error "system error" (fn ^ "(" ^ arg ^ "): " ^ Unix.error_message err)
   | Failure msg -> print_error "error" msg
+  | Invalid_argument msg -> print_error "internal error" ("invalid argument: " ^ msg)
+  | Not_found -> print_error "internal error" "missing value"
+  | Match_failure _ -> print_error "internal error" "pattern match failure"
+  | End_of_file -> print_error "input error" "unexpected end of file"
   | Sys_error msg -> print_error "system error" msg
+  | _ -> print_error "internal error" "unexpected exception"
 
 let command_parse file =
   let p =

@@ -335,7 +335,7 @@ listees dans la section "Gates de validation".
   `HarnessRegression`, `AmbiguousHumanSyntax`, `UnsafeMigration`,
   `PolicyViolation`, `SecretLeakRisk`.
 - [ ] Associer un code stable a chaque erreur publique.
-- [ ] Verifier qu'aucune exception OCaml brute ne fuite dans les erreurs CLI.
+- [x] Verifier qu'aucune exception OCaml brute ne fuite dans les erreurs CLI.
 - [ ] Modeliser les erreurs externes negatives comme evenements ledger.
 - [x] Ajouter helpers `Result` pour erreurs metier dans les examples.
 
