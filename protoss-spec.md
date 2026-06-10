@@ -352,7 +352,10 @@ Preuves de section: `lib/loader.ml`, `lib/workspace.ml`,
 
 Preuves de section: `lib/patch.ml`, `lib/patch_audit.ml`,
 `lib/workspace.ml`, fixtures `patches/*.json`, commandes `protoss patch ...`
-et `protoss diff`, assertions patch/diff/audit dans `test/test_protoss.ml`.
+et `protoss diff`, assertions patch/diff/audit dans `test/test_protoss.ml`;
+serveur MCP stdio `Mcp_server.serve_stdio`, outils `protoss.*` dans
+`Mcp_server.tools`, commande `protoss mcp serve`, assertions "mcp exposes" et
+"mcp query" dans `test/test_protoss.ml`.
 
 - [x] Appliquer des patches JSON atomiques sur store.
 - [x] Verifier les patches avant insertion.
@@ -362,18 +365,18 @@ et `protoss diff`, assertions patch/diff/audit dans `test/test_protoss.ml`.
 - [x] Verifier que `latest` correspond au hash programme courant.
 - [x] Produire `diff`, `diff --json` et `patch from-diff`.
 - [x] Diagnostiquer les erreurs de patch avec fichier, operation, kind et source.
-- [ ] Implementer un serveur MCP Protoss.
-- [ ] Exposer `protoss.query` via MCP.
-- [ ] Exposer `protoss.readNode` via MCP.
-- [ ] Exposer `protoss.renderView` via MCP.
-- [ ] Exposer `protoss.proposePatch` via MCP.
-- [ ] Exposer `protoss.checkPatch` via MCP.
-- [ ] Exposer `protoss.applyPatch` via MCP.
-- [ ] Exposer `protoss.runHarness` via MCP.
-- [ ] Exposer `protoss.explain` via MCP.
-- [ ] Exposer `protoss.normalize` via MCP.
-- [ ] Exposer `protoss.diff` via MCP.
-- [ ] Exposer `protoss.rollback` via MCP.
+- [x] Implementer un serveur MCP Protoss.
+- [x] Exposer `protoss.query` via MCP.
+- [x] Exposer `protoss.readNode` via MCP.
+- [x] Exposer `protoss.renderView` via MCP.
+- [x] Exposer `protoss.proposePatch` via MCP.
+- [x] Exposer `protoss.checkPatch` via MCP.
+- [x] Exposer `protoss.applyPatch` via MCP.
+- [x] Exposer `protoss.runHarness` via MCP.
+- [x] Exposer `protoss.explain` via MCP.
+- [x] Exposer `protoss.normalize` via MCP.
+- [x] Exposer `protoss.diff` via MCP.
+- [x] Exposer `protoss.rollback` via MCP.
 - [ ] Ajouter Patch ADT pour `AddField`, `RemoveField`, `Inline`, `Extract`,
   `AddHarness`, `AddCapability`, `MigrateType`.
 - [ ] Convertir diff texte humain en candidat patch structurel.
@@ -648,14 +651,19 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 ### v0.3 - MCP-first
 
-- [ ] Serveur MCP Protoss.
+- [x] Serveur MCP Protoss.
+  Preuves: `Mcp_server.serve_stdio`, commande `protoss mcp serve`,
+  assertions "mcp initialize" et "mcp exposes" dans `test/test_protoss.ml`.
 - [x] Query graph.
   Preuves: API `Canonical_ir.agent_graph_*_json`, commande
   `protoss agent graph`, assertions "agent graph" dans `test/test_protoss.ml`.
-- [ ] ProposePatch.
-- [ ] CheckPatch.
-- [ ] ApplyPatch.
-- [ ] RenderView.
+- [x] ProposePatch.
+- [x] CheckPatch.
+- [x] ApplyPatch.
+- [x] RenderView.
+  Preuves: outils MCP `protoss.proposePatch`, `protoss.checkPatch`,
+  `protoss.applyPatch`, `protoss.renderView` dans `Mcp_server.tools` et
+  assertions "mcp exposes" dans `test/test_protoss.ml`.
 - [x] Explain CLI minimal.
 
 ### v0.4 - Effects / World ledger

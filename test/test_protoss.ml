@@ -1241,6 +1241,57 @@ let () =
     (List.exists
        (fun note -> contains_substring note "Depends on: two")
        (json_string_array_field "notes" agent_explain));
+  let mcp_response request =
+    match Mcp_server.handle_message request with
+    | Some response -> Json.parse response
+    | None -> fail "MCP request unexpectedly returned no response"
+  in
+  let mcp_init =
+    mcp_response
+      "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}"
+  in
+  let mcp_init_result = json_field "result" mcp_init in
+  assert_equal "mcp initialize protocol" "2025-11-25"
+    (json_string_field "protocolVersion" mcp_init_result);
+  let mcp_tools =
+    mcp_response "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}"
+  in
+  let mcp_tool_names =
+    json_array_field "tools" (json_field "result" mcp_tools)
+    |> List.map (json_string_field "name")
+  in
+  List.iter
+    (fun name ->
+      assert_true ("mcp exposes " ^ name) (List.exists (String.equal name) mcp_tool_names))
+    [
+      "protoss.query";
+      "protoss.readNode";
+      "protoss.renderView";
+      "protoss.proposePatch";
+      "protoss.checkPatch";
+      "protoss.applyPatch";
+      "protoss.runHarness";
+      "protoss.explain";
+      "protoss.normalize";
+      "protoss.diff";
+      "protoss.rollback";
+    ];
+  let mcp_graph_dir = temp_dir "mcp-graph" in
+  ensure_dir mcp_graph_dir;
+  let mcp_graph_path = Filename.concat mcp_graph_dir "graph.json" in
+  write_file mcp_graph_path dep_graph_json;
+  let mcp_query =
+    mcp_response
+      ("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"protoss.query\",\"arguments\":{\"graphPath\":"
+      ^ Ast.quote mcp_graph_path ^ ",\"query\":\"definitions\"}}}")
+  in
+  let mcp_query_result = json_field "result" mcp_query in
+  assert_true "mcp query result is not error" (not (json_bool_field "isError" mcp_query_result));
+  let mcp_query_structured = json_field "structuredContent" mcp_query_result in
+  assert_equal "mcp query structured format" "protoss-agent-graph-v1"
+    (json_string_field "format" mcp_query_structured);
+  assert_equal "mcp query structured query" "definitions"
+    (json_string_field "query" mcp_query_structured);
   let duplicate_ref_checked = check "(def a Nat 1)\n(def b Nat 1)\n(def c Nat b)" in
   let duplicate_ref_graph_json = Canonical_ir.serialize_graph duplicate_ref_checked in
   let duplicate_ref_roundtrip =

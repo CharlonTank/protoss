@@ -56,6 +56,7 @@ let usage () =
      \       protoss agent graph --store-graph <project-or-store> <graphHash> [--summary|--stats|--roots|--deps [nameOrDefId]|--capabilities|--capability <nameOrCapRef>|--capability-scopes [nameOrCapRef]|--host-contract|--node <nodeRef>|--def <nameOrDefId>|--explain <nameOrDefId>]\n\
      \       protoss agent explain <graph.json> <nameOrDefId> | protoss agent explain --store-graph <project-or-store> <graphHash> <nameOrDefId>\n\
      \       protoss agent protocol | guard-write <path> | commit <store> <patch.json>\n\
+     \       protoss mcp serve\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
      \       protoss grammar kernel\n\
@@ -1039,6 +1040,10 @@ let command_agent = function
            (Protoss.Store.read_file file) id)
   | _ -> usage ()
 
+let command_mcp = function
+  | [ "serve" ] -> Protoss.Mcp_server.serve_stdio ()
+  | _ -> usage ()
+
 let command_repl () =
   print_endline "Protoss REPL. Enter a single expression or EOF.";
   try
@@ -1444,6 +1449,7 @@ let () =
       | "fmt" :: args -> command_fmt args
       | "graph" :: args -> command_graph args
       | "agent" :: args -> command_agent args
+      | "mcp" :: args -> command_mcp args
       | [ "repl" ] -> command_repl ()
       | "explain" :: args -> command_explain args
       | "grammar" :: args -> command_grammar args
