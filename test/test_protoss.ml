@@ -2124,6 +2124,11 @@ let () =
     (Kernel.hash_string
        ("protoss.eval.v1\ndef-id=p2:def\nargs-hash=p2:args\nruntime-policy=policy"))
     (Runtime.eval_key ~def_id:"p2:def" ~args_hash:"p2:args" ~runtime_policy:"policy");
+  assert_equal "process eval key explicit shape"
+    (Kernel.hash_string
+       ("protoss.process.eval.v1\ndef-id=p2:def\nworld-ref=p2:world\ncap-scope=Human.ask\nruntime-policy=policy"))
+    (Runtime.process_eval_key ~def_id:"p2:def" ~world_ref:"p2:world"
+       ~cap_scope:[ "Human.ask" ] ~runtime_policy:"policy");
   assert_true "eval key uses content hash prefix"
     (contains_substring eval_key_b "p2:");
   assert_true "eval key partitions by runtime policy"
@@ -2138,6 +2143,19 @@ let () =
   assert_true "runtime policy records capability scope"
     (contains_substring (Runtime.eval_runtime_policy ~cap_scope:[ "Human.ask" ] memo)
        "cap-scope=Human.ask");
+  let process_eval_key_world_a =
+    Runtime.process_eval_key_for_def ~world_ref:"p2:world-a" ~cap_scope:[ "Human.ask" ] memo "b"
+  in
+  let process_eval_key_world_b =
+    Runtime.process_eval_key_for_def ~world_ref:"p2:world-b" ~cap_scope:[ "Human.ask" ] memo "b"
+  in
+  let process_eval_key_cap_scope =
+    Runtime.process_eval_key_for_def ~world_ref:"p2:world-a" ~cap_scope:[ "Clock.read" ] memo "b"
+  in
+  assert_true "process eval key partitions by WorldRef"
+    (not (String.equal process_eval_key_world_a process_eval_key_world_b));
+  assert_true "process eval key partitions by CapScope"
+    (not (String.equal process_eval_key_world_a process_eval_key_cap_scope));
   let _, _ = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let _, persistent_trace = Runtime.eval_entry ~trace_cache:true ~cache_dir memo "b" in
   let _, _ =

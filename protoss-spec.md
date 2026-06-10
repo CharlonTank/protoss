@@ -166,7 +166,10 @@ listees dans la section "Gates de validation".
   DefId dans `lib/runtime.ml`, assertions "eval key" dans `test/test_protoss.ml`
   et `README.md`.
 - [x] Ajouter un cache d'evaluation pure persistent.
-- [ ] Implementer `EvalKey` avec `WorldRef` et `CapScope` pour processus.
+- [x] Implementer `EvalKey` avec `WorldRef` et `CapScope` pour processus.
+  Preuves: `Runtime.process_eval_key`, `Runtime.process_eval_key_for_def`,
+  sortie `ProcessEvalKey` de `protoss run`, assertions "process eval key ..."
+  dans `test/test_protoss.ml` et `README.md`.
 - [x] Ajouter une commande d'inspection des entrees de cache.
 - [x] Partitionner le cache par politique runtime.
   Preuves: `Runtime.runtime_policy_text`, `app-v5` cache keys et assertions

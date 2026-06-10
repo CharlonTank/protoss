@@ -355,9 +355,15 @@ let run_checked checked args =
   let value, _ = Protoss.Runtime.eval_entry checked entry in
   match value with
   | Protoss.Runtime.VProcessDone v ->
+      Printf.printf "ProcessEvalKey %s\n"
+        (Protoss.Runtime.process_eval_key_for_def ~world_ref:Protoss.Ledger.initial_world checked
+           entry);
       Printf.printf "Done %s\n" (Protoss.Runtime.value_to_string v)
   | Protoss.Runtime.VProcessRequest s ->
       let root = Option.value (find_arg "--ledger" args) ~default:(Filename.concat "target" "ledger") in
+      Printf.printf "ProcessEvalKey %s\n"
+        (Protoss.Runtime.process_eval_key_for_def ~world_ref:Protoss.Ledger.initial_world
+           ~cap_scope:s.cap_scope checked entry);
       let event, next_world =
         Protoss.Ledger.record_request root Protoss.Ledger.initial_world s.req
           (Protoss.Runtime.serialize_suspended s)

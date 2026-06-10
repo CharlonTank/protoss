@@ -6,12 +6,22 @@ let runtime_version = "protoss-runtime-v2"
 
 let eval_cache_version = "protoss.eval.v1"
 
+let process_eval_cache_version = "protoss.process.eval.v1"
+
 let no_args_hash = Kernel.hash_string "protoss.eval.args.v1\n()"
+
+let capability_scope_text caps =
+  String.concat " " (List.sort_uniq String.compare caps)
 
 let eval_key ~def_id ~args_hash ~runtime_policy =
   Kernel.hash_string
     (eval_cache_version ^ "\ndef-id=" ^ def_id ^ "\nargs-hash=" ^ args_hash
    ^ "\nruntime-policy=" ^ runtime_policy)
+
+let process_eval_key ~def_id ~world_ref ~cap_scope ~runtime_policy =
+  Kernel.hash_string
+    (process_eval_cache_version ^ "\ndef-id=" ^ def_id ^ "\nworld-ref=" ^ world_ref
+   ^ "\ncap-scope=" ^ capability_scope_text cap_scope ^ "\nruntime-policy=" ^ runtime_policy)
 
 type value =
   | VUnit
@@ -87,9 +97,6 @@ type eval_state = {
   mutable recur_stack : recur_frame list;
   mutable cap_scope : string list;
 }
-
-let capability_scope_text caps =
-  String.concat " " (List.sort_uniq String.compare caps)
 
 let runtime_policy_text ~cap_scope ~cache_scope ~stdlib_fast_paths =
   "runtime=" ^ runtime_version ^ "\ncache-scope=" ^ cache_scope
@@ -1032,6 +1039,17 @@ let eval_key_for_def ?(stdlib_fast_paths = false) ?cache_scope ?cap_scope checke
         match cap_scope with Some caps -> caps | None -> d.capabilities
       in
       eval_key ~def_id:d.def_id ~args_hash:no_args_hash
+        ~runtime_policy:(eval_runtime_policy ~stdlib_fast_paths ?cache_scope ~cap_scope checked)
+
+let process_eval_key_for_def ?(stdlib_fast_paths = false) ?cache_scope ?cap_scope ~world_ref
+    checked name =
+  match def_by_ref checked name with
+  | None -> fail ("unknown definition for process eval key: " ^ name)
+  | Some d ->
+      let cap_scope =
+        match cap_scope with Some caps -> caps | None -> d.capabilities
+      in
+      process_eval_key ~def_id:d.def_id ~world_ref ~cap_scope
         ~runtime_policy:(eval_runtime_policy ~stdlib_fast_paths ?cache_scope ~cap_scope checked)
 
 (* Normal forms are pure functions of the program, yet the default
