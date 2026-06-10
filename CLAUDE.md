@@ -19,6 +19,8 @@ Policy names are executable, not just descriptor text: for example
 Package aliases are local manifest entries (`package_aliases = ["name@semver=path"]` or
 `package_policy_aliases = ["name@policy=path"]`) and must validate the imported package
 name/version or advertised policy before resolving to the locked package hash.
+`protoss grammar kernel` is the stable executable grammar surface for the trusted core; update
+`Kernel.executable_grammar_text` when adding core forms.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

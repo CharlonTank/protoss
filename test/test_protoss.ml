@@ -222,6 +222,12 @@ let () =
     (string_of_int (List.length spec_missing.missing));
   assert_true "spec audit report names missing line"
     (contains_substring (Spec_audit.report_text spec_missing) "line 3");
+  assert_true "kernel executable grammar exposes defs"
+    (contains_substring Kernel.executable_grammar_text "declaration ::= (def Name type expr)");
+  assert_true "kernel executable grammar exposes Process"
+    (contains_substring Kernel.executable_grammar_text "Process");
+  assert_true "kernel executable grammar exposes requests"
+    (contains_substring Kernel.executable_grammar_text "request ::= (AskHuman String)");
   assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
 let expect_parse_error input =

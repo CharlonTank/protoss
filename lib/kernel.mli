@@ -214,6 +214,7 @@ val cbranch_global_refs : cbranch -> string list
 val cterm_to_string : cterm -> string
 val cbranch_to_string : cbranch -> string
 val canonical_version : string
+val executable_grammar_text : string
 type canonical_def = {
   cname : string;
   cdef_id : string;

@@ -165,7 +165,10 @@ assertions recursion, alpha-stabilite et normalisation dans `test/test_protoss.m
 - [x] Supporter `defrec` Nat/List/Variant structurel.
 - [x] Supporter `defrecpoly` structurel polymorphe.
 - [x] Tester la stabilite alpha et les hashes equivalents.
-- [ ] Formaliser le noyau dans la spec avec grammaire executable.
+- [x] Formaliser le noyau dans la spec avec grammaire executable.
+  Preuves: `Kernel.executable_grammar_text`, commande
+  `protoss grammar kernel`, assertions "kernel executable grammar ..." dans
+  `test/test_protoss.ml` et `README.md`.
 - [ ] Supporter la recursion bien fondee au-dela de Nat/List/Variant directs.
 - [ ] Supporter tailles statiques pour terminaison.
 - [ ] Supporter coinduction productive.

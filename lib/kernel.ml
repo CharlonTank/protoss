@@ -2184,6 +2184,42 @@ and cbranch_to_string = function
 
 let canonical_version = "protoss-canon-v2"
 
+let executable_grammar_text =
+  String.concat "\n"
+    [
+      "protoss-kernel-grammar-v1";
+      "program ::= declaration*";
+      "declaration ::= (capabilities Capability*) | (module Name) | (export Name*)";
+      "declaration ::= (type Name type-params? type) | (record Name type-params? field*)";
+      "declaration ::= (variant Name type-params? variant-case*)";
+      "declaration ::= (def Name type expr)";
+      "declaration ::= (defpoly Name (params TypeName*) type expr)";
+      "declaration ::= (defcap Name (capabilities Capability*) type expr)";
+      "declaration ::= (defpolycap Name (params TypeName*) (capabilities Capability*) type expr)";
+      "declaration ::= (defrec Name type-params? type recursion-body)";
+      "type ::= Unit | Bool | Nat | String | (-> type type) | (List type) | (Process type)";
+      "type ::= (Record field*) | (Variant variant-case*) | (Named Name type*) | TypeName";
+      "expr ::= unit | true | false | Nat | String | Name | (lambda binder+ expr)";
+      "expr ::= (let binding expr) | (record field*) | (get expr Field)";
+      "expr ::= (variant type Constructor expr) | (inst Name type*)";
+      "expr ::= (case expr branch*) | (foldNat expr expr expr) | (foldList expr expr expr)";
+      "expr ::= (foldVariant type type expr branch*) | recur";
+      "expr ::= (Nil type) | (Cons type expr expr) | (caseList expr expr Name Name expr)";
+      "expr ::= (text expr) | (image expr expr) | (button expr expr) | (input expr expr)";
+      "expr ::= (column expr) | (row expr) | (list expr expr) | (when expr expr)";
+      "expr ::= (node expr expr expr) | (attr expr expr) | (on expr expr)";
+      "expr ::= (done expr) | (request request) | (bind expr binder expr)";
+      "request ::= (AskHuman String) | (HttpGet String) | ReadClock";
+      "request ::= (SaveLocal String String) | (LoadLocal String)";
+      "request ::= (ServerRequest String String)";
+      "field ::= (Name type) | (Name expr)";
+      "variant-case ::= (Constructor type)";
+      "branch ::= (true expr) | (false expr) | (Constructor binder? expr) | (_ expr)";
+      "binder ::= Name | (Name type)";
+      "type-params ::= (params TypeName*)";
+      "";
+    ]
+
 type canonical_def = {
   cname : string;
   cdef_id : string;
