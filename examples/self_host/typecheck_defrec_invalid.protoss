@@ -1,0 +1,4 @@
+(defrec badCount (-> Nat Nat)
+  (nat n)
+  (zero 0)
+  (step acc true))

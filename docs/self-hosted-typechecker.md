@@ -26,7 +26,8 @@ Supported in the current kernel-checked subset:
 - `Unit`, `Bool`, `Nat`, `String`
 - `List A` for annotated `Nil` and expected-context `Nil`/`Cons`
 - function types
-- top-level `def`, `defcap`, `defpoly`, and `defpolycap`
+- top-level `def`, `defcap`, `defpoly`, `defpolycap`, and Nat/List
+  `defrec`/`defrecpoly`
 - annotated lambdas, with structural checking of direct body subterms
 - `let` bindings, with structural checking of direct value/body subterms
 - `foldNat`, `foldList`, `foldVariant`, `caseList`, records, fields, explicit
@@ -54,8 +55,8 @@ Supported in the current kernel-checked subset:
 Unsupported constructs are reported with `SELF_TC004` instead of being silently
 accepted. A `Process` value bound by `let` is rejected when the surrounding
 expected type is pure, matching the trusted OCaml kernel rule. Remaining gaps
-include deeper already-applied prefix list tails whose tail also needs
-expected-context-only checking without an annotation. The next step toward a
-fuller self-hosted checker is to cover those constructs while continuing to
-route all recursive expression traversal through kernel-accepted structural
-paths before attempting a self-hosted canonicalizer.
+include `defrec`/`defrecpoly` over variants and deeper already-applied prefix
+list tails whose tail also needs expected-context-only checking without an
+annotation. The next step toward a fuller self-hosted checker is to cover those
+constructs while continuing to route all recursive expression traversal through
+kernel-accepted structural paths before attempting a self-hosted canonicalizer.

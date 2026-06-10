@@ -5933,6 +5933,41 @@ let () =
         (contains_substring got "\"name\":\"main\"");
       assert_true "self typecheck defpolycap has no unsupported constructs"
         (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_defrec"
+    "examples/self_host/typecheck_defrec.protoss"
+    (fun got ->
+      assert_true "self typecheck defrec reports ok"
+        (contains_substring got "\"status\":\"ok\"");
+      assert_true "self typecheck defrec reports Nat recursion"
+        (contains_substring got "\"name\":\"count\"");
+      assert_true "self typecheck defrec reports List recursion"
+        (contains_substring got "\"name\":\"bump\"");
+      assert_true "self typecheck defrec reports polymorphic List recursion"
+        (contains_substring got "\"name\":\"copy\"");
+      assert_true "self typecheck defrec has no unsupported constructs"
+        (contains_substring got "\"unsupported\":[]"));
+  register_self_tc_file "__tc_file_defrec_invalid"
+    "examples/self_host/typecheck_defrec_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck defrec invalid reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck defrec invalid reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck defrec invalid reports definition"
+        (contains_substring got "\"definition\":\"badCount\"");
+      assert_true "self typecheck defrec invalid reports Bool actual"
+        (contains_substring got "\"actual\":\"Bool\""));
+  register_self_tc_file "__tc_file_defrec_list_input_invalid"
+    "examples/self_host/typecheck_defrec_list_input_invalid.protoss"
+    (fun got ->
+      assert_true "self typecheck defrec list input reports error"
+        (contains_substring got "\"status\":\"error\"");
+      assert_true "self typecheck defrec list input reports mismatch"
+        (contains_substring got "\"code\":\"SELF_TC002\"");
+      assert_true "self typecheck defrec list input reports definition"
+        (contains_substring got "\"definition\":\"badList\"");
+      assert_true "self typecheck defrec list input explains List"
+        (contains_substring got "defrec list input must be List"));
   register_self_tc_file "__tc_file_inferred_variants"
     "examples/self_host/typecheck_inferred_variants.protoss"
     (fun got ->

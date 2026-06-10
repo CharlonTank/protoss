@@ -1,0 +1,4 @@
+(defrec badList (-> Nat Nat)
+  (list xs)
+  (nil 0)
+  (cons item acc acc))

@@ -1,0 +1,26 @@
+(defrec count (-> Nat Nat)
+  (nat n)
+  (zero 0)
+  (step acc (succ acc)))
+
+(def four Nat
+  (count 4))
+
+(defrec bump (-> (List Nat) (List Nat))
+  (list xs)
+  (nil (Nil Nat))
+  (cons item acc (Cons Nat (succ item) acc)))
+
+(def numbers (List Nat)
+  (Cons Nat 1 (Cons Nat 2 (Nil Nat))))
+
+(def bumped (List Nat)
+  (bump numbers))
+
+(defrecpoly copy (params A) (-> (List A) (List A))
+  (list xs)
+  (nil (Nil A))
+  (cons item acc (Cons A item acc)))
+
+(def copied (List String)
+  (copy (Cons String "a" (Nil String))))

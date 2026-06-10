@@ -6493,6 +6493,13 @@
         (PDDefCap def (((TermEnv.insert (get def name)) (get def typ)) env))
         (PDDefPoly def ((((TermEnv.insertPoly (get def name)) (get def typeParams)) (get def typ)) env))
         (PDDefPolyCap def ((((TermEnv.insertPoly (get def name)) (get def typeParams)) (get def typ)) env))
+        (PDDefRec def
+          (caseList (get def typeParams)
+            (Nil (((TermEnv.insert (get def name)) (get def typ)) env))
+            (Cons first rest
+              ((((TermEnv.insertPoly (get def name)) (get def typeParams))
+                (get def typ))
+                env))))
         (_ env)))))
 
 (def Protoss.tcTermEnvOfDecls (-> (List Decl) TermEnv)
@@ -8434,6 +8441,95 @@
                   actual)
                   (Protoss.renderExpr (get def expr)))))))))))
 
+(def Protoss.tcCheckDefRecNat
+  (-> TypeEnv (-> TermEnv (-> TypeExpr (-> TypeExpr (-> ProtossDefRecNat
+    (Result TypeError TypeExpr))))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (termEnv TermEnv)
+      (lambda (input TypeExpr)
+        (lambda (result TypeExpr)
+          (lambda (body ProtossDefRecNat)
+            (case (((Protoss.tcTypeEq typeEnv) Protoss.tcNat) input)
+              (false
+                ((((Protoss.tcMismatch Protoss.tcNoDef) Protoss.tcNat) input)
+                  "defrec nat input"))
+              (true
+                (let (paramEnv TermEnv
+                  (((TermEnv.insert (get body param)) input) termEnv))
+                  (case ((((Protoss.tcCheckExprAs typeEnv) paramEnv) result)
+                          (get body zero))
+                    (Err err (variant Err err))
+                    (Ok checkedZero
+                      (let (stepEnv TermEnv
+                        (((TermEnv.insert (get body acc)) result) paramEnv))
+                        (case ((((Protoss.tcCheckExprAs typeEnv) stepEnv) result)
+                                (get body step))
+                          (Err err (variant Err err))
+                          (Ok checkedStep
+                            (Protoss.tcOk ((Protoss.tcFun input) result))))))))))))))))
+
+(def Protoss.tcCheckDefRecListInputError
+  (-> TypeExpr (Result TypeError TypeExpr))
+  (lambda (input TypeExpr)
+    (Protoss.tcErr
+      ((((((Protoss.tcError "SELF_TC002") Protoss.tcNoDef)
+        Protoss.tcNoType)
+        (Protoss.tcSomeType input))
+        "defrec list input")
+        "defrec list input must be List"))))
+
+(def Protoss.tcCheckDefRecList
+  (-> TypeEnv (-> TermEnv (-> TypeExpr (-> TypeExpr (-> ProtossDefRecList
+    (Result TypeError TypeExpr))))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (termEnv TermEnv)
+      (lambda (input TypeExpr)
+        (lambda (result TypeExpr)
+          (lambda (body ProtossDefRecList)
+            (case ((Protoss.tcListItemType typeEnv) input)
+              (None _ (Protoss.tcCheckDefRecListInputError input))
+              (Some itemType
+                (let (paramEnv TermEnv
+                  (((TermEnv.insert (get body param)) input) termEnv))
+                  (case ((((Protoss.tcCheckExprAs typeEnv) paramEnv) result)
+                          (get body nil))
+                    (Err err (variant Err err))
+                    (Ok checkedNil
+                      (let (stepEnv TermEnv
+                        (((TermEnv.insert (get body item)) itemType)
+                          (((TermEnv.insert (get body acc)) result) paramEnv)))
+                        (case ((((Protoss.tcCheckExprAs typeEnv) stepEnv) result)
+                                (get body step))
+                          (Err err (variant Err err))
+                          (Ok checkedStep
+                            (Protoss.tcOk ((Protoss.tcFun input) result))))))))))))))))
+
+(def Protoss.tcCheckDefRec
+  (-> TypeEnv (-> TermEnv (-> ProtossDefRec (Result TypeError TypeExpr))))
+  (lambda (typeEnv TypeEnv)
+    (lambda (termEnv TermEnv)
+      (lambda (def ProtossDefRec)
+        (let (checked (Result TypeError TypeExpr)
+          (case (get def typ)
+            (PTFun pair
+              (case (get def body)
+                (PDRNat body
+                  (((((Protoss.tcCheckDefRecNat typeEnv) termEnv)
+                    (get pair first))
+                    (get pair second))
+                    body))
+                (PDRList body
+                  (((((Protoss.tcCheckDefRecList typeEnv) termEnv)
+                    (get pair first))
+                    (get pair second))
+                    body))
+                (PDRVariant body
+                  ((Protoss.tcUnsupported Protoss.tcNoDef) "defrec variant"))))
+            (_ ((Protoss.tcUnsupported Protoss.tcNoDef) "defrec requires function type"))))
+          (case checked
+            (Err err (variant Err ((Protoss.tcErrorWithDefinition (get def name)) err)))
+            (Ok actual (Protoss.tcOk actual))))))))
+
 (def Protoss.tcDeclStep
   (-> TypeEnv (-> TermEnv (-> Decl (-> TypecheckState TypecheckState))))
   (lambda (typeEnv TypeEnv)
@@ -8456,12 +8552,17 @@
 		                  (case (((Protoss.tcCheckPolyDef typeEnv) termEnv) def)
 		                    (Err err ((TypecheckState.withError err) state))
 		                    (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))
-	                (PDDefPolyCap def
-	                  (case (((Protoss.tcCheckPolyCapDef typeEnv) termEnv) def)
-	                    (Err err ((TypecheckState.withError err) state))
-	                    (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))
+                (PDDefPolyCap def
+                  (case (((Protoss.tcCheckPolyCapDef typeEnv) termEnv) def)
+                    (Err err ((TypecheckState.withError err) state))
+                    (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))
                 (PDDefRec def
-                  ((TypecheckState.addUnsupported (get def name)) state))
+                  (case (get def body)
+                    (PDRVariant body ((TypecheckState.addUnsupported (get def name)) state))
+                    (_
+                      (case (((Protoss.tcCheckDefRec typeEnv) termEnv) def)
+                        (Err err ((TypecheckState.withError err) state))
+                        (Ok typ (((TypecheckState.addDefinition (get def name)) typ) state))))))
                 (_ state)))))))))
 
 (def Protoss.tcDecls (-> (List Decl) (Result TypeError TypecheckReport))
