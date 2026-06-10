@@ -283,7 +283,10 @@ scope refs, package negative capabilities et SecretLeakRisk dans
   `NoNetworkExceptDeclared` aux capabilities reseau, assertions
   "NoNetworkExceptDeclared ..." dans `test/test_protoss.ml`, `README.md` et
   `CLAUDE.md`.
-- [ ] Ajouter tests de fuite de secret.
+- [x] Ajouter tests de fuite de secret.
+  Preuves: fixture `examples/secret_leak_risk.protoss`, assertion
+  "SecretLeakRisk detects local storage plus outbound request" dans
+  `test/test_protoss.ml`, `README.md`.
 - [x] Exposer une commande d'audit des capabilities par root.
 
 ## 10. Modules, imports et packages

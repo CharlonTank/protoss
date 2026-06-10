@@ -3481,12 +3481,8 @@ let () =
   assert_sensor_request "askSensor"
     (Ast.ServerRequest ("/sensor/read", "{\"sensor\":\"temperature\"}"))
     "Server.request";
-  let secret_leak_risk =
-    check
-      "(capabilities Local.storage Http.get)\n\
-       (defcap risky (capabilities Local.storage Http.get) (Process String)\n\
-       \  (bind (Local.load \"token\") (lambda (token String) (Http.get \"https://example.invalid\"))))"
-  in
+  let secret_leak_risk_path = find_up (Sys.getcwd ()) "examples/secret_leak_risk.protoss" in
+  let secret_leak_risk = Loader.check_file secret_leak_risk_path in
   assert_true "SecretLeakRisk detects local storage plus outbound request"
     (List.exists
        (fun line ->

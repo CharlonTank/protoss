@@ -22,6 +22,7 @@
  (name test-fixtures)
  (deps
   %{workspace_root}/stdlib/prelude.protoss
+  %{workspace_root}/examples/secret_leak_risk.protoss
   (glob_files %{workspace_root}/examples/*.protoss)
   (glob_files %{workspace_root}/examples/*.pt)
   (glob_files %{workspace_root}/examples/*.ptc)
