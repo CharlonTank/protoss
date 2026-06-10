@@ -85,6 +85,15 @@ let sanitize_name name =
 
 let objects_dir root = Filename.concat root "objects"
 
+let global_store_root () =
+  match Sys.getenv_opt "PROTOSS_GLOBAL_STORE" with
+  | Some "" -> None
+  | Some path -> Some path
+  | None -> (
+      match Sys.getenv_opt "HOME" with
+      | Some home when home <> "" -> Some (Filename.concat home ".protoss/global-store")
+      | _ -> None)
+
 let graphs_dir root = Filename.concat root "graphs"
 
 let defs_dir root = Filename.concat root "defs"
@@ -102,6 +111,21 @@ let ensure_store root =
 
 let object_path root hash = Filename.concat (objects_dir root) hash
 
+let same_file_path a b =
+  try
+    let a = Unix.realpath a and b = Unix.realpath b in
+    String.equal a b
+  with Unix.Unix_error _ -> String.equal a b
+
+let write_global_object hash payload =
+  match global_store_root () with
+  | None -> None
+  | Some root ->
+      ensure_store root;
+      let path = object_path root hash in
+      if not (Sys.file_exists path) then write_file_atomic path payload;
+      Some path
+
 let graph_path root graph_hash =
   Filename.concat (graphs_dir root) (sanitize_name graph_hash ^ ".graph.json")
 
@@ -114,7 +138,11 @@ let put_object root kind content =
   let payload = "kind=" ^ kind ^ "\n" ^ content in
   let hash = Hashcons.hash payload in
   let path = object_path root hash in
-  if not (Sys.file_exists path) then write_file_atomic path payload;
+  if not (Sys.file_exists path) then (
+    match write_global_object hash payload with
+    | Some global_path when not (same_file_path global_path path) -> (
+        try Unix.link global_path path with Unix.Unix_error _ -> write_file_atomic path payload)
+    | _ -> write_file_atomic path payload);
   hash
 
 let def_path root name = Filename.concat (defs_dir root) (sanitize_name name ^ ".protoss")

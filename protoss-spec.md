@@ -59,8 +59,14 @@ Preuves de section: `lib/ast.ml`, `lib/kernel.ml`, `lib/canonical_ir.ml`,
   assertions "project universe root ..." dans `test/test_protoss.ml` et
   `README.md`.
 - [ ] Faire du `UniverseRoot` la source de verite de toutes les commandes projet.
-- [ ] Ajouter un store global partage entre projets pour l'interning des noeuds.
-- [ ] Dedupliquer physiquement les noeuds identiques entre projets distincts.
+- [x] Ajouter un store global partage entre projets pour l'interning des noeuds.
+  Preuves: `Store.global_store_root`, `Store.put_object`, variable
+  `PROTOSS_GLOBAL_STORE`, assertion "global store writes shared object" dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Dedupliquer physiquement les noeuds identiques entre projets distincts.
+  Preuves: hardlink depuis `Store.put_object` vers le store global, assertions
+  "global store project ... hardlink inode" dans `test/test_protoss.ml`,
+  `README.md`.
 - [x] Exposer une commande de comparaison semantique entre deux roots.
 - [ ] Ajouter une provenance native liee aux roots et patches.
 

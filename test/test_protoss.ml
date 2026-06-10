@@ -4540,6 +4540,42 @@ let () =
   let h2 = Store.put_object dedupe_store "test" "same" in
   assert_equal "store dedupe hash" h1 h2;
   assert_true "store dedupe object count" (List.length (Store.list_objects dedupe_store) = 1);
+  let old_global_store = Sys.getenv_opt "PROTOSS_GLOBAL_STORE" in
+  let restore_global_store () =
+    match old_global_store with
+    | Some value -> Unix.putenv "PROTOSS_GLOBAL_STORE" value
+    | None -> (
+        match Sys.getenv_opt "HOME" with
+        | Some home when home <> "" ->
+            Unix.putenv "PROTOSS_GLOBAL_STORE" (Filename.concat home ".protoss/global-store")
+        | _ -> Unix.putenv "PROTOSS_GLOBAL_STORE" "")
+  in
+  let global_store = temp_dir "global-store" in
+  Fun.protect
+    ~finally:restore_global_store
+    (fun () ->
+      Unix.putenv "PROTOSS_GLOBAL_STORE" global_store;
+      let global_project_a = temp_dir "global-project-a" in
+      let global_project_b = temp_dir "global-project-b" in
+      let global_hash_a = Store.put_object global_project_a "test" "cross-project" in
+      let global_hash_b = Store.put_object global_project_b "test" "cross-project" in
+      assert_equal "global store cross-project hash" global_hash_a global_hash_b;
+      let global_object = Store.object_path global_store global_hash_a in
+      let object_a = Store.object_path global_project_a global_hash_a in
+      let object_b = Store.object_path global_project_b global_hash_b in
+      assert_true "global store writes shared object" (Sys.file_exists global_object);
+      let global_stat = Unix.stat global_object in
+      let stat_a = Unix.stat object_a in
+      let stat_b = Unix.stat object_b in
+      assert_equal "global store project a hardlink device"
+        (string_of_int global_stat.Unix.st_dev)
+        (string_of_int stat_a.Unix.st_dev);
+      assert_equal "global store project a hardlink inode"
+        (string_of_int global_stat.Unix.st_ino)
+        (string_of_int stat_a.Unix.st_ino);
+      assert_equal "global store project b hardlink inode"
+        (string_of_int global_stat.Unix.st_ino)
+        (string_of_int stat_b.Unix.st_ino));
 
   if integration_part "workspace" then (
   trace_test "integration:start";
