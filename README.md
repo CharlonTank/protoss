@@ -140,6 +140,8 @@ dune exec protoss -- invariants ledger --store-graph examples/workspace <graphHa
 dune exec protoss -- invariants package examples/workspace
 dune exec protoss -- explain WEB007
 dune exec protoss -- bench build examples/web/todo_app
+dune exec protoss -- cache stats .protoss/cache
+dune exec protoss -- cache list .protoss/cache
 ```
 
 Compatibility commands from earlier MVPs still work:

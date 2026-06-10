@@ -142,9 +142,9 @@ listees dans la section "Gates de validation".
 - [ ] Prouver par test qu'un let non force n'evalue pas son RHS.
 - [ ] Implementer `EvalKey = H("protoss.eval.v1", DefId, ArgsHash, RuntimePolicy)`
   pour les evaluations pures.
-- [ ] Ajouter un cache d'evaluation pure persistent.
+- [x] Ajouter un cache d'evaluation pure persistent.
 - [ ] Implementer `EvalKey` avec `WorldRef` et `CapScope` pour processus.
-- [ ] Ajouter une commande d'inspection des entrees de cache.
+- [x] Ajouter une commande d'inspection des entrees de cache.
 - [ ] Partitionner le cache par politique runtime.
 
 ## 7. Effets, Process et monde
@@ -389,7 +389,7 @@ listees dans la section "Gates de validation".
 - [x] Package roots prototype.
 - [x] Imports locaux verrouilles par hash.
 - [ ] Imports par hash en syntaxe source.
-- [ ] Cache d'evaluation.
+- [x] Cache d'evaluation.
 - [x] Diff structurel prototype.
 - [ ] Store global cross-project.
 

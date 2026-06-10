@@ -405,6 +405,14 @@ let persistent_cache_stats dir =
   in
   (hits, misses, entries)
 
+let persistent_cache_entries dir =
+  if not (Sys.file_exists dir) then []
+  else
+    Sys.readdir dir |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".cache")
+    |> List.map (fun f -> String.sub f 0 (String.length f - String.length ".cache"))
+    |> List.sort String.compare
+
 (* Global references are resolved on every [CGlobal]/[CInst] evaluation, so a
    linear scan over all definitions dominates large programs. The index keeps
    the first definition per name/def_id, matching [List.find_opt] order. *)

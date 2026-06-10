@@ -53,7 +53,7 @@ let usage () =
      \       protoss repl\n\
      \       protoss explain <error-code>\n\
      \       protoss bench build <project>\n\
-     \       protoss cache stats <dir>\n\
+     \       protoss cache stats|list <dir>\n\
      \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats [args]";
   exit 2
 
@@ -525,6 +525,9 @@ let command_cache = function
   | [ "stats"; root ] ->
       let hits, misses, entries = Protoss.Runtime.persistent_cache_stats root in
       Printf.printf "hits=%d\nmisses=%d\nentries=%d\n" hits misses entries
+  | [ "list"; root ] ->
+      Protoss.Runtime.persistent_cache_entries root
+      |> List.iter print_endline
   | _ -> usage ()
 
 let is_flag s = String.length s > 0 && s.[0] = '-'
