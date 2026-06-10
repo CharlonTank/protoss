@@ -3064,6 +3064,34 @@ let () =
   let module_checked = Loader.check_file module_app in
   let module_result, _ = Runtime.normalize_def module_checked "result" in
   assert_equal "module export with private dependency" "6" (Runtime.value_to_string module_result);
+  let human_module_math = Filename.concat module_root "human_math.protoss" in
+  let human_module_app = Filename.concat module_root "human_app.protoss" in
+  let human_module_bad = Filename.concat module_root "human_bad.protoss" in
+  write_file human_module_math
+    ("module Demo.HumanMath exposing (Number, double)\n\
+      import " ^ Ast.quote stdlib_path ^ " exposing (..)\n\n\
+      type alias Number = Nat\n\n\
+      hidden : Number\n\
+      hidden = 2\n\n\
+      double : Number -> Number\n\
+      double x = x + hidden\n");
+  write_file human_module_app
+    "import \"human_math.protoss\" exposing (double)\n\n\
+     result : Demo.HumanMath.Number\n\
+     result = Demo.HumanMath.double 4\n";
+  let human_module_checked = Loader.check_file human_module_app in
+  let human_module_result, _ = Runtime.normalize_def human_module_checked "result" in
+  assert_equal "human module exposing import" "6"
+    (Runtime.value_to_string human_module_result);
+  write_file human_module_bad
+    "import \"human_math.protoss\" exposing (hidden)\n\n\
+     leak : Demo.HumanMath.Number\n\
+     leak = Demo.HumanMath.hidden\n";
+  (try
+     ignore (Loader.check_file human_module_bad);
+     fail "human import exposing should not bypass module exports"
+   with Loader.Error msg ->
+     assert_true "human import exposing private module export error" (String.contains msg 'e'));
   write_file module_bad
     "(import \"math.protoss\")\n(def leak Demo.Math.Number Demo.Math.hidden)\n";
   (try

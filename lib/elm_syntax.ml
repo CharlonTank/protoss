@@ -784,6 +784,67 @@ let parse_type_decl text =
         @ cases)
   | _ -> fail "invalid type declaration"
 
+let ensure_unique_names what names =
+  let seen = Hashtbl.create 16 in
+  List.iter
+    (fun name ->
+      if Hashtbl.mem seen name then fail ("duplicate " ^ what ^ ": " ^ name);
+      Hashtbl.add seen name ())
+    names
+
+let parse_exposing_clause text =
+  let text = trim text in
+  let len = String.length text in
+  if len < 2 || text.[0] <> '(' || text.[len - 1] <> ')' then
+    fail "exposing syntax is: exposing (name, ...)";
+  let inner = trim (String.sub text 1 (len - 2)) in
+  if String.equal inner ".." then None
+  else
+    let names =
+      inner |> String.split_on_char ',' |> List.map trim |> List.filter (( <> ) "")
+    in
+    if names = [] then fail "exposing requires at least one name";
+    List.iter
+      (fun name ->
+        if not (is_name name) then fail ("invalid exposing name: " ^ name))
+      names;
+    ensure_unique_names "exposing name" names;
+    Some names
+
+let parse_module_line line =
+  let rest = trim (String.sub line 7 (String.length line - 7)) in
+  match find_sub rest " exposing " with
+  | None ->
+      if not (is_name rest) then fail "module syntax is: module Name";
+      [ Sexp.List [ Sexp.Atom "module"; Sexp.Atom rest ] ]
+  | Some i ->
+      let name = trim (String.sub rest 0 i) in
+      if not (is_name name) then fail "module syntax is: module Name exposing (...)";
+      let exposing =
+        trim (String.sub rest (i + 10) (String.length rest - i - 10))
+        |> parse_exposing_clause
+      in
+      Sexp.List [ Sexp.Atom "module"; Sexp.Atom name ]
+      ::
+      (match exposing with
+      | None -> []
+      | Some names -> [ Sexp.List (Sexp.Atom "export" :: List.map (fun n -> Sexp.Atom n) names) ])
+
+let parse_import_line line =
+  let rest = trim (String.sub line 7 (String.length line - 7)) in
+  let path =
+    match find_sub rest " exposing " with
+    | None -> rest
+    | Some i ->
+        let path = trim (String.sub rest 0 i) in
+        let exposing = trim (String.sub rest (i + 10) (String.length rest - i - 10)) in
+        ignore (parse_exposing_clause exposing);
+        path
+  in
+  if String.length path >= 2 && path.[0] = '"' && path.[String.length path - 1] = '"'
+  then String.sub path 1 (String.length path - 2)
+  else path
+
 let looks_like input =
   input |> String.split_on_char '\n'
   |> List.exists (fun raw ->
@@ -806,12 +867,8 @@ let to_sexp_source input =
       if line = "" then loop (i + 1)
       else if indentation raw > 0 then fail ("unexpected indented top-level line: " ^ line)
       else if starts_with line "module " then (
-        let parts = split_words line in
-        match parts with
-        | [ "module"; name ] ->
-            forms := Sexp.List [ Sexp.Atom "module"; Sexp.Atom name ] :: !forms;
-            loop (i + 1)
-        | _ -> fail "module syntax is: module Name")
+        forms := List.rev_append (parse_module_line line) !forms;
+        loop (i + 1))
       else if starts_with line "export " then (
         match split_words line with
         | "export" :: names ->
@@ -819,12 +876,7 @@ let to_sexp_source input =
             loop (i + 1)
         | _ -> fail "export syntax is: export name ...")
       else if starts_with line "import " then (
-        let path = trim (String.sub line 7 (String.length line - 7)) in
-        let path =
-          if String.length path >= 2 && path.[0] = '"' && path.[String.length path - 1] = '"'
-          then String.sub path 1 (String.length path - 2)
-          else path
-        in
+        let path = parse_import_line line in
         forms := Sexp.List [ Sexp.Atom "import"; Sexp.Str path ] :: !forms;
         loop (i + 1))
       else if starts_with line "capabilities " then (

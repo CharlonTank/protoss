@@ -87,8 +87,12 @@ listees dans la section "Gates de validation".
   pareil pour les cas couverts.
 - [ ] Finaliser la grammaire officielle Protoss/H.
 - [ ] Supporter l'indentation significative complete.
-- [ ] Supporter les modules humains `module X exposing (...)`.
-- [ ] Supporter les imports humains `import X exposing (...)`.
+- [x] Supporter les modules humains `module X exposing (...)`.
+  Preuves: `test/test_protoss.ml` assertion "human module exposing import" et
+  `README.md`.
+- [x] Supporter les imports humains `import X exposing (...)`.
+  Preuves: `test/test_protoss.ml` assertion "human module exposing import" et
+  `README.md`.
 - [ ] Supporter les declarations de capabilities en syntaxe humaine.
 - [ ] Supporter les effets `Process { cap } A` en syntaxe humaine.
 - [x] Supporter les record updates humains `{ model | x = y }`.
