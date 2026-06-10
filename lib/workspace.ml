@@ -722,14 +722,28 @@ let cache_list name values =
 let cache_pairs name pairs =
   cache_list name (List.map (fun (a, b) -> cache_field "k" a ^ cache_field "v" b) pairs)
 
+let cache_project_path manifest path =
+  let root = realpath_or manifest.root in
+  let path = realpath_or path in
+  let root_prefix = if has_suffix "/" root then root else root ^ "/" in
+  if has_prefix root_prefix path then
+    String.sub path (String.length root_prefix) (String.length path - String.length root_prefix)
+  else path
+
 let prepare_build_cache_key (manifest : manifest) (units : unit_load list) =
   let option_field name = function
     | None -> [ cache_field (name ^ ".some") "false" ]
     | Some value -> [ cache_field (name ^ ".some") "true"; cache_field name value ]
   in
+  let stdlib_key =
+    match manifest.stdlib with
+    | None -> None
+    | Some path -> Some (cache_project_path manifest (path_in_project manifest path))
+  in
   let unit_fields index unit =
     [
-      cache_field ("unit." ^ string_of_int index ^ ".path") unit.path;
+      cache_field ("unit." ^ string_of_int index ^ ".path")
+        (cache_project_path manifest unit.path);
       cache_field ("unit." ^ string_of_int index ^ ".source_hash") unit.source_hash;
     ]
     @ cache_list ("unit." ^ string_of_int index ^ ".imports") unit.imports
@@ -747,19 +761,11 @@ let prepare_build_cache_key (manifest : manifest) (units : unit_load list) =
   String.concat "\n"
     ([
        cache_field "cache.version" "prepare-build-v1";
-       cache_field "manifest.root" manifest.root;
-       cache_field "manifest.name" manifest.name;
-       cache_field "manifest.version" manifest.version;
-       cache_field "manifest.store_dir" manifest.store_dir;
-       cache_field "manifest.cache_dir" manifest.cache_dir;
      ]
     @ cache_list "manifest.entrypoints" manifest.entrypoints
-    @ option_field "manifest.stdlib" manifest.stdlib
+    @ option_field "manifest.stdlib" stdlib_key
     @ cache_list "manifest.source_dirs" manifest.source_dirs
     @ cache_list "manifest.capabilities" manifest.capabilities
-    @ cache_pairs "manifest.package_imports" manifest.package_imports
-    @ cache_pairs "manifest.package_interfaces" manifest.package_interfaces
-    @ cache_pairs "manifest.package_contracts" manifest.package_contracts
     @ [ cache_field "units.count" (string_of_int (List.length units)) ]
     @ List.concat (List.mapi unit_fields units))
   |> Kernel.hash_string
@@ -819,39 +825,70 @@ let prepared_graph_hash prepared =
 let prepared_host_contract_hash prepared =
   host_contract_hash (Canonical_ir.graph_host_contract prepared.program_graph)
 
+let file_exact path expected =
+  Sys.file_exists path && String.equal (read_file path) expected
+
+let build_record_content manifest prepared lock_hash =
+  "id=" ^ prepared.build_id ^ "\npackage=" ^ manifest.name ^ "\nversion="
+  ^ manifest.version ^ "\nprogram_hash=" ^ prepared.build_id ^ "\ndefs="
+  ^ String.concat " " (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs)
+  ^ "\nlock_hash=" ^ Option.value lock_hash ~default:""
+  ^ "\n"
+
+let roots_content manifest prepared =
+  "package=" ^ manifest.name ^ "\nversion=" ^ manifest.version ^ "\nentrypoints="
+  ^ String.concat " " manifest.entrypoints ^ "\nroots="
+  ^ String.concat " "
+      (prepared.units
+      |> List.filter (fun u ->
+             List.exists
+               (fun entry -> String.equal u.path (path_in_project manifest entry))
+               manifest.entrypoints)
+      |> List.concat_map (fun u -> List.map (fun (d : def) -> d.name) u.defs))
+  ^ "\n"
+
+let prepared_def_artifacts_current store cd =
+  let name = cd.Kernel.def.name in
+  file_exact (Store.canonical_path store name) (cd.canonical ^ "\n")
+  && file_exact (defid_path store name) (cd.def_id ^ "\n")
+  && Sys.file_exists (Store.def_path store name)
+  && Sys.file_exists (type_path store name)
+  && Sys.file_exists (deps_path store name)
+  && Sys.file_exists (normal_path store name)
+  && Sys.file_exists (capability_scope_path store name)
+
+let prepared_store_current store prepared =
+  file_exact (Filename.concat store "current") (prepared.build_id ^ "\n")
+  && file_exact (Filename.concat store "capabilities")
+       (String.concat "\n" prepared.checked.program.capabilities ^ "\n")
+  && file_exact (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n")
+  && file_exact (Store.graph_path store (prepared_graph_hash prepared)) prepared.program_graph
+  && file_exact (host_contract_current_path store) (prepared_host_contract_hash prepared ^ "\n")
+  && Sys.file_exists (host_contract_object_path store (prepared_host_contract_hash prepared))
+  && List.for_all (prepared_def_artifacts_current store) prepared.checked.defs
+
 let build_prepared ?(write = true) ?lock_hash manifest prepared =
   let store = store_root manifest in
   if write then (
     project_store_dirs store;
-    List.iter (write_unit store) prepared.units;
-    write_file (Filename.concat store "capabilities")
-      (String.concat "\n" prepared.checked.program.capabilities ^ "\n");
-    Store.write_type_aliases store prepared.checked.program.type_aliases;
-    write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
-    write_program_graph store prepared.checked prepared.program_graph;
-    ignore (write_host_contract store prepared.program_graph);
-    cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
-    List.iter
-      (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
-      prepared.checked.defs;
+    if prepared_store_current store prepared then
+      prepared.stats.cache_hits <- prepared.stats.cache_hits + List.length prepared.checked.defs
+    else (
+      List.iter (write_unit store) prepared.units;
+      write_file (Filename.concat store "capabilities")
+        (String.concat "\n" prepared.checked.program.capabilities ^ "\n");
+      Store.write_type_aliases store prepared.checked.program.type_aliases;
+      write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
+      write_program_graph store prepared.checked prepared.program_graph;
+      ignore (write_host_contract store prepared.program_graph);
+      cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
+      List.iter
+        (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
+        prepared.checked.defs);
     write_file (Filename.concat (builds_dir store) (sanitize_id prepared.build_id ^ ".build"))
-      ("id=" ^ prepared.build_id ^ "\npackage=" ^ manifest.name ^ "\nversion="
-     ^ manifest.version ^ "\nprogram_hash=" ^ prepared.build_id ^ "\ndefs="
-      ^ String.concat " " (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs)
-      ^ "\nlock_hash=" ^ Option.value lock_hash ~default:""
-      ^ "\n");
+      (build_record_content manifest prepared lock_hash);
     write_file (Filename.concat store "current") (prepared.build_id ^ "\n");
-    write_file (Filename.concat store "roots")
-      ("package=" ^ manifest.name ^ "\nversion=" ^ manifest.version ^ "\nentrypoints="
-     ^ String.concat " " manifest.entrypoints ^ "\nroots="
-      ^ String.concat " "
-          (prepared.units
-          |> List.filter (fun u ->
-                 List.exists
-                   (fun entry -> String.equal u.path (path_in_project manifest entry))
-                   manifest.entrypoints)
-          |> List.concat_map (fun u -> List.map (fun (d : def) -> d.name) u.defs))
-      ^ "\n");
+    write_file (Filename.concat store "roots") (roots_content manifest prepared);
     write_file (Filename.concat store "world_refs") "");
   { manifest; checked = prepared.checked; stats = prepared.stats; build_id = prepared.build_id; store }
 
@@ -1039,6 +1076,10 @@ type package_interface = {
   interface_imports : (string * string * string * string * string) list;
   interface_exports : package_interface_export list;
 }
+
+let package_check_cache : (string, package_result) Hashtbl.t = Hashtbl.create 16
+
+let package_interface_cache : (string, package_interface) Hashtbl.t = Hashtbl.create 16
 
 let package_interface_export_of_sexp = function
   | Sexp.List (Sexp.Atom "def" :: fields) ->
@@ -1530,6 +1571,81 @@ let write_package ?(locked = false) manifest =
     store = build_result.store;
   }
 
+let package_source_cache_key manifest =
+  let stats = empty_stats () in
+  let units = load_units manifest (store_root manifest) stats in
+  prepare_build_cache_key manifest units
+
+let read_current_package_interface_artifact manifest =
+  let current_interface_path = package_interface_current_path manifest in
+  if not (Sys.file_exists current_interface_path) then
+    fail ("missing package interface pointer: " ^ current_interface_path);
+  let interface_ref = trim (read_file current_interface_path) in
+  if String.equal interface_ref "" then
+    fail ("empty package interface pointer: " ^ current_interface_path);
+  let interface_path = package_interface_path_for_ref manifest interface_ref in
+  if not (Sys.file_exists interface_path) then
+    fail ("missing package interface artifact: " ^ interface_path);
+  let interface_json = read_file interface_path in
+  let actual_interface_ref = Kernel.hash_string interface_json in
+  if not (String.equal actual_interface_ref interface_ref) then
+    fail
+      ("package interface artifact hash mismatch: pointer " ^ interface_ref ^ ", content "
+     ^ actual_interface_ref);
+  (interface_ref, interface_path, interface_json)
+
+let package_import_cache_fingerprints manifest =
+  manifest.package_imports
+  |> List.map (fun import ->
+         let imported = package_import_manifest manifest import in
+         let source_key = package_source_cache_key imported in
+         let package_pointer = package_current_path imported in
+         if not (Sys.file_exists package_pointer) then
+           fail ("missing imported package pointer: " ^ package_pointer);
+         let package_ref = trim (read_file package_pointer) in
+         if String.equal package_ref "" then fail ("empty imported package pointer: " ^ package_pointer);
+         let package_path = package_path_for_ref imported package_ref in
+         if not (Sys.file_exists package_path) then
+           fail ("missing imported package descriptor: " ^ package_path);
+         let package_content = read_file package_path in
+         let lock_file = lock_path imported in
+         if not (Sys.file_exists lock_file) then fail ("missing imported lockfile: " ^ lock_file);
+         let interface_ref, _, interface_json =
+           read_current_package_interface_artifact imported
+         in
+         String.concat "\n"
+           [
+             cache_field "import.name" imported.name;
+             cache_field "import.source" source_key;
+             cache_field "import.package_ref" package_ref;
+             cache_field "import.package_hash" (Kernel.hash_string package_content);
+             cache_field "import.lock_hash" (Kernel.hash_string (read_file lock_file));
+             cache_field "import.interface_ref" interface_ref;
+             cache_field "import.interface_hash" (Kernel.hash_string interface_json);
+           ])
+  |> List.sort String.compare
+
+let package_check_cache_key manifest source_key import_keys package_ref content lock_content
+    interface_ref interface_json =
+  Kernel.hash_string
+    (String.concat "\n"
+       ([
+          cache_field "cache.version" "package-check-v1";
+          cache_field "manifest.root" manifest.root;
+          cache_field "manifest.name" manifest.name;
+          cache_field "manifest.version" manifest.version;
+          cache_field "manifest.source" source_key;
+          cache_field "package.ref" package_ref;
+          cache_field "package.hash" (Kernel.hash_string content);
+          cache_field "lock.hash" (Kernel.hash_string lock_content);
+          cache_field "interface.ref" interface_ref;
+          cache_field "interface.hash" (Kernel.hash_string interface_json);
+        ]
+       @ cache_list "imports" import_keys
+       @ cache_pairs "manifest.package_imports" manifest.package_imports
+       @ cache_pairs "manifest.package_interfaces" manifest.package_interfaces
+       @ cache_pairs "manifest.package_contracts" manifest.package_contracts))
+
 let check_package manifest =
   let current_path = package_current_path manifest in
   if not (Sys.file_exists current_path) then fail ("missing package pointer: " ^ current_path);
@@ -1542,6 +1658,21 @@ let check_package manifest =
   if not (String.equal package_ref actual_ref) then
     fail
       ("package hash mismatch: pointer " ^ package_ref ^ ", content " ^ actual_ref);
+  let lock_file = lock_path manifest in
+  if not (Sys.file_exists lock_file) then fail ("missing lockfile: " ^ lock_file);
+  let lock_content_current = read_file lock_file in
+  let source_key = package_source_cache_key manifest in
+  let import_keys = package_import_cache_fingerprints manifest in
+  let interface_ref, interface_path, stored_interface_json =
+    read_current_package_interface_artifact manifest
+  in
+  let cache_key =
+    package_check_cache_key manifest source_key import_keys package_ref content lock_content_current
+      interface_ref stored_interface_json
+  in
+  match Hashtbl.find_opt package_check_cache cache_key with
+  | Some cached -> cached
+  | None ->
   let items = package_items content in
   let prepared = prepare_build manifest in
   let lock_hash = check_lock_prepared manifest prepared in
@@ -1587,18 +1718,10 @@ let check_package manifest =
     fail
       ("package interface pointer mismatch: expected " ^ expected_interface_ref ^ ", got "
      ^ interface_ref);
-  let interface_path = package_interface_path_for_ref manifest interface_ref in
-  if not (Sys.file_exists interface_path) then
-    fail ("missing package interface artifact: " ^ interface_path);
-  let stored_interface_json = read_file interface_path in
-  let actual_interface_ref = Kernel.hash_string stored_interface_json in
-  if not (String.equal actual_interface_ref interface_ref) then
-    fail
-      ("package interface artifact hash mismatch: pointer " ^ interface_ref ^ ", content "
-     ^ actual_interface_ref);
   if not (String.equal stored_interface_json interface_json) then
     fail "package interface artifact out of date";
-  {
+  let result =
+    {
     package_ref;
     package_path;
     interface_ref;
@@ -1608,12 +1731,31 @@ let check_package manifest =
     build_id = prepared.build_id;
     store = store_root manifest;
   }
+  in
+  Hashtbl.replace package_check_cache cache_key result;
+  result
 
 let read_package_interface manifest =
   let checked = check_package manifest in
   let content = read_file checked.package_path in
-  let items = package_items content in
-  package_interface_from_items ~project:manifest.root checked.package_ref items
+  let key =
+    Kernel.hash_string
+      (String.concat "\n"
+         [
+           cache_field "cache.version" "package-interface-v1";
+           cache_field "manifest.root" manifest.root;
+           cache_field "package.ref" checked.package_ref;
+           cache_field "package.hash" (Kernel.hash_string content);
+           cache_field "interface.ref" checked.interface_ref;
+         ])
+  in
+  match Hashtbl.find_opt package_interface_cache key with
+  | Some interface -> interface
+  | None ->
+      let items = package_items content in
+      let interface = package_interface_from_items ~project:manifest.root checked.package_ref items in
+      Hashtbl.replace package_interface_cache key interface;
+      interface
 
 let package_interface_export_text = function
   | PackageDefExport

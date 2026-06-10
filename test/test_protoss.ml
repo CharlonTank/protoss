@@ -4371,6 +4371,7 @@ let () =
   trace_test "integration:workspace-a:lock";
   trace_test "integration:package-a";
   let package_a = Workspace.write_package manifest_a in
+  trace_test "integration:package-a:written";
   assert_true "project package writes file" (Sys.file_exists package_a.Workspace.package_path);
   assert_equal "project package records build" build_a.build_id package_a.build_id;
   assert_equal "project package records lock hash" lock_hash package_a.lock_hash;
@@ -4416,6 +4417,7 @@ let () =
   assert_true "project package records recursive Json type"
     (contains_substring package_content "(name \"Json\")");
   let package_checked = Workspace.check_package manifest_a in
+  trace_test "integration:package-a:checked";
   assert_equal "project package check ref" package_a.package_ref package_checked.package_ref;
   assert_equal "project package check lock" lock_hash package_checked.lock_hash;
   assert_equal "project package check interface ref" package_a.interface_ref
@@ -4425,6 +4427,7 @@ let () =
   assert_equal "project package check interface contract" package_a.interface_contract_hash
     package_checked.interface_contract_hash;
   let package_interface_text = Workspace.package_interface_text manifest_a in
+  trace_test "integration:package-a:interface-text";
   assert_true "project package interface prints ref"
     (contains_substring package_interface_text ("package_ref=" ^ package_a.package_ref));
   assert_true "project package interface prints public def"
@@ -4437,6 +4440,7 @@ let () =
   assert_true "project package interface prints public type export"
     (contains_substring package_interface_text "export type PublicBox");
   let package_interface_json = Workspace.package_interface_json manifest_a in
+  trace_test "integration:package-a:interface-json";
   assert_equal "project package interface artifact content" package_interface_json
     stored_package_interface_json;
   let package_interface_obj = Json.parse package_interface_json in
@@ -4503,6 +4507,7 @@ let () =
   let package_interface_file = Filename.concat ws_a "interface.json" in
   write_file package_interface_file package_interface_json;
   let package_interface_check = Workspace.check_package_interface_contract manifest_a package_interface_file in
+  trace_test "integration:package-a:interface-contract";
   assert_true "project package interface check accepts saved contract"
     (contains_substring package_interface_check "PackageInterfaceCheck OK");
   assert_true "project package interface check prints contract hash"
@@ -4523,6 +4528,7 @@ let () =
      fail "package interface contract check should reject corrupt capability descriptors"
    with Workspace.Error _ -> ());
   let package_invariants = Invariants.check_package ws_a in
+  trace_test "integration:package-a:invariants";
   assert_equal "package invariant interface ref" package_a.interface_ref
     package_invariants.Invariants.interface_ref;
   assert_equal "package invariant interface hash" interface_hash
@@ -4537,7 +4543,9 @@ let () =
     (string_of_int package_invariants.Invariants.interface_exports)
     (string_of_int package_invariants.Invariants.interface_type_hashes);
   assert_equal "project package audit" "Audit OK\n" (Workspace.audit manifest_a);
+  trace_test "integration:package-a:audit";
   let package_again = Workspace.write_package manifest_a in
+  trace_test "integration:package-a:written-again";
   assert_equal "project package deterministic ref" package_a.package_ref package_again.package_ref;
   assert_equal "project package deterministic path" package_a.package_path package_again.package_path;
   assert_equal "project package deterministic interface ref" package_a.interface_ref
@@ -4549,6 +4557,7 @@ let () =
   assert_equal "project package deterministic interface content" package_interface_json
     (Store.read_file package_again.interface_path);
   let package_locked = Workspace.write_package ~locked:true manifest_a in
+  trace_test "integration:package-a:locked";
   assert_equal "project package locked ref" package_a.package_ref package_locked.package_ref;
   assert_equal "project package locked interface ref" package_a.interface_ref
     package_locked.interface_ref;
@@ -4556,6 +4565,7 @@ let () =
   copy_tree ws_a package_copy_root;
   let package_copy_manifest = Workspace.parse_manifest package_copy_root in
   let package_copy = Workspace.write_package package_copy_manifest in
+  trace_test "integration:package-a:copy";
   assert_equal "project package ref is path independent" package_a.package_ref
     package_copy.package_ref;
   assert_equal "project package interface ref is path independent" package_a.interface_ref
@@ -4570,6 +4580,7 @@ let () =
     (manifest_without_interface ^ "package_interfaces = [\"workspace-a=" ^ interface_hash ^ "\"]\n");
   let manifest_with_interface = Workspace.parse_manifest interface_ws in
   let package_with_interface = Workspace.write_package manifest_with_interface in
+  trace_test "integration:package-a:interface-constraint";
   assert_equal "package interface constraint accepts current package" package_with_interface.package_ref
     (Workspace.check_package manifest_with_interface).Workspace.package_ref;
   write_file manifest_path_interface
@@ -4586,6 +4597,7 @@ let () =
    with Workspace.Error _ -> ());
   assert_true "invalid package interface write leaves package store untouched"
     (package_dot_before_bad = snapshot (Filename.concat interface_ws ".protoss"));
+  trace_test "integration:package-a:invalid-constraint";
   trace_test "integration:consumer-package";
   let consumer_ws = make_workspace "workspace-consumer" 5 "z" in
   let consumer_manifest_path = Filename.concat consumer_ws "protoss.toml" in
@@ -4593,9 +4605,10 @@ let () =
   write_file consumer_manifest_path
     (consumer_manifest_base ^ "package_imports = [\"workspace-a=" ^ ws_a
    ^ "\"]\npackage_interfaces = [\"workspace-a=" ^ interface_hash
-   ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash ^ "\"]\n");
+  ^ "\"]\npackage_contracts = [\"workspace-a=" ^ package_interface_contract_hash ^ "\"]\n");
   let consumer_manifest = Workspace.parse_manifest consumer_ws in
   let consumer_package = Workspace.write_package consumer_manifest in
+  trace_test "integration:consumer-package:written";
   let consumer_package_content = Store.read_file consumer_package.package_path in
   assert_true "package dependency records package ref"
     (contains_substring consumer_package_content ("workspace-a=" ^ package_a.package_ref));
@@ -4604,6 +4617,7 @@ let () =
   assert_true "package dependency records contract hash"
     (contains_substring consumer_package_content ("workspace-a=" ^ package_interface_contract_hash));
   let consumer_interface_text = Workspace.package_interface_text consumer_manifest in
+  trace_test "integration:consumer-package:interface-text";
   assert_true "package interface prints imported package"
     (contains_substring consumer_interface_text ("import workspace-a package=" ^ package_a.package_ref));
   assert_true "package interface prints imported interface"
@@ -4611,6 +4625,7 @@ let () =
   assert_true "package interface prints imported contract"
     (contains_substring consumer_interface_text ("contract=" ^ package_interface_contract_hash));
   let consumer_interface_obj = Json.parse (Workspace.package_interface_json consumer_manifest) in
+  trace_test "integration:consumer-package:interface-json";
   let consumer_imports = json_array_field "imports" consumer_interface_obj in
   let workspace_import =
     match
@@ -4628,7 +4643,9 @@ let () =
     (json_string_field "contractHash" workspace_import);
   assert_equal "package dependency check ref" consumer_package.package_ref
     (Workspace.check_package consumer_manifest).Workspace.package_ref;
+  trace_test "integration:consumer-package:checked";
   let consumer_package_invariants = Invariants.check_package consumer_ws in
+  trace_test "integration:consumer-package:invariants";
   assert_equal "package invariant ref" consumer_package.package_ref
     consumer_package_invariants.Invariants.package_ref;
   assert_equal "package invariant imported count" "1"
@@ -4650,14 +4667,17 @@ let () =
      ignore (Invariants.check_package consumer_ws);
      fail "package invariant should reject imported package source drift"
    with Workspace.Error _ | Kernel.Error _ -> ());
+  trace_test "integration:consumer-package:drift-invariants";
   (try
      ignore (Workspace.check_package consumer_manifest);
      fail "package check should reject imported package source drift"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:drift-check";
   (try
      ignore (Workspace.write_package consumer_manifest);
      fail "package write should reject imported package source drift"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:drift-write";
   assert_true "imported package source drift leaves consumer package store untouched"
     (consumer_dot_before_import_drift = snapshot (Filename.concat consumer_ws ".protoss"));
   write_file import_math_path import_math_before;
@@ -4670,6 +4690,7 @@ let () =
      ignore (Workspace.write_package consumer_bad_interface);
      fail "bad imported package interface should reject without mutation"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:bad-interface";
   assert_true "bad imported package interface leaves package store untouched"
     (consumer_dot_before_bad = snapshot (Filename.concat consumer_ws ".protoss"));
   let consumer_dot_before_bad_contract = snapshot (Filename.concat consumer_ws ".protoss") in
@@ -4681,6 +4702,7 @@ let () =
      ignore (Workspace.write_package consumer_bad_contract);
      fail "bad imported package contract should reject without mutation"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:bad-contract";
   assert_true "bad imported package contract leaves package store untouched"
     (consumer_dot_before_bad_contract = snapshot (Filename.concat consumer_ws ".protoss"));
   let mismatch_ws = make_workspace "workspace-import-mismatch" 6 "q" in
@@ -4693,6 +4715,7 @@ let () =
      ignore (Workspace.write_package mismatch_manifest);
      fail "package import name mismatch should reject"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:mismatch";
   let capability_interface_ws = temp_dir "workspace-interface-capability" in
   copy_tree ws_a capability_interface_ws;
   let capability_manifest_path = Filename.concat capability_interface_ws "protoss.toml" in
@@ -4704,6 +4727,7 @@ let () =
     (replace_once (Store.read_file capability_app_path) "(Human.ask \"Name?\")" "(Clock.read)");
   let capability_manifest = Workspace.parse_manifest capability_interface_ws in
   let capability_package = Workspace.write_package capability_manifest in
+  trace_test "integration:consumer-package:capability-package";
   let capability_interface_hash =
     sexp_atom_field "interface-hash" (Store.read_file capability_package.package_path)
   in
@@ -4729,11 +4753,13 @@ let () =
      ignore (Workspace.build_locked manifest_a);
      fail "locked build should reject source drift"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:source-drift";
   assert_equal "project lock drift keeps lockfile" lock_before (Store.read_file lock_path);
   assert_true "project lock drift leaves .protoss untouched"
     (dot_before_drift = snapshot (Filename.concat ws_a ".protoss"));
   write_file math_path math_before;
   let locked_build = Workspace.build_locked manifest_a in
+  trace_test "integration:consumer-package:locked-build";
   let locked_build_meta =
     Filename.concat
       (Filename.concat locked_build.Workspace.store "builds")
@@ -4753,6 +4779,7 @@ let () =
      ignore (Workspace.audit scope_corrupt_manifest);
      fail "audit should reject corrupt capability scope"
    with Workspace.Error _ | Kernel.Error _ -> ());
+  trace_test "integration:consumer-package:scope-corrupt";
   let package_corrupt_root = temp_dir "workspace-package-corrupt" in
   copy_tree ws_a package_corrupt_root;
   let package_corrupt_manifest = Workspace.parse_manifest package_corrupt_root in
@@ -4773,6 +4800,7 @@ let () =
      ignore (Workspace.audit package_corrupt_manifest);
      fail "audit should reject corrupt package descriptor"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:package-corrupt";
   let interface_corrupt_root = temp_dir "workspace-interface-artifact-corrupt" in
   copy_tree ws_a interface_corrupt_root;
   let interface_corrupt_manifest = Workspace.parse_manifest interface_corrupt_root in
@@ -4794,6 +4822,7 @@ let () =
      ignore (Workspace.audit interface_corrupt_manifest);
      fail "audit should reject corrupt interface artifact"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:interface-corrupt";
   let package_outdated_root = temp_dir "workspace-package-outdated" in
   copy_tree ws_a package_outdated_root;
   let package_outdated_manifest = Workspace.parse_manifest package_outdated_root in
@@ -4818,6 +4847,7 @@ let () =
      ignore (Workspace.check_package package_outdated_manifest);
      fail "package check should reject out-of-date descriptor"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:package-outdated";
   let package_host_contract_outdated_root = temp_dir "workspace-package-host-contract-outdated" in
   copy_tree ws_a package_host_contract_outdated_root;
   let package_host_contract_outdated_manifest =
@@ -4849,6 +4879,7 @@ let () =
      ignore (Workspace.check_package package_host_contract_outdated_manifest);
      fail "package check should reject out-of-date host contract hash"
    with Workspace.Error _ -> ());
+  trace_test "integration:consumer-package:host-contract-outdated";
   let graph_corrupt_root = temp_dir "workspace-graph-corrupt" in
   copy_tree ws_a graph_corrupt_root;
   let graph_corrupt_manifest = Workspace.parse_manifest graph_corrupt_root in
@@ -4862,6 +4893,7 @@ let () =
      ignore (Workspace.audit graph_corrupt_manifest);
      fail "audit should reject corrupt canonical graph"
    with Workspace.Error _ | Kernel.Error _ -> ());
+  trace_test "integration:consumer-package:graph-corrupt";
   let graph_object_corrupt_root = temp_dir "workspace-graph-object-corrupt" in
   copy_tree ws_a graph_object_corrupt_root;
   let graph_object_corrupt_manifest = Workspace.parse_manifest graph_object_corrupt_root in
@@ -4877,9 +4909,10 @@ let () =
   (try
      ignore (Workspace.audit graph_object_corrupt_manifest);
      fail "audit should reject corrupt content-addressed canonical graph"
-   with Workspace.Error msg ->
+  with Workspace.Error msg ->
      assert_true "audit reports content-addressed graph mismatch"
        (contains_substring msg "content-addressed canonical graph mismatch"));
+  trace_test "integration:consumer-package:graph-object-corrupt";
   let host_contract_corrupt_root = temp_dir "workspace-host-contract-corrupt" in
   copy_tree ws_a host_contract_corrupt_root;
   let host_contract_corrupt_manifest = Workspace.parse_manifest host_contract_corrupt_root in
@@ -4895,6 +4928,7 @@ let () =
    with Workspace.Error msg ->
      assert_true "audit reports host contract mismatch"
        (contains_substring msg "host contract mismatch: host.contract.json"));
+  trace_test "integration:consumer-package:host-contract-corrupt";
   let host_contract_ref_corrupt_root = temp_dir "workspace-host-contract-ref-corrupt" in
   copy_tree ws_a host_contract_ref_corrupt_root;
   let host_contract_ref_corrupt_manifest =
@@ -4909,6 +4943,7 @@ let () =
    with Workspace.Error msg ->
      assert_true "audit reports host contract ref mismatch"
        (contains_substring msg "host contract ref mismatch"));
+  trace_test "integration:consumer-package:host-contract-ref-corrupt";
   let host_contract_object_corrupt_root = temp_dir "workspace-host-contract-object-corrupt" in
   copy_tree ws_a host_contract_object_corrupt_root;
   let host_contract_object_corrupt_manifest =
