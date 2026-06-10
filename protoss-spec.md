@@ -52,8 +52,12 @@ Preuves de section: `lib/ast.ml`, `lib/kernel.ml`, `lib/canonical_ir.ml`,
 - [x] Stocker les objets de graphe dans un store de projet content-addressed.
 - [x] Auditer les objets de graphe presents dans le store.
 - [x] Produire des locks, packages et interfaces deterministes.
-- [ ] Definir et implementer un vrai `UniverseRoot = H(packages, defs, types,
+- [x] Definir et implementer un vrai `UniverseRoot = H(packages, defs, types,
   harnesses, policies, worldRefs)`.
+  Preuves: `Workspace.universe_root_content`, fichiers store `universe.root`
+  et `universe.root.content`, champs `universe-root` des locks/packages,
+  assertions "project universe root ..." dans `test/test_protoss.ml` et
+  `README.md`.
 - [ ] Faire du `UniverseRoot` la source de verite de toutes les commandes projet.
 - [ ] Ajouter un store global partage entre projets pour l'interning des noeuds.
 - [ ] Dedupliquer physiquement les noeuds identiques entre projets distincts.

@@ -10,6 +10,9 @@ source file is checked, canonicalized into a typed graph, and hashed to a stable
 Elm-like, with/without type/lambda inference, with/without aliases) **must produce the identical
 canonical graph and hash**. Preserving that property is the central design constraint — treat any
 change that makes equivalent sources hash differently, or that introduces non-determinism, as a bug.
+Workspace builds also write a deterministic `UniverseRoot` (`universe.root` plus
+`universe.root.content`) over package metadata, defs, types, harness slots, policies, and world refs;
+lock/package flows must keep their `universe-root` field in sync with that store root.
 
 `README.md` is the de-facto spec: it enumerates every supported surface form, command, and
 invariant in detail. Consult it before assuming a feature does or doesn't exist.

@@ -4641,6 +4641,23 @@ let () =
   trace_test "integration:workspace-a:built";
   assert_true "project build parsed sources" (build_a.Workspace.stats.Workspace.parsed > 0);
   assert_true "project build normalized defs" (build_a.Workspace.stats.Workspace.normalized > 0);
+  assert_true "project universe root is content addressed"
+    (contains_substring build_a.Workspace.universe_root "p2:");
+  let universe_root_file = Workspace.universe_root_path build_a.store in
+  let universe_root_content_file = Workspace.universe_root_content_path build_a.store in
+  assert_equal "project universe root pointer" build_a.Workspace.universe_root
+    (String.trim (Store.read_file universe_root_file));
+  let universe_root_content = Store.read_file universe_root_content_file in
+  assert_equal "project universe root hashes content" build_a.Workspace.universe_root
+    (Kernel.hash_string (String.trim universe_root_content));
+  assert_true "project universe root records defs"
+    (contains_substring universe_root_content "(defs ");
+  assert_true "project universe root records types"
+    (contains_substring universe_root_content "(types ");
+  assert_true "project universe root records harness slot"
+    (contains_substring universe_root_content "(harnesses)");
+  assert_true "project universe root records policies"
+    (contains_substring universe_root_content "(policies \"NoNetworkExceptDeclared\")");
   assert_true "project store list" (String.contains (Workspace.list_store build_a.store) 'a');
   assert_true "project store get" (String.length (Workspace.get_store build_a.store "appMain") > 0);
   assert_equal "project store deps" "Nat.add,base,total"
@@ -4867,6 +4884,8 @@ let () =
   assert_true "project lock records hash prefix"
     (contains_substring lock_before "(hash-prefix \"p2:\")");
   assert_true "project lock records program hash" (contains_substring lock_before build_a.build_id);
+  assert_equal "project lock records universe root" build_a.universe_root
+    (sexp_atom_field "universe-root" lock_before);
   assert_equal "project lock records canonical graph hash" (json_string_field "graphHash" store_graph)
     (sexp_atom_field "program-graph-hash" lock_before);
   assert_equal "project lock records host contract hash" store_host_contract_hash
@@ -4885,7 +4904,11 @@ let () =
   trace_test "integration:package-a:written";
   assert_true "project package writes file" (Sys.file_exists package_a.Workspace.package_path);
   assert_equal "project package records build" build_a.build_id package_a.build_id;
+  assert_equal "project package records universe result" build_a.universe_root
+    package_a.universe_root;
   assert_equal "project package records lock hash" lock_hash package_a.lock_hash;
+  assert_equal "project package records universe root" build_a.universe_root
+    (sexp_atom_field "universe-root" (Store.read_file package_a.package_path));
   assert_equal "project package records canonical graph hash" (json_string_field "graphHash" store_graph)
     (sexp_atom_field "program-graph-hash" (Store.read_file package_a.package_path));
   assert_equal "project package records host contract hash" store_host_contract_hash

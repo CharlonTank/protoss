@@ -275,6 +275,10 @@ let meta_dir store = Filename.concat store "meta"
 
 let host_contracts_dir store = Filename.concat store "host-contracts"
 
+let universe_root_path store = Filename.concat store "universe.root"
+
+let universe_root_content_path store = Filename.concat store "universe.root.content"
+
 let host_contract_path store = Filename.concat store "host.contract.json"
 
 let host_contract_current_path store = Filename.concat store "host_contract"
@@ -729,6 +733,7 @@ type build_result = {
   checked : Kernel.checked;
   stats : build_stats;
   build_id : string;
+  universe_root : string;
   store : string;
 }
 
@@ -740,6 +745,7 @@ type package_result = {
   interface_contract_hash : string;
   lock_hash : string;
   build_id : string;
+  universe_root : string;
   store : string;
 }
 
@@ -880,13 +886,88 @@ let prepared_graph_hash prepared =
 let prepared_host_contract_hash prepared =
   host_contract_hash (Canonical_ir.graph_host_contract (Lazy.force prepared.program_graph))
 
+let lock_item name values =
+  "(" ^ name
+  ^ (match values with [] -> "" | _ -> " " ^ String.concat " " values)
+  ^ ")"
+
+let lock_string s = Ast.quote s
+
+let lock_string_list name values =
+  lock_item name (List.map lock_string (List.sort String.compare values))
+
+let lock_pair_list name values =
+  values
+  |> List.map (fun (k, v) -> k ^ "=" ^ v)
+  |> lock_string_list name
+
+let read_world_refs store =
+  match read_trim (Filename.concat store "world_refs") with
+  | None | Some "" -> []
+  | Some refs -> split_words refs |> sort_uniq
+
+let universe_type_item (alias : type_alias) =
+  lock_item "type"
+    [
+      lock_item "name" [ lock_string alias.type_name ];
+      lock_string_list "params" alias.type_params;
+      lock_item "hash" [ Kernel.hash_string (string_of_type_alias alias) ];
+    ]
+
+let universe_def_item (d : Kernel.checked_def) =
+  lock_item "def"
+    [
+      lock_item "name" [ lock_string d.def.name ];
+      lock_item "def-id" [ d.def_id ];
+      lock_item "hash" [ Kernel.hash_string d.canonical ];
+      lock_item "type-hash" [ Kernel.hash_string (Kernel.type_to_canonical d.def.typ) ];
+      lock_string_list "capability-scope" d.capabilities;
+    ]
+
+let universe_root_content manifest prepared world_refs =
+  let package_deps =
+    [
+      lock_pair_list "package-imports" manifest.package_imports;
+      lock_pair_list "package-interfaces" manifest.package_interfaces;
+      lock_pair_list "package-contracts" manifest.package_contracts;
+    ]
+  in
+  let def_items =
+    prepared.checked.defs |> List.map universe_def_item |> List.sort String.compare
+  in
+  let type_items =
+    prepared.checked.program.type_aliases
+    |> List.map universe_type_item |> List.sort String.compare
+  in
+  lock_item "universe-root-v1"
+    [
+      lock_item "package" [ lock_string manifest.name ];
+      lock_item "version" [ lock_string manifest.version ];
+      lock_item "program-hash" [ prepared.build_id ];
+      lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
+      lock_item "program-graph-hash" [ prepared_graph_hash prepared ];
+      lock_item "host-contract-hash" [ prepared_host_contract_hash prepared ];
+      lock_item "packages" package_deps;
+      lock_item "defs" def_items;
+      lock_item "types" type_items;
+      lock_item "harnesses" [];
+      lock_string_list "policies" manifest.policies;
+      lock_string_list "world-refs" world_refs;
+    ]
+
+let universe_root_of_content content = Kernel.hash_string content
+
+let universe_root manifest prepared world_refs =
+  universe_root_of_content (universe_root_content manifest prepared world_refs)
+
 let file_exact path expected =
   Sys.file_exists path && String.equal (read_file path) expected
 
-let build_record_content manifest prepared lock_hash =
+let build_record_content manifest prepared lock_hash universe_root =
   "id=" ^ prepared.build_id ^ "\npackage=" ^ manifest.name ^ "\nversion="
   ^ manifest.version ^ "\nprogram_hash=" ^ prepared.build_id ^ "\ndefs="
   ^ String.concat " " (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs)
+  ^ "\nuniverse_root=" ^ universe_root
   ^ "\nlock_hash=" ^ Option.value lock_hash ~default:""
   ^ "\n"
 
@@ -951,6 +1032,9 @@ let prepared_store_current store prepared =
 
 let build_prepared ?(write = true) ?lock_hash manifest prepared =
   let store = store_root manifest in
+  let world_refs = read_world_refs store in
+  let universe_content = universe_root_content manifest prepared world_refs in
+  let universe_root = universe_root_of_content universe_content in
   if write then (
     project_store_dirs store;
     if prepared_store_current store prepared then
@@ -968,11 +1052,21 @@ let build_prepared ?(write = true) ?lock_hash manifest prepared =
         (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
         prepared.checked.defs);
     write_file (Filename.concat (builds_dir store) (sanitize_id prepared.build_id ^ ".build"))
-      (build_record_content manifest prepared lock_hash);
+      (build_record_content manifest prepared lock_hash universe_root);
     write_file (Filename.concat store "current") (prepared.build_id ^ "\n");
     write_file (Filename.concat store "roots") (roots_content manifest prepared);
-    write_file (Filename.concat store "world_refs") "");
-  { manifest; checked = prepared.checked; stats = prepared.stats; build_id = prepared.build_id; store }
+    if not (Sys.file_exists (Filename.concat store "world_refs")) then
+      write_file (Filename.concat store "world_refs") "";
+    write_file (universe_root_path store) (universe_root ^ "\n");
+    write_file (universe_root_content_path store) (universe_content ^ "\n"));
+  {
+    manifest;
+    checked = prepared.checked;
+    stats = prepared.stats;
+    build_id = prepared.build_id;
+    universe_root;
+    store;
+  }
 
 let build ?(write = true) ?lock_hash manifest =
   build_prepared ~write ?lock_hash manifest (prepare_build manifest)
@@ -1047,21 +1141,6 @@ let import_with_relative_path manifest base import =
   let path, hash = import_path_and_hash import in
   let rel = normalize_path base path |> relative_to_root manifest in
   match hash with None -> rel | Some hash -> rel ^ "#" ^ hash
-
-let lock_item name values =
-  "(" ^ name
-  ^ (match values with [] -> "" | _ -> " " ^ String.concat " " values)
-  ^ ")"
-
-let lock_string s = Ast.quote s
-
-let lock_string_list name values =
-  lock_item name (List.map lock_string (List.sort String.compare values))
-
-let lock_pair_list name values =
-  values
-  |> List.map (fun (k, v) -> k ^ "=" ^ v)
-  |> lock_string_list name
 
 let package_type_item (alias : type_alias) =
   lock_item "type"
@@ -1429,6 +1508,7 @@ let read_package_import manifest import =
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (prepared_graph_hash prepared);
   expect_atom "host-contract-hash" (prepared_host_contract_hash prepared);
+  expect_atom "universe-root" (universe_root imported prepared (read_world_refs (store_root imported)));
   expect_atom "interface-hash" current_interface_hash;
   let current_interface = package_interface_from_items package_ref items in
   let current_contract_hash = package_interface_contract_hash current_interface in
@@ -1474,6 +1554,7 @@ let unit_lock manifest (unit : unit_load) =
 let lock_content manifest prepared =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
   let imports = package_imports manifest in
+  let universe_root = universe_root manifest prepared (read_world_refs (store_root manifest)) in
   String.concat "\n"
     [
       "(protoss-lock-v1";
@@ -1487,6 +1568,7 @@ let lock_content manifest prepared =
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
       "  " ^ lock_item "program-graph-hash" [ prepared_graph_hash prepared ];
       "  " ^ lock_item "host-contract-hash" [ prepared_host_contract_hash prepared ];
+      "  " ^ lock_item "universe-root" [ universe_root ];
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
       "  " ^ lock_string_list "capabilities" prepared.checked.program.capabilities;
@@ -1590,6 +1672,7 @@ let package_content manifest prepared lock_hash =
   let units = List.sort (fun a b -> String.compare a.path b.path) prepared.units in
   let interface_items = package_interface_items manifest prepared in
   let imports = package_imports manifest in
+  let universe_root = universe_root manifest prepared (read_world_refs (store_root manifest)) in
   String.concat "\n"
     [
       "(protoss-package-v1";
@@ -1605,6 +1688,7 @@ let package_content manifest prepared lock_hash =
       "  " ^ lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
       "  " ^ lock_item "program-graph-hash" [ prepared_graph_hash prepared ];
       "  " ^ lock_item "host-contract-hash" [ prepared_host_contract_hash prepared ];
+      "  " ^ lock_item "universe-root" [ universe_root ];
       "  " ^ lock_item "interface-hash" [ package_interface_hash manifest prepared ];
       "  " ^ lock_string_list "entrypoints" manifest.entrypoints;
       "  " ^ lock_string_list "source-dirs" manifest.source_dirs;
@@ -1669,6 +1753,7 @@ let write_package ?(locked = false) manifest =
     interface_contract_hash;
     lock_hash;
     build_id = build_result.build_id;
+    universe_root = build_result.universe_root;
     store = build_result.store;
   }
 
@@ -1803,6 +1888,8 @@ let check_package manifest =
   expect_atom "program-canonical-hash" (Kernel.hash_string prepared.program_canonical);
   expect_atom "program-graph-hash" (prepared_graph_hash prepared);
   expect_atom "host-contract-hash" (prepared_host_contract_hash prepared);
+  let expected_universe_root = universe_root manifest prepared (read_world_refs (store_root manifest)) in
+  expect_atom "universe-root" expected_universe_root;
   let interface_hash = package_interface_hash manifest prepared in
   expect_atom "interface-hash" interface_hash;
   validate_package_interface_constraints manifest interface_hash;
@@ -1830,6 +1917,7 @@ let check_package manifest =
     interface_contract_hash = package_interface_contract_hash interface;
     lock_hash;
     build_id = prepared.build_id;
+    universe_root = expected_universe_root;
     store = store_root manifest;
   }
   in

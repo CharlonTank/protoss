@@ -603,7 +603,8 @@ let command_project_build args =
         if locked then Protoss.Workspace.build_locked manifest
         else Protoss.Workspace.build manifest
   in
-  Printf.printf "Build %s\nStore %s\n" result.Protoss.Workspace.build_id result.store;
+  Printf.printf "Build %s\nUniverseRoot %s\nStore %s\n" result.Protoss.Workspace.build_id
+    result.universe_root result.store;
   if stats then print_string (Protoss.Workspace.stats_to_string result.stats)
 
 let command_project_lock args =
@@ -622,15 +623,17 @@ let command_project_package args =
   if has_flag "--check" args then
     let result = Protoss.Workspace.check_package manifest in
     Printf.printf
-      "Package OK %s\nPath %s\nInterface %s\nInterfacePath %s\nContract %s\nLock %s\nBuild %s\nStore %s\n"
+      "Package OK %s\nPath %s\nInterface %s\nInterfacePath %s\nContract %s\nLock %s\nBuild %s\nUniverseRoot %s\nStore %s\n"
       result.Protoss.Workspace.package_ref result.package_path result.interface_ref
-      result.interface_path result.interface_contract_hash result.lock_hash result.build_id result.store
+      result.interface_path result.interface_contract_hash result.lock_hash result.build_id
+      result.universe_root result.store
   else
     let result = Protoss.Workspace.write_package ~locked:(has_flag "--locked" args) manifest in
     Printf.printf
-      "Package %s\nPath %s\nInterface %s\nInterfacePath %s\nContract %s\nLock %s\nBuild %s\nStore %s\n"
+      "Package %s\nPath %s\nInterface %s\nInterfacePath %s\nContract %s\nLock %s\nBuild %s\nUniverseRoot %s\nStore %s\n"
       result.Protoss.Workspace.package_ref result.package_path result.interface_ref
-      result.interface_path result.interface_contract_hash result.lock_hash result.build_id result.store
+      result.interface_path result.interface_contract_hash result.lock_hash result.build_id
+      result.universe_root result.store
 
 let parse_project_interface_args args =
   let rec loop json check paths = function
