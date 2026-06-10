@@ -5836,6 +5836,19 @@ let () =
     && contains_substring inspected_negative_event "error-message=host timed out");
   assert_true "ledger negative external world inspectable"
     (String.length (Ledger.inspect_world ledger_root negative_world) > 0);
+  let merged_world = Ledger.merge ledger_root resume_world negative_world in
+  let inspected_merged_world = Ledger.inspect_world ledger_root merged_world in
+  assert_true "ledger merged world records left parent"
+    (contains_substring inspected_merged_world "merge-left=");
+  assert_true "ledger merged world records right parent"
+    (contains_substring inspected_merged_world "merge-right=");
+  let merged_replay = Ledger.replay ledger_root merged_world in
+  assert_true "ledger merged replay includes resume event"
+    (contains_substring merged_replay ("Event " ^ resume_event));
+  assert_true "ledger merged replay includes negative event"
+    (contains_substring merged_replay ("Event " ^ negative_event));
+  assert_true "ledger branches list merge parents"
+    (contains_substring (Ledger.branches ledger_root) "merge-left=");
   let bad_negative_signature_ref_event = "p2:bad-negative-signature-ref-event" in
   Store.write_file_atomic (Ledger.event_path ledger_root bad_negative_signature_ref_event)
     (replace_once inspected_negative_event ("request-signature-ref=" ^ human_signature_ref)

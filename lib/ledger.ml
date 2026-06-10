@@ -490,6 +490,14 @@ let validate_event root event content =
             ("maltyped event " ^ event ^ ": response-codec-ref mismatch: expected "
            ^ codec_ref ^ ", got " ^ declared)
       | None -> assert false)
+  | Some "merge" ->
+      List.iter need [ "merge-left"; "merge-right" ];
+      let left = Option.value (field "merge-left" fields) ~default:"" in
+      let right = Option.value (field "merge-right" fields) ~default:"" in
+      if not (Sys.file_exists (world_path root left)) then
+        failwith ("maltyped event " ^ event ^ ": merge-left world not found: " ^ left);
+      if not (Sys.file_exists (world_path root right)) then
+        failwith ("maltyped event " ^ event ^ ": merge-right world not found: " ^ right)
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
   fields
@@ -526,10 +534,19 @@ let rec replay_events root world =
   else
     let content = inspect_world root world in
     let fields = parse_lines content in
-    match (field "previous" fields, field "event" fields) with
-    | Some previous, Some event when event <> "" ->
-        replay_events root previous @ [ event ]
-    | _ -> []
+    let rec unique seen = function
+      | [] -> []
+      | event :: rest ->
+          if List.exists (String.equal event) seen then unique seen rest
+          else event :: unique (event :: seen) rest
+    in
+    match (field "merge-left" fields, field "merge-right" fields, field "event" fields) with
+    | Some left, Some right, Some event when event <> "" ->
+        unique [] (replay_events root left @ replay_events root right @ [ event ])
+    | _ -> (
+        match (field "previous" fields, field "event" fields) with
+        | Some previous, Some event when event <> "" -> replay_events root previous @ [ event ]
+        | _ -> [])
 
 let replay root world =
   let events = replay_events root world in
@@ -569,6 +586,34 @@ let fork root name world =
   write_file_atomic (branch_path root name) (world ^ "\n");
   world
 
+let merge root world_a world_b =
+  ignore (init root);
+  if not (Sys.file_exists (world_path root world_a)) then
+    failwith ("world not found: " ^ world_a);
+  if not (Sys.file_exists (world_path root world_b)) then
+    failwith ("world not found: " ^ world_b);
+  let left, right =
+    if String.compare world_a world_b <= 0 then (world_a, world_b)
+    else (world_b, world_a)
+  in
+  let events = Filename.concat root "events" in
+  let worlds = Filename.concat root "worlds" in
+  ensure_dir events;
+  ensure_dir worlds;
+  let event_content =
+    "world=" ^ left ^ "\nkind=merge\nmerge-left=" ^ left ^ "\nmerge-right=" ^ right ^ "\n"
+  in
+  let event_hash = hash ("event:" ^ event_content) in
+  let event_path = Filename.concat events event_hash in
+  if not (Sys.file_exists event_path) then write_file_atomic event_path event_content;
+  let merged_world = hash ("world-merge:" ^ left ^ ":" ^ right ^ ":" ^ event_hash) in
+  let merged_path = Filename.concat worlds merged_world in
+  if not (Sys.file_exists merged_path) then
+    write_file_atomic merged_path
+      ("previous=" ^ left ^ "\nevent=" ^ event_hash ^ "\nmerge-left=" ^ left
+     ^ "\nmerge-right=" ^ right ^ "\n");
+  merged_world
+
 let branches root =
   let worlds = Filename.concat root "worlds" in
   let world_lines =
@@ -579,7 +624,10 @@ let branches root =
              let fields = parse_lines (read_world root world) in
              "world " ^ world ^ " previous="
              ^ Option.value (field "previous" fields) ~default:""
-             ^ " event=" ^ Option.value (field "event" fields) ~default:"")
+             ^ " event=" ^ Option.value (field "event" fields) ~default:""
+             ^ (match (field "merge-left" fields, field "merge-right" fields) with
+               | Some left, Some right -> " merge-left=" ^ left ^ " merge-right=" ^ right
+               | _ -> ""))
   in
   let branch_lines =
     let dir = branch_dir root in

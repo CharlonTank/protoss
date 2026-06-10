@@ -184,7 +184,9 @@ listees dans la section "Gates de validation".
 - [ ] Promouvoir `Process` vers `Process caps a` dans le langage surface.
 - [ ] Rendre les capabilities visibles dans le type de `Process`.
 - [ ] Representer `WorldRef` comme Merkle-DAG evenementiel complet.
-- [ ] Ajouter fork/merge de mondes.
+- [x] Ajouter fork/merge de mondes.
+  Preuves: `Ledger.fork`, `Ledger.merge`, `protoss ledger merge`, assertions
+  "ledger merged" dans `test/test_protoss.ml` et `README.md`.
 - [x] Ajouter branches de monde deterministes.
 - [ ] Garantir que toute lecture monde passe par evenement explicite.
 - [x] Ajouter API pour reponse externe negative comme evenement typed.
