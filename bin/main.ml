@@ -59,7 +59,7 @@ let usage () =
      \       protoss mcp serve\n\
      \       protoss repl\n\
      \       protoss explain <error-code>|--list\n\
-     \       protoss grammar kernel\n\
+     \       protoss grammar kernel|human\n\
      \       protoss spec check [protoss-spec.md]\n\
      \       protoss bench build <project>\n\
      \       protoss cache stats|list <dir>\n\
@@ -1077,6 +1077,7 @@ let command_explain = function
 
 let command_grammar = function
   | [ "kernel" ] -> print_string Protoss.Kernel.executable_grammar_text
+  | [ "human" ] -> print_string Protoss.Surface_syntax.human_grammar_text
   | _ -> usage ()
 
 let command_spec = function

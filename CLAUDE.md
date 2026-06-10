@@ -20,7 +20,8 @@ Package aliases are local manifest entries (`package_aliases = ["name@semver=pat
 `package_policy_aliases = ["name@policy=path"]`) and must validate the imported package
 name/version or advertised policy before resolving to the locked package hash.
 `protoss grammar kernel` is the stable executable grammar surface for the trusted core; update
-`Kernel.executable_grammar_text` when adding core forms.
+`Kernel.executable_grammar_text` when adding core forms. `protoss grammar human` is the shipped
+Protoss/H grammar surface; update `Surface_syntax.human_grammar_text` when adding human syntax.
 `Store.put_object` interns through `PROTOSS_GLOBAL_STORE` or `$HOME/.protoss/global-store` and
 hardlinks project objects to that global payload when possible; preserve content-addressed writes.
 Patch audits carry `previous-root`/`root-ref` and write native `store/provenance` root-state plus

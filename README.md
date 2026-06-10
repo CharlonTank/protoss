@@ -35,7 +35,7 @@ What works now:
 - Source-level modules work with `(module Name)` and `(export symbol ...)`. Module-local definitions and type aliases are namespace-qualified, and imports may only reference exported symbols directly.
 - S-expression syntax errors include deterministic `line:column` locations. File loading and project builds preserve them as `path:line:column: message`; common type errors loaded from files are localized to the source expression or symbol when it can be recovered deterministically, with definition-level fallback.
 - Public CLI failures are prefixed with stable error codes from the `Public_error` catalog, including the formal taxonomy categories `TypeMismatch`, `UnknownReference`, `CapabilityDenied`, `NonTerminatingRecursion`, `NonProductiveProcess`, `HarnessRegression`, `AmbiguousHumanSyntax`, `UnsafeMigration`, `PolicyViolation`, and `SecretLeakRisk`. Use `protoss explain <code>` or `protoss explain --list` for the current catalog.
-- `protoss grammar kernel` prints the versioned executable grammar for trusted core declarations, types, expressions, requests, branches, and binders.
+- `protoss grammar kernel` prints the versioned executable grammar for trusted core declarations, types, expressions, requests, branches, and binders. `protoss grammar human` prints the versioned Protoss/H grammar covering the accepted S-expression and Elm-like human-source views.
 - `View msg` is a typed canonical UI type. Supported constructors are `text`, `image`, `button`, `input`, `column`, `row`, `list`, `when`, and `node`.
 - For HTML beyond the declarative constructors, `node`, `attr`, and `on` are an Elm-`Html`-style escape hatch and compose with the existing `View msg` tree: `node : String -> List (Attr msg) -> List (View msg) -> View msg` builds an arbitrary element, `attr : String -> String -> Attr msg` is a static attribute, and `on : String -> msg -> Attr msg` is an event handler. They introduce a new canonical type `Attr a` (mirrored on `View a`): `attr` is message-agnostic (`Attr Unit`) and unifies into any `List (Attr msg)`, exactly as `text : View Unit` composes into any `List (View msg)`. Attribute order follows the source and is never sorted, so equivalent S-expression and Elm-like forms hash identically. The web runtime renders nodes with `createElement`/`setAttribute`/`addEventListener` (never `innerHTML`) and dispatches the typed `msg`, so there is no script injection. The shipped prelude adds `defpoly` helpers over these primitives: `Html.div`/`Html.span`/`Html.p`/`Html.ul`/`Html.li`/`Html.a`, `Html.class`/`Html.id`/`Html.href`/`Html.style`, and `Html.onClick`/`Html.onInput`.
 - UI/message mismatches are rejected statically by the typechecker.
@@ -101,6 +101,7 @@ dune exec protoss -- duplicates examples/basic.protoss
 dune exec protoss -- duplicates --project examples/web/todo_app
 dune exec protoss -- termination examples/basic.protoss main
 dune exec protoss -- grammar kernel
+dune exec protoss -- grammar human
 dune exec protoss -- spec check protoss-spec.md
 
 dune exec protoss -- ledger inspect <WorldRefOrEventRef>

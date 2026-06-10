@@ -103,7 +103,8 @@ Preuves de section: `lib/parser.ml`, `lib/canonical_binary.ml`,
 
 Preuves de section: `lib/parser.ml`, `lib/surface_syntax.ml`,
 `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`, assertions
-Elm-like et modules humains dans `test/test_protoss.ml`.
+Elm-like, modules humains et "human official grammar" dans
+`test/test_protoss.ml`.
 
 - [x] Parser un sous-ensemble Elm-like avec signatures `name : Type`.
 - [x] Parser les definitions `name = expr` et `name arg = expr`.
@@ -122,7 +123,10 @@ Elm-like et modules humains dans `test/test_protoss.ml`.
 - [x] Convertir la syntaxe Elm-like vers l'AST S-expression existant.
 - [x] Verifier que syntaxe S-expression et syntaxe Elm-like equivalentes hashent
   pareil pour les cas couverts.
-- [ ] Finaliser la grammaire officielle Protoss/H.
+- [x] Finaliser la grammaire officielle Protoss/H.
+  Preuves: `Surface_syntax.human_grammar_text`, commande
+  `protoss grammar human`, assertions "human official grammar" dans
+  `test/test_protoss.ml`, `README.md`.
 - [ ] Supporter l'indentation significative complete.
 - [x] Supporter les modules humains `module X exposing (...)`.
   Preuves: `test/test_protoss.ml` assertion "human module exposing import" et

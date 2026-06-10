@@ -238,6 +238,17 @@ let () =
     (contains_substring Kernel.executable_grammar_text "Process");
   assert_true "kernel executable grammar exposes requests"
     (contains_substring Kernel.executable_grammar_text "request ::= (AskHuman String)");
+  assert_true "human official grammar versioned"
+    (contains_substring Surface_syntax.human_grammar_text "protoss-human-grammar-v1");
+  assert_true "human official grammar exposes sexp declarations"
+    (contains_substring Surface_syntax.human_grammar_text
+       "declaration ::= (module ModuleName)");
+  assert_true "human official grammar exposes Elm-like declarations"
+    (contains_substring Surface_syntax.human_grammar_text
+       "elm_declaration ::= module_decl");
+  assert_true "human official grammar exposes capability process type"
+    (contains_substring Surface_syntax.human_grammar_text
+       "Process { CapabilityName* } elm_type");
   assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
 let expect_parse_error input =
