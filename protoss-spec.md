@@ -674,7 +674,11 @@ contract, runtime browser payload et UI/message mismatch dans
   inclut `architecture`, assertion "web app cmd architecture" et build
   `protoss-app.json` dans `test/test_protoss.ml`, `README.md`, `CLAUDE.md`.
 - [ ] Ajouter migrations UI/harness pour changements de model plus complexes.
-- [ ] Ajouter examples humains Protoss/H complets pour apps web.
+- [x] Ajouter examples humains Protoss/H complets pour apps web.
+  Preuves: `examples/web/site_vitrine/src/site.protoss`,
+  `examples/web/site_vitrine/protoss.toml`, commande `protoss app check
+  examples/web/site_vitrine`, assertions "human web app example checks" et
+  "human web app example model" dans `test/test_protoss.ml`, `README.md`.
 
 ## 17. Erreurs et diagnostics
 

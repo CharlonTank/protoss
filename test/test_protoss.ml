@@ -6830,6 +6830,7 @@ let () =
   if integration_part "web" then (
   let stdlib_path = find_up (Sys.getcwd ()) "stdlib/prelude.protoss" in
   let todo_src = find_up (Sys.getcwd ()) "examples/web/todo_app" in
+  let site_vitrine_src = find_up (Sys.getcwd ()) "examples/web/site_vitrine" in
   (* Each web slice materializes its own todo project: the example sources
      plus a pinned manifest, built deterministically, so slices stay
      independent processes (same pattern as rebuild_workspace_a). Only src/
@@ -6854,6 +6855,10 @@ let () =
     "(Record (draft String) (items (List String)) (next Nat))"
     (Ast.string_of_typ contract.Web.model_ty);
   assert_equal "web app process architecture" "process" contract.Web.architecture;
+  let human_site_contract = Web.app_check site_vitrine_src in
+  assert_equal "human web app example checks" "process" human_site_contract.Web.architecture;
+  assert_equal "human web app example model" "(Record (lead String) (status String))"
+    (Ast.string_of_typ human_site_contract.Web.model_ty);
   let cmd_app = temp_dir "web-cmd-app" in
   ensure_dir (Filename.concat cmd_app "src");
   write_file (Filename.concat cmd_app "src/app.protoss")
