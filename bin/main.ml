@@ -13,6 +13,7 @@ let usage () =
      \       protoss convert --to pt|ptc|ptb <file>\n\
      \       protoss compare <file-a> <file-b> | protoss compare --graph <graph-a.json> <graph-b.json> | protoss compare --project <project-a> <project-b>\n\
      \       protoss capabilities <file> | protoss capabilities --project <project>\n\
+     \       protoss duplicates <file> | protoss duplicates --project <project>\n\
      \       protoss eval <file> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --graph <graph.json> --entry <name> [--trace-cache] [--cache <dir>]\n\
      \       protoss eval --store-graph <project-or-store> <graphHash> --entry <name> [--trace-cache] [--cache <dir>]\n\
@@ -221,6 +222,42 @@ let command_capabilities = function
       in
       let build = Protoss.Workspace.build ~write:false manifest in
       print_string (capability_audit_text build.Protoss.Workspace.checked)
+  | _ -> usage ()
+
+let duplicate_audit_text checked =
+  let groups = Hashtbl.create 32 in
+  List.iter
+    (fun (d : Protoss.Kernel.checked_def) ->
+      let names = Option.value (Hashtbl.find_opt groups d.def_id) ~default:[] in
+      Hashtbl.replace groups d.def_id (d.def.name :: names))
+    checked.Protoss.Kernel.defs;
+  let duplicates =
+    Hashtbl.fold
+      (fun def_id names acc ->
+        let names = List.sort String.compare names in
+        match names with _ :: _ :: _ -> (def_id, names) :: acc | _ -> acc)
+      groups []
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  in
+  let lines =
+    List.map
+      (fun (def_id, names) ->
+        "def-id=" ^ def_id ^ " names=[" ^ String.concat "," names ^ "]")
+      duplicates
+  in
+  "program-hash=" ^ Protoss.Kernel.hash_program checked ^ "\nduplicates="
+  ^ string_of_int (List.length duplicates) ^ "\n" ^ String.concat "\n" lines
+  ^ if lines = [] then "" else "\n"
+
+let command_duplicates = function
+  | [ file ] -> print_string (duplicate_audit_text (parse_and_check file))
+  | [ "--project"; project ] ->
+      let manifest =
+        Protoss.Workspace.parse_manifest
+          (Protoss.Workspace.project_root project)
+      in
+      let build = Protoss.Workspace.build ~write:false manifest in
+      print_string (duplicate_audit_text build.Protoss.Workspace.checked)
   | _ -> usage ()
 
 let canonical_program checked =
@@ -1209,6 +1246,7 @@ let () =
       | [ "hash"; file ] -> command_hash file
       | "compare" :: args -> command_compare args
       | "capabilities" :: args -> command_capabilities args
+      | "duplicates" :: args -> command_duplicates args
       | [ "canon"; "--version" ] -> print_endline Protoss.Kernel.canonical_version
       | [ "canon"; "--ptb"; file ] -> command_canon_ptb file
       | [ "canon"; "--graph"; file ] -> command_canon_graph file

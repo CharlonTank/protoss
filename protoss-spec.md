@@ -261,7 +261,7 @@ listees dans la section "Gates de validation".
 - [ ] Fournir generation de migrations assistee.
 - [ ] Fournir synthese de tests assistee.
 - [ ] Fournir explication de definition.
-- [ ] Detecter doublons semantiques.
+- [x] Detecter doublons semantiques.
 - [ ] Factoriser fonctions identiques.
 - [ ] Simuler changements dans un `WorldRef` forke.
 - [ ] Comparer deux branches par harness.
