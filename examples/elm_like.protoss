@@ -25,6 +25,15 @@ selected =
         true -> 1
         false -> 0
 
+layoutNestedCase : Nat
+layoutNestedCase =
+    case true of
+        true ->
+            case false of
+                true -> 1
+                false -> 2
+        false -> 0
+
 withLet : Nat
 withLet =
     let
@@ -34,6 +43,27 @@ withLet =
         bumped = base |> bump
     in
         bumped |> succ
+
+layoutLetCase : Nat
+layoutLetCase =
+    let
+        selected =
+            case false of
+                true -> 4
+                false -> 5
+    in
+        selected
+
+layoutLetFunction : Nat
+layoutLetFunction =
+    let
+        choose : Bool -> Nat
+        choose flag =
+            case flag of
+                true -> 8
+                false -> 9
+    in
+        choose true
 
 pick : Bool -> Nat -> Nat -> Nat
 pick flag yes no =

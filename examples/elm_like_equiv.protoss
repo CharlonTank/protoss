@@ -18,11 +18,34 @@
     (true 1)
     (false 0)))
 
+(def layoutNestedCase Nat
+  (match true
+    (true
+      (match false
+        (true 1)
+        (false 2)))
+    (false 0)))
+
 (def withLet Nat
   (let (base 2)
     (let (bump (-> Nat Nat) (lambda value (double value)))
     (let (bumped (bump base))
       (succ bumped)))))
+
+(def layoutLetCase Nat
+  (let (selected
+    (match false
+      (true 4)
+      (false 5)))
+    selected))
+
+(def layoutLetFunction Nat
+  (let (choose (-> Bool Nat)
+    (lambda flag
+      (match flag
+        (true 8)
+        (false 9))))
+    (choose true)))
 
 (def pick (-> Bool (-> Nat (-> Nat Nat)))
   (lambda flag

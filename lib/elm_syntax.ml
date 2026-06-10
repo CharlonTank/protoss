@@ -61,9 +61,19 @@ let ensure_unique_names what names =
       Hashtbl.add seen name ())
     names
 
-let nonempty_lines text =
-  text |> String.split_on_char '\n' |> List.map strip_line_comment |> List.map trim
-  |> List.filter (( <> ) "")
+type layout_line = {
+  indent : int;
+  text : string;
+}
+
+let layout_lines text =
+  text |> String.split_on_char '\n'
+  |> List.filter_map (fun raw ->
+         let source = strip_line_comment raw in
+         let text = trim source in
+         if text = "" then None else Some { indent = indentation source; text })
+
+let layout_line_source line = String.make line.indent ' ' ^ line.text
 
 let find_sub s needle =
   let n = String.length needle in
@@ -450,28 +460,61 @@ let rec parse_expr_text text =
     expr
 
 and parse_let_expr text =
-  let lines = nonempty_lines text in
+  let lines = layout_lines text in
   match lines with
-  | "let" :: rest ->
+  | { text = "let"; _ } :: rest ->
       let signatures = Hashtbl.create 8 in
-      let rec split_bindings acc = function
-        | [] -> fail "let block missing in"
-        | "in" :: body -> (List.rev acc, body)
-        | line :: rest -> (
-            match signature_separator line with
-            | Some (name, ty) ->
-                Hashtbl.replace signatures name (parse_type_text ty);
-                split_bindings acc rest
-            | None -> (
-                match value_separator line with
-                | Some (name, params, expr) -> split_bindings ((name, params, expr) :: acc) rest
-                | None -> fail ("invalid let binding: " ^ line)))
+      let finish_binding acc = function
+        | None -> acc
+        | Some (name, params, source_lines) ->
+            let source = String.concat "\n" (List.rev source_lines) |> trim in
+            if source = "" then fail ("let binding missing body: " ^ name);
+            (name, params, source) :: acc
       in
-      let bindings, body = split_bindings [] rest in
+      let rec split_bindings binding_indent acc current = function
+        | [] -> fail "let block missing in"
+        | line :: rest
+          when line.text = "in"
+               &&
+               (match binding_indent with
+               | None -> true
+               | Some indent -> line.indent <= indent) ->
+            let acc = finish_binding acc current in
+            if acc = [] then fail "let block requires at least one binding";
+            (List.rev acc, rest)
+        | line :: rest -> (
+            let binding_indent =
+              match binding_indent with None -> line.indent | Some indent -> indent
+            in
+            if line.indent < binding_indent then
+              fail ("unexpected let dedent: " ^ line.text)
+            else if line.indent > binding_indent then
+              match current with
+              | None -> fail ("unexpected indented let line: " ^ line.text)
+              | Some (name, params, source_lines) ->
+                  split_bindings (Some binding_indent) acc
+                    (Some (name, params, layout_line_source line :: source_lines))
+                    rest
+            else
+              let acc = finish_binding acc current in
+              match signature_separator line.text with
+              | Some (name, ty) ->
+                  Hashtbl.replace signatures name (parse_type_text ty);
+                  split_bindings (Some binding_indent) acc None rest
+              | None -> (
+                  match value_separator line.text with
+                  | Some (name, params, expr) ->
+                      let source_lines = if expr = "" then [] else [ expr ] in
+                      split_bindings (Some binding_indent) acc
+                        (Some (name, params, source_lines))
+                        rest
+                  | None -> fail ("invalid let binding: " ^ line.text)))
+      in
+      let bindings, body = split_bindings None [] None rest in
       let body =
         match body with
         | [] -> fail "let block missing body"
-        | lines -> parse_expr_text (String.concat "\n" lines)
+        | lines -> parse_expr_text (String.concat "\n" (List.map layout_line_source lines))
       in
       List.fold_right
         (fun (name, params, source) acc ->
@@ -487,12 +530,12 @@ and parse_let_expr text =
   | _ -> fail "let syntax is: let ... in ..."
 
 and parse_case_expr text =
-  let lines = nonempty_lines text in
+  let lines = layout_lines text in
   match lines with
-  | header :: branch_lines when starts_with header "case " && String.length header >= 8 ->
+  | header :: branch_lines when starts_with header.text "case " && String.length header.text >= 8 ->
       let scrutinee =
-        match find_sub header " of" with
-        | Some i -> trim (String.sub header 5 (i - 5))
+        match find_sub header.text " of" with
+        | Some i -> trim (String.sub header.text 5 (i - 5))
         | None -> fail "case syntax is: case expr of"
       in
       if branch_lines = [] then fail "case expression requires branches";
@@ -505,26 +548,37 @@ and parse_case_branches lines =
     | None -> List.rev acc
     | Some (pattern, body_lines) ->
         let body = String.concat "\n" (List.rev body_lines) in
+        if trim body = "" then fail ("case branch missing body: " ^ pattern);
         parse_case_branch pattern body :: acc |> List.rev
+  in
+  let branch_indent =
+    match lines with [] -> fail "case expression requires branches" | line :: _ -> line.indent
   in
   let rec loop acc current = function
     | [] -> finish acc current
     | line :: rest -> (
-        match find_sub line "->" with
+        if line.indent < branch_indent then fail ("unexpected case dedent: " ^ line.text)
+        else if line.indent > branch_indent then
+          match current with
+          | None -> fail ("unexpected indented case line: " ^ line.text)
+          | Some (pattern, body) ->
+              loop acc (Some (pattern, layout_line_source line :: body)) rest
+        else
+          match find_sub line.text "->" with
         | Some i ->
-            let pattern = trim (String.sub line 0 i) in
-            let body = trim (String.sub line (i + 2) (String.length line - i - 2)) in
+            let pattern = trim (String.sub line.text 0 i) in
+            let body =
+              trim (String.sub line.text (i + 2) (String.length line.text - i - 2))
+            in
             let acc =
               match current with
               | None -> acc
               | Some (old_pattern, old_body) ->
                   parse_case_branch old_pattern (String.concat "\n" (List.rev old_body)) :: acc
             in
-            loop acc (Some (pattern, [ body ])) rest
-        | None -> (
-            match current with
-            | None -> fail ("case branch missing ->: " ^ line)
-            | Some (pattern, body) -> loop acc (Some (pattern, line :: body)) rest))
+            let body = if body = "" then [] else [ body ] in
+            loop acc (Some (pattern, body)) rest
+        | None -> fail ("case branch missing ->: " ^ line.text))
   in
   loop [] None lines
 
@@ -792,7 +846,7 @@ let collect_block lines start first =
       let trimmed = trim raw in
       if trimmed = "" then loop (i + 1) acc
       else if indentation raw > 0 || starts_with trimmed "|" || starts_with trimmed "," then
-        loop (i + 1) (trimmed :: acc)
+        loop (i + 1) (raw :: acc)
       else (String.concat "\n" (List.rev acc), i)
   in
   let acc = if trim first = "" then [] else [ trim first ] in

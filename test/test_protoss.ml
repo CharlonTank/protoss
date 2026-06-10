@@ -523,9 +523,22 @@ let () =
   let elm_like_selected, _ = Runtime.normalize_def elm_like "selected" in
   assert_equal "Elm-like case normalizes" "1"
     (Runtime.value_to_string elm_like_selected);
+  let elm_like_layout_nested_case, _ =
+    Runtime.normalize_def elm_like "layoutNestedCase"
+  in
+  assert_equal "Elm-like nested layout case normalizes" "2"
+    (Runtime.value_to_string elm_like_layout_nested_case);
   let elm_like_with_let, _ = Runtime.normalize_def elm_like "withLet" in
   assert_equal "Elm-like let normalizes" "5"
     (Runtime.value_to_string elm_like_with_let);
+  let elm_like_layout_let_case, _ = Runtime.normalize_def elm_like "layoutLetCase" in
+  assert_equal "Elm-like layout let case normalizes" "5"
+    (Runtime.value_to_string elm_like_layout_let_case);
+  let elm_like_layout_let_function, _ =
+    Runtime.normalize_def elm_like "layoutLetFunction"
+  in
+  assert_equal "Elm-like layout let function normalizes" "8"
+    (Runtime.value_to_string elm_like_layout_let_function);
   let elm_like_picked, _ = Runtime.normalize_def elm_like "picked" in
   assert_equal "Elm-like if and multi-parameter lambda normalize" "8"
     (Runtime.value_to_string elm_like_picked);

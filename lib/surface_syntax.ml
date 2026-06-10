@@ -95,8 +95,8 @@ elm_type ::= Unit | Bool | Nat | String | Name | Name elm_type+
 
 elm_expr ::= literal | Name | \Name+ -> elm_expr
            | if elm_expr then elm_expr else elm_expr
-           | let value_decl+ in elm_expr
-           | case elm_expr of elm_case+
+           | let elm_block(value_decl+) in elm_block(elm_expr)
+           | case elm_expr of elm_block(elm_case+)
            | { field = elm_expr (, field = elm_expr)* }
            | { elm_expr | field = elm_expr (, field = elm_expr)* }
            | [ elm_expr (, elm_expr)* ]
@@ -105,6 +105,9 @@ elm_expr ::= literal | Name | \Name+ -> elm_expr
            | elm_expr binary_op elm_expr
            | elm_expr elm_expr+
 
+elm_case ::= pattern -> elm_expr
+           | pattern -> elm_block(elm_expr)
+elm_block(x) ::= NEWLINE INDENT x+ DEDENT
 binary_op ::= + | == | /= | < | <= | > | >= | && | ||
 exposing_list ::= .. | Name (, Name)*
 Name ::= identifier

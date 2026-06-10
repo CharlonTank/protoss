@@ -127,7 +127,13 @@ Elm-like, modules humains et "human official grammar" dans
   Preuves: `Surface_syntax.human_grammar_text`, commande
   `protoss grammar human`, assertions "human official grammar" dans
   `test/test_protoss.ml`, `README.md`.
-- [ ] Supporter l'indentation significative complete.
+- [x] Supporter l'indentation significative complete.
+  Preuves: `lib/elm_syntax.ml` preserve les lignes de bloc avec indentation,
+  `Surface_syntax.human_grammar_text` documente `INDENT`/`DEDENT`,
+  fixtures `examples/elm_like.protoss` et `examples/elm_like_equiv.protoss`,
+  assertions "Elm-like nested layout case normalizes", "Elm-like layout let
+  case normalizes" et "Elm-like layout let function normalizes" dans
+  `test/test_protoss.ml`, `README.md`, `CLAUDE.md`.
 - [x] Supporter les modules humains `module X exposing (...)`.
   Preuves: `test/test_protoss.ml` assertion "human module exposing import" et
   `README.md`.

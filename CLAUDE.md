@@ -116,8 +116,9 @@ dispatcher (pattern-matches argv → `command_*` functions → `Protoss.<Module>
 
 1. `parser.ml` — entry point for text. Auto-detects surface syntax: if `Elm_syntax.looks_like`,
    it routes through `elm_syntax.ml` (`to_sexp_source`) to lower Elm-like text to S-expressions
-   first; otherwise parses S-expressions directly (`sexp.ml`). Either way the result is one
-   canonical S-expression AST, so both syntaxes converge before checking.
+   first, including significant indentation for nested `let`/`case` blocks; otherwise parses
+   S-expressions directly (`sexp.ml`). Either way the result is one canonical S-expression AST,
+   so both syntaxes converge before checking.
 2. `ast.ml` — the surface AST (`typ`, `expr`, `def`, `program`, `req`). Plain data, no logic.
 3. `loader.ml` — reads files/workspaces, applies aliases/desugaring, attaches `path:line:col`
    source locations to errors.
