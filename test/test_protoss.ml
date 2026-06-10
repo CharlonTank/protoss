@@ -168,6 +168,48 @@ let () =
   assert_equal "string primitive utf8 length" "3" (string_of_int (String_prim.length utf8_sample));
   assert_equal "string primitive utf8 slice" "\195\169" (String_prim.slice utf8_sample 1 1);
   assert_equal "kernel hash algorithm" "sha256" Kernel.hash_algorithm;
+  let public_error_codes =
+    List.map (fun (entry : Public_error.entry) -> entry.code) Public_error.catalog
+  in
+  assert_equal "public error codes are unique"
+    (string_of_int (List.length public_error_codes))
+    (string_of_int (List.length (List.sort_uniq String.compare public_error_codes)));
+  List.iter
+    (fun name ->
+      assert_true ("public error taxonomy contains " ^ name)
+        (List.mem name (Public_error.taxonomy_names ())))
+    [
+      "TypeMismatch";
+      "UnknownReference";
+      "CapabilityDenied";
+      "NonTerminatingRecursion";
+      "NonProductiveProcess";
+      "HarnessRegression";
+      "AmbiguousHumanSyntax";
+      "UnsafeMigration";
+      "PolicyViolation";
+      "SecretLeakRisk";
+    ];
+  assert_true "explain WEB007 uses public error catalog"
+    (contains_substring (Public_error.explain "WEB007") "message type");
+  assert_true "explain CAPABILITY keeps legacy public code"
+    (contains_substring (Public_error.explain "CAPABILITY") "explicit capabilities");
+  assert_true "explain --list exposes stable codes"
+    (contains_substring (Public_error.list_text ()) "TYPE001 TypeMismatch");
+  assert_equal "CLI parse errors get syntax code" "SYN001"
+    (Public_error.code_for_cli_kind "parse error" "1:1: unterminated list");
+  assert_equal "CLI type errors get type mismatch code" "TYPE001"
+    (Public_error.code_for_cli_kind "check error" "expected Nat, got Bool");
+  assert_equal "CLI capability errors get capability code" "CAP001"
+    (Public_error.code_for_cli_kind "check error" "missing capability Human.ask");
+  assert_equal "CLI localized load type errors keep type code" "TYPE001"
+    (Public_error.code_for_cli_kind "load error"
+       "examples/bad.protoss:1:14: definition bad: expected Nat, got Bool");
+  assert_equal "CLI localized load syntax errors keep syntax code" "SYN001"
+    (Public_error.code_for_cli_kind "load error"
+       "examples/bad.protoss:1:1: unterminated list");
+  assert_equal "CLI web errors keep explicit web code" "WEB007"
+    (Public_error.code_for_cli_kind "web error" "WEB007 view message mismatch");
   assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
 let expect_parse_error input =

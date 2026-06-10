@@ -125,5 +125,7 @@ helpers, plus self-hosted Sexp/Json/Protoss parsers written in Protoss itself).
   asserting the sugared and desugared forms hash identically.
 - **Alpha-stability:** binder names must not affect the canonical graph or hash.
 - Error messages carry `path:line:column` locations; preserve that when adding error paths.
+- Public CLI errors are prefixed through `public_error.ml`; add or reuse a stable catalog code when
+  exposing a new user-visible error family, and keep `protoss explain --list` useful.
 - `examples/` holds `.protoss` fixtures used by tests; `patches/` holds JSON patch fixtures.
 - Editor support (syntax highlighting, go-to-definition) lives in `editors/cursor/protoss-syntax`.

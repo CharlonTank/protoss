@@ -52,7 +52,7 @@ let usage () =
      \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --capability-scopes <graph.json> [nameOrCapRef] | --host-contract <graph.json> | --check-host-contract <graph.json> <contract.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
      \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --host-contract | --check-host-contract <contract.json> | --node <nodeRef> | --def <nameOrDefId>\n\
      \       protoss repl\n\
-     \       protoss explain <error-code>\n\
+     \       protoss explain <error-code>|--list\n\
      \       protoss bench build <project>\n\
      \       protoss cache stats|list <dir>\n\
      \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats [args]";
@@ -85,7 +85,8 @@ let find_arg flag args =
 let required_arg flag args = match find_arg flag args with Some v -> v | None -> usage ()
 
 let print_error kind msg =
-  prerr_endline (kind ^ ": " ^ msg);
+  let code = Protoss.Public_error.code_for_cli_kind kind msg in
+  prerr_endline (code ^ " " ^ kind ^ ": " ^ msg);
   exit 1
 
 let protect f =
@@ -911,27 +912,8 @@ let command_repl () =
   with End_of_file -> ()
 
 let command_explain = function
-  | [ code ] ->
-      let msg =
-        match code with
-        | "WEB001" -> "Missing init/update/view definition in a web app."
-        | "WEB007" -> "view returns a View whose message type does not match update."
-        | "PATCH_DEPS" -> "Patch deps must exactly match canonical definition dependencies."
-        | "CAPABILITY" -> "Effects require explicit capabilities in the project or source."
-        | "SELF_TC001" -> "Self-hosted typechecker: unknown variable."
-        | "SELF_TC002" -> "Self-hosted typechecker: expected and actual types differ."
-        | "SELF_TC003" -> "Self-hosted typechecker: application target is not a function."
-        | "SELF_TC004" -> "Self-hosted typechecker: construct is outside the supported subset."
-        | "SELF_TC005" -> "Self-hosted typechecker: case branch types differ."
-        | "SELF_TC006" -> "Self-hosted typechecker: record field is missing or unknown."
-        | "SELF_TC007" -> "Self-hosted typechecker: variant constructor or payload is invalid."
-        | "SELF_TC008" -> "Self-hosted typechecker: text parsing failed."
-        | "SELF_TC009" -> "Self-hosted typechecker: case expression is not exhaustive."
-        | "SELF_TC010" -> "Self-hosted typechecker: shared static frontend rejected the declarations."
-        | "SELF_TC011" -> "Self-hosted typechecker: polymorphic instantiation is invalid."
-        | _ -> "Unknown error code."
-      in
-      print_endline msg
+  | [ "--list" ] -> print_endline (Protoss.Public_error.list_text ())
+  | [ code ] -> print_endline (Protoss.Public_error.explain code)
   | _ -> usage ()
 
 (* ---- Self-hosted frontend bridge ----------------------------------------

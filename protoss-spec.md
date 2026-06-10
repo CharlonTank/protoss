@@ -345,11 +345,16 @@ listees dans la section "Gates de validation".
 - [x] Localiser des erreurs type communes vers source quand possible.
 - [x] Ajouter diagnostics patch operation par operation.
 - [x] Ajouter `explain WEB007`.
-- [ ] Formaliser la taxonomie `TypeMismatch`, `UnknownReference`,
+- [x] Formaliser la taxonomie `TypeMismatch`, `UnknownReference`,
   `CapabilityDenied`, `NonTerminatingRecursion`, `NonProductiveProcess`,
   `HarnessRegression`, `AmbiguousHumanSyntax`, `UnsafeMigration`,
   `PolicyViolation`, `SecretLeakRisk`.
-- [ ] Associer un code stable a chaque erreur publique.
+  Preuves: `lib/public_error.ml`, assertions `public error taxonomy` dans
+  `test/test_protoss.ml`, `README.md` et `CLAUDE.md`.
+- [x] Associer un code stable a chaque erreur publique.
+  Preuves: `Protoss.Public_error.code_for_cli_kind`, prefixe CLI dans
+  `bin/main.ml`, `protoss explain --list` et assertions `CLI ... code` dans
+  `test/test_protoss.ml`.
 - [x] Verifier qu'aucune exception OCaml brute ne fuite dans les erreurs CLI.
 - [ ] Modeliser les erreurs externes negatives comme evenements ledger.
 - [x] Ajouter helpers `Result` pour erreurs metier dans les examples.
