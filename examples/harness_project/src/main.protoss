@@ -1,2 +1,5 @@
 (def two Nat 2)
 (def label String "ok")
+(def sample Nat 2)
+(def isStable (-> Nat Bool) (lambda (n Nat) true))
+(def invariantOk Bool true)

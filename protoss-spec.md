@@ -449,15 +449,35 @@ parser", "harness report" et "harness failing" dans `test/test_protoss.ml`,
   Preuves: `Harness.run_json`, syntaxe `unit def == expected`, assertions
   "harness unit actual", "harness failing status" et "harness failing
   expected" dans `test/test_protoss.ml`.
-- [ ] Supporter tests de proprietes.
-- [ ] Supporter generateurs de donnees.
-- [ ] Supporter benchmarks.
-- [ ] Supporter invariants metier.
-- [ ] Supporter contrats de migration.
-- [ ] Supporter scenarios de monde.
-- [ ] Supporter politiques de securite.
-- [ ] Supporter prompts de diagnostic.
-- [ ] Supporter evaluations IA.
+- [x] Supporter tests de proprietes.
+  Preuves: `Harness.Property`, syntaxe `property def [with generator]`,
+  assertion "harness property with generator passes" dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Supporter generateurs de donnees.
+  Preuves: `Harness.Generator`, application de generateur dans
+  `Harness.run_one`, assertion "harness generator actual" dans
+  `test/test_protoss.ml`, fixture `examples/harness_project/harness/smoke.pth`.
+- [x] Supporter benchmarks.
+  Preuves: `Harness.Benchmark`, syntaxe `benchmark def`, assertion "harness
+  benchmark passes" dans `test/test_protoss.ml`, `README.md`.
+- [x] Supporter invariants metier.
+  Preuves: `Harness.Invariant`, syntaxe `invariant def == expected`, assertion
+  "harness invariant passes" dans `test/test_protoss.ml`.
+- [x] Supporter contrats de migration.
+  Preuves: `Harness.Migration`, syntaxe `migration def == expected`, assertion
+  "harness migration contract passes" dans `test/test_protoss.ml`.
+- [x] Supporter scenarios de monde.
+  Preuves: `Harness.Scenario`, syntaxe `scenario def`, assertion "harness
+  world scenario passes" dans `test/test_protoss.ml`.
+- [x] Supporter politiques de securite.
+  Preuves: `Harness.Security`, syntaxe `security def == expected`, assertion
+  "harness security policy passes" dans `test/test_protoss.ml`.
+- [x] Supporter prompts de diagnostic.
+  Preuves: `Harness.Diagnostic`, syntaxe `diagnostic prompt`, assertion
+  "harness diagnostic prompt actual" dans `test/test_protoss.ml`.
+- [x] Supporter evaluations IA.
+  Preuves: `Harness.AiEval`, syntaxe `ai-eval def == expected`, assertion
+  "harness ai evaluation passes" dans `test/test_protoss.ml`, `README.md`.
 - [x] Faire echouer les patches qui regressent un harness attache.
   Preuves: `Agent_protocol.validate_harnesses`, erreur `HARNESS001`, taxonomy
   `HarnessRegression`, assertion "agent commit rejects failing harness" et
@@ -779,8 +799,13 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 ### v0.5 - Harness IA
 
-- [ ] Tests de proprietes.
-- [ ] Generation de tests par IA.
+- [x] Tests de proprietes.
+  Preuves: `Harness.Property`, assertion "harness property with generator
+  passes" dans `test/test_protoss.ml`, `README.md`.
+- [x] Generation de tests par IA.
+  Preuves: `Agent_protocol.synthesize_tests_json`, commande `protoss agent
+  synthesize-tests`, assertion "agent test synthesis suggests normalization
+  harness" dans `test/test_protoss.ml`, `README.md`.
 - [x] Validation de patches par harness.
   Preuves: `Agent_protocol.commit_patch_json`, option CLI
   `protoss agent commit --harness`, assertions "agent commit rejects missing

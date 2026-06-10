@@ -4415,12 +4415,34 @@ let () =
          && contains_substring (json_string_field "harnessTemplate" suggestion)
               "harness two_normalizes = unit two == <expected>")
        agent_test_suggestions);
-  let harness_checked = check "(def two Nat 2)\n(def main Nat 0)" in
+  let harness_checked =
+    check
+      "(def two Nat 2)\n\
+       (def main Nat 0)\n\
+       (def sample Nat 2)\n\
+       (def prop (-> Nat Bool) (lambda (n Nat) true))\n\
+       (def boolProp Bool true)\n\
+       (def invariantOk Bool true)\n\
+       (def migrationOk Bool true)\n\
+       (def securityOk Bool true)\n\
+       (def evalOk Bool true)"
+  in
   let harness_source =
-    "harness twoExample = example two\nharness twoUnit = unit two == 2\n"
+    "harness twoExample = example two\n\
+     harness twoUnit = unit two == 2\n\
+     harness propBool = property boolProp\n\
+     harness propGenerated = property prop with sample\n\
+     harness sampleGenerator = generator sample\n\
+     harness twoBenchmark = benchmark two\n\
+     harness invariantOk = invariant invariantOk == true\n\
+     harness migrationOk = migration migrationOk == true\n\
+     harness scenarioMain = scenario main\n\
+     harness securityOk = security securityOk == true\n\
+     harness diagnosticPrompt = diagnostic inspect two\n\
+     harness aiEvalOk = ai-eval evalOk == true\n"
   in
   let harnesses = Harness.parse harness_source in
-  assert_equal "harness parser declarations" "2"
+  assert_equal "harness parser declarations" "12"
     (string_of_int (List.length harnesses));
   assert_true "harness canonical bytes include format"
     (contains_substring (Harness.canonical_bytes harness_source)
@@ -4435,9 +4457,18 @@ let () =
     (json_string_field "format" harness_report);
   assert_equal "harness report status" "pass"
     (json_string_field "status" harness_report);
-  assert_equal "harness report count" "2"
+  assert_equal "harness report count" "12"
     (string_of_int (json_nat_field "harnessCount" harness_report));
   let harness_results = json_array_field "harnesses" harness_report in
+  let harness_result name =
+    match
+      List.find_opt
+        (fun result -> String.equal (json_string_field "name" result) name)
+        harness_results
+    with
+    | Some result -> result
+    | None -> fail ("missing harness result: " ^ name)
+  in
   let harness_example = List.hd harness_results in
   assert_equal "harness result id"
     (Harness.harness_id (List.hd harnesses))
@@ -4447,6 +4478,26 @@ let () =
   assert_equal "harness unit actual" "2" (json_string_field "actual" harness_unit);
   assert_equal "harness unit expected" "2"
     (json_string_field "expected" harness_unit);
+  assert_true "harness property with generator passes"
+    (json_bool_field "passed" (harness_result "propGenerated"));
+  assert_equal "harness property diagnostic names generator" "generator=sample sample=2"
+    (json_string_field "diagnostic" (harness_result "propGenerated"));
+  assert_equal "harness generator actual" "2"
+    (json_string_field "actual" (harness_result "sampleGenerator"));
+  assert_true "harness benchmark passes"
+    (json_bool_field "passed" (harness_result "twoBenchmark"));
+  assert_true "harness invariant passes"
+    (json_bool_field "passed" (harness_result "invariantOk"));
+  assert_true "harness migration contract passes"
+    (json_bool_field "passed" (harness_result "migrationOk"));
+  assert_true "harness world scenario passes"
+    (json_bool_field "passed" (harness_result "scenarioMain"));
+  assert_true "harness security policy passes"
+    (json_bool_field "passed" (harness_result "securityOk"));
+  assert_equal "harness diagnostic prompt actual" "inspect two"
+    (json_string_field "actual" (harness_result "diagnosticPrompt"));
+  assert_true "harness ai evaluation passes"
+    (json_bool_field "passed" (harness_result "aiEvalOk"));
   let failing_harness =
     Json.parse
       (Harness.run_json harness_checked ~source:"inline.pth"
