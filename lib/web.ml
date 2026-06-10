@@ -636,6 +636,7 @@ let runtime_js =
   window.ProtossRuntime = {
     start: function (app) {
       var mount = document.getElementById("app");
+      mount.className = "protoss-app";
       var machine = evalProgram(app.program);
       var hostContract = hostContractIndex(app.hostContract || {});
       var modelValue = app.initialModel;
