@@ -38,6 +38,7 @@ let usage () =
      \       protoss patch from-diff <store-a> <store-b>\n\
      \       protoss diff [--json] <store-a> <store-b>\n\
      \       protoss audit [project]\n\
+     \       protoss git map [project]\n\
      \       protoss invariants file <file> | graph <graph.json> | alpha <file-a> <file-b>\n\
      \       protoss invariants graph --store-graph <project-or-store> <graphHash>\n\
      \       protoss invariants process <file> --entry <name> --response <value>\n\
@@ -730,6 +731,17 @@ let command_audit = function
       print_string (Protoss.Workspace.audit manifest)
   | _ -> usage ()
 
+let command_git = function
+  | [ "map" ] ->
+      let manifest = Protoss.Workspace.parse_manifest (Sys.getcwd ()) in
+      let mapping = Protoss.Workspace.write_git_mapping manifest in
+      print_string (Protoss.Workspace.git_mapping_content mapping)
+  | [ "map"; project ] ->
+      let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root project) in
+      let mapping = Protoss.Workspace.write_git_mapping manifest in
+      print_string (Protoss.Workspace.git_mapping_content mapping)
+  | _ -> usage ()
+
 let command_invariants = function
   | [ "file"; file ] ->
       print_string (Protoss.Invariants.describe_file (Protoss.Invariants.check_file file))
@@ -1321,6 +1333,7 @@ let () =
       | "patch" :: args -> command_patch args
       | "diff" :: args -> command_diff args
       | "audit" :: args -> command_audit args
+      | "git" :: args -> command_git args
       | "invariants" :: args -> command_invariants args
       | "fmt" :: args -> command_fmt args
       | "graph" :: args -> command_graph args

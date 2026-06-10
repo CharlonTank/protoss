@@ -559,8 +559,14 @@ diff/patch review et chemins structurels dans `test/test_protoss.ml`.
 - [x] Ajouter vue review humaine pour patches structurels.
   Preuves: `Patch.review_text`, commande `protoss patch review <patch.json>`,
   assertion "patch review operation" dans `test/test_protoss.ml` et `README.md`.
-- [ ] Mapper `Git commit -> UniverseRoot`.
-- [ ] Mapper `Git branch -> Universe branch`.
+- [x] Mapper `Git commit -> UniverseRoot`.
+  Preuves: `Workspace.write_git_mapping`, commande `protoss git map`, fichier
+  `.protoss/git.map`, assertion "git map records current universe root" dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Mapper `Git branch -> Universe branch`.
+  Preuves: `Workspace.git_universe_branch`, champ `universe-branch` dans
+  `.protoss/git.map`, assertion "git map records universe branch" dans
+  `test/test_protoss.ml`, `README.md`.
 - [ ] Mapper `Git blame -> provenance ledger`.
 - [ ] Exporter layout `/protoss.lock`, `/views/**/*.pt`, `/cache/**/*.ptb`,
   `/harness/**/*.pth`.

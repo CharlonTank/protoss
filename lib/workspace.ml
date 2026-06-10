@@ -62,6 +62,21 @@ let ensure_dir = Store.ensure_dir_cached
 let read_file path =
   try Store.read_file path with Store.Error msg -> fail msg | Sys_error msg -> fail msg
 
+let read_command cmd =
+  let ic = Unix.open_process_in cmd in
+  let buf = Buffer.create 128 in
+  (try
+     while true do
+       Buffer.add_string buf (input_line ic);
+       Buffer.add_char buf '\n'
+     done
+   with End_of_file -> ());
+  match Unix.close_process_in ic with
+  | Unix.WEXITED 0 -> trim (Buffer.contents buf)
+  | Unix.WEXITED code -> fail ("command failed (" ^ string_of_int code ^ "): " ^ cmd)
+  | Unix.WSIGNALED signal -> fail ("command signaled (" ^ string_of_int signal ^ "): " ^ cmd)
+  | Unix.WSTOPPED signal -> fail ("command stopped (" ^ string_of_int signal ^ "): " ^ cmd)
+
 (* Workspace artifacts are deterministic, so rebuilding into an existing store
    leaves most of them byte-identical; comparing first skips the write entirely
    (nothing in the project model depends on mtimes). *)
@@ -760,6 +775,14 @@ type package_result = {
   store : string;
 }
 
+type git_mapping = {
+  git_map_path : string;
+  git_commit : string;
+  git_branch : string;
+  git_universe_root : string;
+  git_universe_branch : string;
+}
+
 type prepared_build = {
   units : unit_load list;
   checked : Kernel.checked;
@@ -1110,6 +1133,51 @@ let build_prepared ?(write = true) ?lock_hash manifest prepared =
 
 let build ?(write = true) ?lock_hash manifest =
   build_prepared ~write ?lock_hash manifest (prepare_build manifest)
+
+let git_map_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "git.map"
+
+let git_command root args =
+  "git -C " ^ Filename.quote root ^ " "
+  ^ String.concat " " (List.map Filename.quote args)
+
+let git_output root args = read_command (git_command root args)
+
+let git_branch root =
+  try git_output root [ "symbolic-ref"; "--quiet"; "--short"; "HEAD" ] with
+  | Error _ -> "detached:" ^ git_output root [ "rev-parse"; "--short"; "HEAD" ]
+
+let git_universe_branch branch universe_root =
+  Kernel.hash_string
+    ("protoss-universe-branch-v1\nbranch=" ^ branch ^ "\nuniverse-root=" ^ universe_root)
+
+let git_mapping_content mapping =
+  String.concat "\n"
+    [
+      "protoss-git-map-v1";
+      "commit=" ^ mapping.git_commit;
+      "branch=" ^ mapping.git_branch;
+      "universe-root=" ^ mapping.git_universe_root;
+      "universe-branch=" ^ mapping.git_universe_branch;
+      "";
+    ]
+
+let write_git_mapping manifest =
+  let build_result = build manifest in
+  let commit = git_output manifest.root [ "rev-parse"; "HEAD" ] in
+  let branch = git_branch manifest.root in
+  let universe_branch = git_universe_branch branch build_result.universe_root in
+  let mapping =
+    {
+      git_map_path = git_map_path manifest;
+      git_commit = commit;
+      git_branch = branch;
+      git_universe_root = build_result.universe_root;
+      git_universe_branch = universe_branch;
+    }
+  in
+  ensure_dir (Filename.dirname mapping.git_map_path);
+  write_file mapping.git_map_path (git_mapping_content mapping);
+  mapping
 
 let lock_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "lock"
 

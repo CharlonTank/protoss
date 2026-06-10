@@ -4669,6 +4669,11 @@ let () =
 	        (def askName (Process String) (Human.ask \"Name?\"))\n");
     root
   in
+  let run_shell label cmd =
+    match Sys.command cmd with
+    | 0 -> ()
+    | code -> fail (label ^ " failed with exit " ^ string_of_int code ^ ": " ^ cmd)
+  in
   (* Rebuilds the workspace-a chain (build + lock + package + locked-build
      record) for slices that run without the project slice. Every step is
      deterministic over content-addressed state, so the resulting tree is
@@ -4741,6 +4746,29 @@ let () =
        "capabilities = [\"Http.get\"]");
   let policy_manifest_declared = Workspace.parse_manifest policy_project_root in
   ignore (Workspace.build policy_manifest_declared);
+  let git_map_ws = make_workspace "workspace-git-map" 4 "g" in
+  let git_q = Filename.quote git_map_ws in
+  run_shell "git init" ("git -C " ^ git_q ^ " init -q");
+  run_shell "git config email"
+    ("git -C " ^ git_q ^ " config user.email protoss@example.invalid");
+  run_shell "git config name" ("git -C " ^ git_q ^ " config user.name Protoss");
+  run_shell "git add" ("git -C " ^ git_q ^ " add protoss.toml src");
+  run_shell "git commit" ("git -C " ^ git_q ^ " commit -q -m initial");
+  let git_map_manifest = Workspace.parse_manifest git_map_ws in
+  let git_mapping = Workspace.write_git_mapping git_map_manifest in
+  let git_map_content = Store.read_file git_mapping.Workspace.git_map_path in
+  assert_true "git map records commit" (String.length git_mapping.git_commit = 40);
+  assert_true "git map records branch" (String.length git_mapping.git_branch > 0);
+  assert_true "git map records universe branch"
+    (contains_substring git_mapping.git_universe_branch "p2:");
+  assert_equal "git map records current universe root" git_mapping.git_universe_root
+    (String.trim
+       (Store.read_file (Workspace.universe_root_path (Workspace.store_root git_map_manifest))));
+  assert_true "git map artifact links commit and root"
+    (contains_substring git_map_content ("commit=" ^ git_mapping.git_commit)
+    && contains_substring git_map_content ("universe-root=" ^ git_mapping.git_universe_root)
+    && contains_substring git_map_content
+         ("universe-branch=" ^ git_mapping.git_universe_branch));
   let ws_a = make_workspace "workspace-a" 2 "x" in
   let manifest_a = Workspace.parse_manifest ws_a in
   trace_test "integration:workspace-a";
