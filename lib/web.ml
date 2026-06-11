@@ -1126,6 +1126,11 @@ let inject_before_body html =
   | None -> html ^ livereload_script
 
 let serve ?(port = 8080) project =
+  (* Every browser reload drops and reopens its SSE stream, so the next push
+     writes to a closed socket. Ignore SIGPIPE so that write raises an EPIPE
+     exception the notify loop catches and prunes, instead of killing the
+     server (which made `live` die after a couple of saves). *)
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   (* Dev server: skip the pre-render evaluation (the browser recomputes init),
      so each save's rebuild avoids waking the interpreted prelude. *)
   let output = ref (build ~prerender:false project) in
