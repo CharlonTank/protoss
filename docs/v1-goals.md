@@ -206,7 +206,7 @@ satisfaites.
   un test (vérification mécanique type `spec check` branchée dans doctor).
 - **Done** : vérification mécanique des claims verte ; fulltest vert.
 
-### G14 — Gate final V1.0 [pending]
+### G14 — Gate final V1.0 [done]
 - **Périmètre** : orchestrateur.
 - **Dépendances** : tous les goals précédents.
 - **Goal** : dérouler la section 23 de la checklist depuis un checkout propre :
@@ -339,3 +339,9 @@ satisfaites.
   mini-builds tmp (def modifiée), `patch_from_diff` dérive un `ReplaceDef`, et le
   patch dérivé est valide (`Patch.check`) contre la version d'origine. Doctor =
   25 pass / 0 fail / 2 not-yet (parités self-hosted §17). `@fulltest` vert.
+- 2026-06-11 — G14 Gate final : `scripts/v1-gate.sh` déroule depuis un checkout
+  propre, dans l'ordre, build → `doctor --v1` → `spec check` → golden run.sh →
+  priority_demo.sh → `@fulltest`, échoue au premier rouge, nettoie les stores.
+  Exécuté : **V1.0 gate PASS** (tout le vert). Le gate note honnêtement que la
+  parité self-hosted patch-validator (§17, G8) reste not-yet → V1.0 pas encore
+  SHIPPED au sens strict de la définition finale tant que G8/G9 ne sont pas verts.
