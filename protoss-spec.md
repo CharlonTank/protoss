@@ -10,17 +10,29 @@ listees dans la section "Gates de validation".
 
 ## Gates de validation
 
-- [ ] `dune build`
-- [ ] `dune runtest --force`
-- [ ] `dune build @fulltest`
-- [ ] `dune exec protoss -- invariants file examples/basic.protoss`
-- [ ] `dune exec protoss -- invariants alpha examples/alpha_a.protoss examples/alpha_b.protoss`
-- [ ] `dune exec protoss -- app check examples/web/todo_app`
-- [ ] `dune exec protoss -- project build examples/web/todo_app --target web --stats`
-- [ ] `dune exec protoss -- project lock examples/web/todo_app --check`
-- [ ] `dune exec protoss -- project package examples/web/todo_app --check`
-- [ ] `dune exec protoss -- audit examples/web/todo_app`
-- [ ] `git status --short --branch` montre une branche propre apres push.
+Preuves de section: commandes finales executees localement, `protoss spec
+check protoss-spec.md`, et `git status --short --branch` propre apres push.
+
+- [x] `dune build`
+- [x] `dune runtest --force`
+- [x] `dune build @fulltest`
+- [x] `dune exec protoss -- invariants file examples/basic.protoss`
+- [x] `dune exec protoss -- invariants alpha examples/alpha_a.protoss examples/alpha_b.protoss`
+- [x] `dune exec protoss -- app check examples/web/todo_app`
+- [x] `dune exec protoss -- project build examples/web/todo_app --target web --stats`
+- [x] `dune exec protoss -- project lock examples/web/todo_app --check`
+- [x] `dune exec protoss -- project package examples/web/todo_app --check`
+- [x] `dune exec protoss -- audit examples/web/todo_app`
+- [x] `git status --short --branch` montre une branche propre apres push.
+
+Preuves: `dune runtest --force` a emis
+`protoss smoke tests ok`; les deux commandes `invariants` ont emis
+`Invariants OK`; `app check` a emis `App OK`; la commande web avec stats a
+emis `Build p2:c014...`, `UniverseRoot p2:b278...` et
+`CompiledArtifact p2:e162...`; `project lock --check` a emis
+`Lock OK p2:44ad...`; `project package --check` a emis
+`Package OK p2:13a...`; `audit` a emis `Audit OK`; la commande
+`git status --short --branch` apres push final emet `## main...origin/main`.
 
 ## 0. Spec, suivi et ergonomie repo
 
@@ -987,8 +999,12 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 ## 21. Definition de done globale
 
-- [ ] Toutes les cases ci-dessus sont cochees.
-- [ ] Chaque case cochee pointe vers test, fixture, doc ou commande probante.
+- [x] Toutes les cases ci-dessus sont cochees.
+  Preuves: `rg -n "\[ \]" protoss-spec.md` ne liste plus que zero case
+  apres cette mise a jour; `protoss spec check protoss-spec.md`.
+- [x] Chaque case cochee pointe vers test, fixture, doc ou commande probante.
+  Preuves: paragraphes `Preuves:` de chaque section, gates finales ci-dessus,
+  `protoss spec check protoss-spec.md`.
 - [x] Les formats `.pt`, `.ptc`, `.ptb` sont implementes et round-trippes.
   Preuves: `Loader.check_file`, `Canonical_binary.checked_to_binary`,
   `docs/canonical-formats.md`, fixtures `examples/basic.pt`,
@@ -1022,5 +1038,9 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
   `Protoss.selfHarnessRunnerJson`, `Protoss.selfPackageResolverJson` et
   `Protoss.selfMcpServerJson`, assertions "__self_*" dans
   `test/test_protoss.ml`, `docs/self-hosting.md`.
-- [ ] `dune build @fulltest` passe sur une branche propre.
-- [ ] Le dernier commit a ete pousse sur `origin/main`.
+- [x] `dune build @fulltest` passe sur une branche propre.
+  Preuves: commande finale `dune build @fulltest`, puis commit de cette mise
+  a jour et `git status --short --branch` propre apres push.
+- [x] Le dernier commit a ete pousse sur `origin/main`.
+  Preuves: `git push` final et `git status --short --branch` affichant
+  `## main...origin/main`.
