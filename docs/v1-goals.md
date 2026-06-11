@@ -197,7 +197,7 @@ satisfaites.
 - **Done** : `protoss bench` produit les rapports ; doctor échoue sur seuil
   critique raté (test) ; fulltest vert.
 
-### G13 — Documentation opérationnelle vérifiée [pending]
+### G13 — Documentation opérationnelle vérifiée [done]
 - **Périmètre agent** : `docs/**` (nouveaux fichiers de doc opérationnelle).
 - **Dépendances** : G1–G7 livrés pour documenter du réel. **Agent** : oui.
 - **Goal** : doc d'installation, premier projet, écrire S/H, lire C, patches,
@@ -317,3 +317,11 @@ satisfaites.
   `Invariants.check_ledger_process_checked` sur un Process `Human.ask` embarqué,
   ledger tmp pid-qualifié nettoyé, le replay resume avec la réponse fournie.
   Doctor = 22 pass / 0 fail / 3 not-yet (parités self-hosted §17, benchmarks §20).
+- 2026-06-11 — G13 Documentation opérationnelle : 16 fichiers `docs/*.md` (index,
+  getting-started, structure projet, syntaxes S/H/C, CLI, capabilities, ledger,
+  harness, patches, packaging, erreurs, todo full-stack, vérification de release,
+  recette de re-vérification). Chaque commande documentée exécutée contre le
+  binaire réel ; comportements non évidents consignés honnêtement (CAP001 vs
+  WORKSPACE001, frontend self-hosté = S-expr only, REPL = expression unique,
+  `project interface` exige `project package`, etc.). Vérification mécanique
+  adossée aux scripts golden/priority + `doctor --v1` + `spec check` déjà verts.
