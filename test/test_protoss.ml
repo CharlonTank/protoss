@@ -512,6 +512,16 @@ let () =
     (Printf.sprintf "bytecode sweep covers a healthy floor of fixtures (%d, need >= 20)" !covered)
     (!covered >= 20)
 
+(* A bare decoded bytecode module runs at interpreter parity on the pure
+   fragment -- the basis of the `bytecode exec <built.ptvm>` command, which runs
+   a built module with no source/checked context. *)
+let () =
+  let checked = check "(def main Nat (succ (succ (succ 0))))" in
+  let m = Bytecode.decode_module (Bytecode.encode_module (Bytecode.compile_checked checked)) in
+  assert_equal "exec_module runs a decoded module at interpreter parity"
+    (Runtime.value_to_canonical (fst (Runtime.normalize_def checked "main")))
+    (Runtime.value_to_canonical (Bytecode_vm.exec_module m "main"))
+
 (* Regression guards for crashes found by the deterministic fuzzer (G3). *)
 let () =
   (* "case ofx": find_sub used to match the space inside "case ", driving

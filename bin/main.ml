@@ -65,7 +65,7 @@ let usage () =
      \       protoss grammar kernel|human\n\
      \       protoss spec check [protoss-spec.md]\n\
      \       protoss bench build <project>\n\
-     \       protoss bytecode <file> | protoss bytecode run <file> --entry <name>\n\
+     \       protoss bytecode <file> | bytecode run <file> --entry <name> | bytecode exec <file.ptvm> --entry <name>\n\
      \       protoss edit import|explain <store-or-project-a> <store-or-project-b>\n\
      \       protoss doctor --v1 [--json]\n\
      \       protoss cache stats|list <dir>\n\
@@ -1689,6 +1689,14 @@ let command_bytecode = function
   | [ "run"; file; "--entry"; entry ] | [ "run"; "--entry"; entry; file ] ->
       let checked = parse_and_check file in
       print_endline (Protoss.Runtime.value_to_string (Protoss.Bytecode_vm.exec_checked checked entry))
+  | [ "exec"; ptvm; "--entry"; entry ] | [ "exec"; "--entry"; entry; ptvm ] ->
+      (* Execute a built `.ptvm` bytecode module directly, without the source:
+         decode the module and run the named def on the VM. Globals resolve among
+         the module's own defs; the capability scope starts empty, so this is
+         exact on the pure fragment (use `bytecode run <src>` for effectful defs
+         that need the checked program's declared capabilities). *)
+      let m = Protoss.Bytecode.decode_module (Protoss.Store.read_file ptvm) in
+      print_endline (Protoss.Runtime.value_to_string (Protoss.Bytecode_vm.exec_module m entry))
   | _ -> usage ()
 
 let command_doctor = function
