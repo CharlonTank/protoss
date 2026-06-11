@@ -1087,37 +1087,91 @@ let content_type path =
   else if has_suffix ".json" path then "application/json"
   else "text/plain"
 
+(* Dev-server live reload. `web build` stays pure/deterministic; this script is
+   injected only into the page that `serve`/`live` hands out. The client polls
+   /livereload for the current build id and reloads when it changes. *)
+let livereload_script =
+  "<script>\n\
+  \  (function () {\n\
+  \    var last = null;\n\
+  \    function poll() {\n\
+  \      fetch('/livereload').then(function (r) { return r.text(); }).then(function (v) {\n\
+  \        if (last === null) { last = v; }\n\
+  \        else if (v !== last) { location.reload(); }\n\
+  \      }).catch(function () {}).then(function () { setTimeout(poll, 1000); });\n\
+  \    }\n\
+  \    poll();\n\
+  \  })();\n\
+   </script>\n"
+
+let inject_before_body html =
+  let needle = "</body>" in
+  let nl = String.length needle and sl = String.length html in
+  let rec find i =
+    if i + nl > sl then None else if String.equal (String.sub html i nl) needle then Some i else find (i + 1)
+  in
+  match find 0 with
+  | Some i -> String.sub html 0 i ^ livereload_script ^ String.sub html i (sl - i)
+  | None -> html ^ livereload_script
+
 let serve ?(port = 8080) project =
-  let output = build project in
+  let output = ref (build project) in
+  (* Watch the project's .protoss sources by mtime; rebuild lazily when a poll
+     arrives and something changed (mtimes drive only the dev watch, never the
+     deterministic store/bundle). *)
+  let source_mtimes () =
+    let manifest = Workspace.parse_manifest (Workspace.project_root project) in
+    Workspace.project_source_files manifest
+    |> List.filter_map (fun f -> try Some (f, (Unix.stat f).Unix.st_mtime) with _ -> None)
+  in
+  let watched = ref (try source_mtimes () with _ -> []) in
+  let sources_changed () =
+    match try Some (source_mtimes ()) with _ -> None with
+    | Some now when now <> !watched ->
+        watched := now;
+        true
+    | _ -> false
+  in
+  let rebuild () =
+    try
+      output := build project;
+      Printf.printf "live: rebuilt %s\n%!" (!output).build.Workspace.build_id
+    with e -> Printf.eprintf "live: rebuild failed, keeping last good build: %s\n%!" (Printexc.to_string e)
+  in
   let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt sock Unix.SO_REUSEADDR true;
   Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
   Unix.listen sock 10;
-  Printf.printf "Serving %s on http://127.0.0.1:%d/\n%!" output.out_dir port;
+  Printf.printf "Serving %s on http://127.0.0.1:%d/  (live reload on .protoss save)\n%!"
+    (!output).out_dir port;
   let rec loop () =
     let client, _ = Unix.accept sock in
     let ic = Unix.in_channel_of_descr client and oc = Unix.out_channel_of_descr client in
     let line = try input_line ic with End_of_file -> "GET / HTTP/1.1" in
     let raw_path =
       match String.split_on_char ' ' line with
-      | _ :: raw :: _ ->
-          if raw = "/" then "/index.html" else raw
+      | _ :: raw :: _ -> if raw = "/" then "/index.html" else raw
       | _ -> "/index.html"
     in
     let path = Filename.basename raw_path in
+    let out_dir = (!output).out_dir in
     let status, body =
       match raw_path with
-      | "/app" -> ("200 OK", read_file (Filename.concat output.out_dir "protoss-app.json"))
-      | "/graph" -> ("200 OK", read_file (Filename.concat output.out_dir "protoss-graph.json"))
-      | "/world" -> ("200 OK", read_file (Filename.concat output.out_dir "protoss-world.json"))
+      | "/livereload" ->
+          if sources_changed () then rebuild ();
+          ("200 OK", (!output).build.Workspace.build_id ^ "\n")
+      | "/index.html" -> ("200 OK", inject_before_body (read_file (Filename.concat out_dir "index.html")))
+      | "/app" -> ("200 OK", read_file (Filename.concat out_dir "protoss-app.json"))
+      | "/graph" -> ("200 OK", read_file (Filename.concat out_dir "protoss-graph.json"))
+      | "/world" -> ("200 OK", read_file (Filename.concat out_dir "protoss-world.json"))
       | "/ledger/events" -> ("200 OK", "{ \"events\": [] }\n")
       | "/process/requests" -> ("200 OK", "{ \"requests\": [] }\n")
       | "/process/resume" -> ("200 OK", "{ \"status\": \"queued\" }\n")
       | _ ->
-          let file = Filename.concat output.out_dir path in
+          let file = Filename.concat out_dir path in
           if Sys.file_exists file then ("200 OK", read_file file) else ("404 Not Found", "not found\n")
     in
-    let file = Filename.concat output.out_dir path in
+    let file = Filename.concat out_dir path in
     output_string oc
       ("HTTP/1.1 " ^ status ^ "\r\nContent-Type: " ^ content_type file
      ^ "\r\nContent-Length: " ^ string_of_int (String.length body)
