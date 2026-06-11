@@ -28,6 +28,7 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|fork|simulate|compare-branches|merge|branches|reject [args]\n\
      \       protoss app check <project>\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
+     \       protoss live [project] [--port <n>]   (build + serve the full-stack app)\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
      \       protoss harness run <project-or-store> <harness.pth>\n\
      \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
@@ -624,6 +625,36 @@ let project_arg args =
 
 let find_flag_value flag args = find_arg flag args
 
+let rec find_up dir rel =
+  let candidate = Filename.concat dir rel in
+  if Sys.file_exists candidate then Some candidate
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_up parent rel
+
+(* Installed layout (dune install): the binary lives at <prefix>/bin/protoss and
+   the prelude is packaged at <prefix>/share/protoss/prelude.protoss. Derive it
+   from the executable's own path so an installed protoss is self-contained. *)
+let installed_prelude_path () =
+  let exe_dir = Filename.dirname Sys.executable_name in
+  let candidate =
+    Filename.concat exe_dir
+      (Filename.concat Filename.parent_dir_name "share/protoss/prelude.protoss")
+  in
+  if Sys.file_exists candidate then Some candidate else None
+
+let prelude_path () =
+  match Sys.getenv_opt "PROTOSS_STDLIB" with
+  | Some p -> p
+  | None -> (
+      match find_up (Sys.getcwd ()) "stdlib/prelude.protoss" with
+      | Some p -> p
+      | None -> (
+          match installed_prelude_path () with
+          | Some p -> p
+          | None ->
+              Protoss.Kernel.fail "cannot locate stdlib/prelude.protoss (set PROTOSS_STDLIB)"))
+
 let parse_build_args args =
   let rec loop target stats locked paths = function
     | [] -> (List.rev paths, target, stats, locked)
@@ -738,9 +769,17 @@ let command_project_export_layout args =
 
 let command_project = function
   | "init" :: args ->
-      let root = project_arg args in
-      let path = Protoss.Workspace.init root in
-      Printf.printf "Initialized %s\n" path
+      (* Default: a runnable full-stack app skeleton (counter) wired to the
+         resolved prelude, so `protoss live` works straight away. `--minimal`
+         keeps the trivial `(def main Nat 0)` module with no stdlib. *)
+      let minimal = List.mem "--minimal" args in
+      let root = project_arg (List.filter (fun a -> not (String.equal a "--minimal")) args) in
+      let path =
+        if minimal then Protoss.Workspace.init root
+        else Protoss.Workspace.init ~app:true ~stdlib:(prelude_path ()) root
+      in
+      Printf.printf "Initialized %s\n" path;
+      if not minimal then Printf.printf "Run it:  protoss live %s\n" root
   | "check" :: args ->
       let root = project_arg args in
       let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
@@ -776,6 +815,22 @@ let command_web = function
       in
       Protoss.Web.serve ~port project
   | _ -> usage ()
+
+(* `protoss live [project] [--port N]`: the convenience "run my app" command —
+   build the full-stack bundle and serve it over HTTP (same as `web serve`, but
+   the obvious verb for a freshly `project init`'d app). *)
+let command_live args =
+  let port =
+    match find_flag_value "--port" args with Some p -> int_of_string p | None -> 8080
+  in
+  (* drop --port and its value so project_arg sees only the project path *)
+  let rec strip = function
+    | "--port" :: _ :: rest -> strip rest
+    | x :: rest -> x :: strip rest
+    | [] -> []
+  in
+  let project = project_arg (strip args) in
+  Protoss.Web.serve ~port project
 
 let command_runtime = function
   | [ "init"; project ] -> print_string (Protoss.Runtime_store.init project)
@@ -1195,36 +1250,6 @@ let command_spec = function
    applies a stdlib function to it, the combined program is checked, and the
    result is evaluated. OCaml stays the trusted kernel (parse/check/normalize);
    the *report* is produced by Protoss code from the prelude. *)
-let rec find_up dir rel =
-  let candidate = Filename.concat dir rel in
-  if Sys.file_exists candidate then Some candidate
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find_up parent rel
-
-(* Installed layout (dune install): the binary lives at <prefix>/bin/protoss and
-   the prelude is packaged at <prefix>/share/protoss/prelude.protoss. Derive it
-   from the executable's own path so an installed protoss is self-contained. *)
-let installed_prelude_path () =
-  let exe_dir = Filename.dirname Sys.executable_name in
-  let candidate =
-    Filename.concat exe_dir
-      (Filename.concat Filename.parent_dir_name "share/protoss/prelude.protoss")
-  in
-  if Sys.file_exists candidate then Some candidate else None
-
-let prelude_path () =
-  match Sys.getenv_opt "PROTOSS_STDLIB" with
-  | Some p -> p
-  | None -> (
-      match find_up (Sys.getcwd ()) "stdlib/prelude.protoss" with
-      | Some p -> p
-      | None -> (
-          match installed_prelude_path () with
-          | Some p -> p
-          | None ->
-              Protoss.Kernel.fail "cannot locate stdlib/prelude.protoss (set PROTOSS_STDLIB)"))
-
 let read_source path =
   let ic = open_in_bin path in
   Fun.protect
@@ -1703,6 +1728,7 @@ let () =
       | "ledger" :: args -> command_ledger args
       | "app" :: args -> command_app args
       | "web" :: args -> command_web args
+      | "live" :: args -> command_live args
       | "runtime" :: args -> command_runtime args
       | "harness" :: args -> command_harness args
       | "self" :: args -> command_self args

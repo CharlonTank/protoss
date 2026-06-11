@@ -250,22 +250,37 @@ let project_root path =
   let path = realpath_or path in
   if Sys.file_exists path && not (Sys.is_directory path) then Filename.dirname path else path
 
-let init ?(force = false) root =
-  let root = project_root root in
-  ensure_dir root;
-  let src = Filename.concat root "src" in
-  ensure_dir src;
-  let dot = Filename.concat root ".protoss" in
-  ensure_dir dot;
-  ensure_dir (Filename.concat dot "store");
-  ensure_dir (Filename.concat dot "cache");
-  let manifest = manifest_path root in
-  if Sys.file_exists manifest && not force then fail ("manifest already exists: " ^ manifest);
-  write_file manifest
+(* A minimal but real full-stack app skeleton: an Elm-like counter with
+   init/update/view, the architecture `protoss app check` and `web build`/`serve`
+   expect. It uses the prelude (Nat.toString, String.concat), so the generated
+   manifest points `stdlib` at the resolved prelude path. *)
+let counter_app_source =
+  "(def init (Process Nat) (done 0))\n\n\
+   (def update\n\
+  \  (-> (Variant (Increment Unit) (Reset Unit)) (-> Nat (Process Nat)))\n\
+  \  (lambda (msg (Variant (Increment Unit) (Reset Unit)))\n\
+  \    (lambda (model Nat)\n\
+  \      (case msg\n\
+  \        (Increment _ (done (succ model)))\n\
+  \        (Reset _ (done 0))))))\n\n\
+   (def view\n\
+  \  (-> Nat (View (Variant (Increment Unit) (Reset Unit))))\n\
+  \  (lambda (model Nat)\n\
+  \    (column\n\
+  \      (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
+  \        (text ((String.concat \"Count: \") (Nat.toString model)))\n\
+  \        (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
+  \          (button \"Increment\" (variant (Variant (Increment Unit) (Reset Unit)) Increment unit))\n\
+  \          (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
+  \            (button \"Reset\" (variant (Variant (Increment Unit) (Reset Unit)) Reset unit))\n\
+  \            (Nil (View (Variant (Increment Unit) (Reset Unit))))))))))\n"
+
+let manifest_source ~entrypoint ~stdlib =
+  Printf.sprintf
     "name = \"protoss-app\"\n\
      version = \"0.1.0\"\n\
-     entrypoints = [\"src/main.protoss\"]\n\
-     stdlib = \"none\"\n\
+     entrypoints = [\"%s\"]\n\
+     stdlib = \"%s\"\n\
      source_dirs = [\"src\"]\n\
      store_dir = \".protoss/store\"\n\
      cache_dir = \".protoss/cache\"\n\
@@ -277,9 +292,29 @@ let init ?(force = false) root =
      package_registry_global = \"none\"\n\
      package_imports = []\n\
      package_interfaces = []\n\
-     package_contracts = []\n";
-  let main = Filename.concat src "main.protoss" in
-  if not (Sys.file_exists main) then write_file main "(def main Nat 0)\n";
+     package_contracts = []\n"
+    entrypoint stdlib
+
+(* [app] generates the full-stack counter skeleton instead of the trivial
+   [(def main Nat 0)]. [stdlib] is the prelude path recorded in the manifest
+   (the app skeleton needs it); when omitted the manifest keeps "none". *)
+let init ?(force = false) ?(app = false) ?stdlib root =
+  let root = project_root root in
+  ensure_dir root;
+  let src = Filename.concat root "src" in
+  ensure_dir src;
+  let dot = Filename.concat root ".protoss" in
+  ensure_dir dot;
+  ensure_dir (Filename.concat dot "store");
+  ensure_dir (Filename.concat dot "cache");
+  let manifest = manifest_path root in
+  if Sys.file_exists manifest && not force then fail ("manifest already exists: " ^ manifest);
+  let stdlib_line = match stdlib with Some p -> p | None -> "none" in
+  let entrypoint = if app then "src/app.protoss" else "src/main.protoss" in
+  write_file manifest (manifest_source ~entrypoint ~stdlib:stdlib_line);
+  let source_file = Filename.concat src (if app then "app.protoss" else "main.protoss") in
+  if not (Sys.file_exists source_file) then
+    write_file source_file (if app then counter_app_source else "(def main Nat 0)\n");
   manifest
 
 let source_extensions = [ ".protoss"; ".pt" ]

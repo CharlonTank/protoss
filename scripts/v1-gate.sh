@@ -57,18 +57,18 @@ step "fulltest" dune build @fulltest --force
 
 # 7. The CLI actually installs and runs OUTSIDE a checkout, with no
 #    PROTOSS_STDLIB: a "V1" you can only run via `dune exec` is not shipped.
-#    Hermetic: installs to a throwaway prefix and exercises it from a temp dir
-#    that is not under the repo, so the prelude must be found via the installed
-#    layout (<prefix>/share/protoss/prelude.protoss), not the source tree.
+#    Hermetic: installs to a throwaway prefix, then from a temp dir that is not
+#    under the repo it scaffolds the default full-stack app and `app check`s it.
+#    Both the binary and the prelude must come from the installed layout
+#    (<prefix>/bin/protoss, <prefix>/share/protoss/prelude.protoss).
 install_smoke() {
   local prefix demo ok=0
   prefix="$(mktemp -d)"; demo="$(mktemp -d)"
   if dune build @install >/dev/null 2>&1 \
      && dune install --prefix "${prefix}" protoss >/dev/null 2>&1 \
      && ( cd "${demo}" && env -u PROTOSS_STDLIB "${prefix}/bin/protoss" project init app >/dev/null ) \
-     && printf '(def x Nat 1)\n' > "${demo}/app/x.protoss" \
-     && ( cd "${demo}" && env -u PROTOSS_STDLIB "${prefix}/bin/protoss" self nf "${demo}/app/x.protoss" ) \
-          | grep -q 'x = 1'; then
+     && ( cd "${demo}" && env -u PROTOSS_STDLIB "${prefix}/bin/protoss" app check app ) \
+          | grep -q 'App OK'; then
     ok=0
   else
     ok=1
@@ -76,7 +76,7 @@ install_smoke() {
   rm -rf "${prefix}" "${demo}"
   return "${ok}"
 }
-step "install smoke (CLI runs outside a checkout)" install_smoke
+step "install smoke (scaffold + check a full-stack app outside a checkout)" install_smoke
 
 echo
 if [ "${fail}" -eq 0 ]; then

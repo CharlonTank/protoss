@@ -5838,6 +5838,20 @@ let () =
   if workspace_part "project" then (
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
+  (* init ~app generates the runnable full-stack skeleton: app.protoss with
+     init/update/view, wired to the given prelude path. *)
+  (let app_init_root = temp_dir "project-init-app" in
+   ignore (Workspace.init ~app:true ~stdlib:"/p/prelude.protoss" app_init_root);
+   let toml = Store.read_file (Filename.concat app_init_root "protoss.toml") in
+   let app_src = Store.read_file (Filename.concat app_init_root "src/app.protoss") in
+   assert_true "init --app points the entrypoint at app.protoss"
+     (contains_substring toml "src/app.protoss");
+   assert_true "init --app records the prelude path in stdlib"
+     (contains_substring toml "/p/prelude.protoss");
+   assert_true "init --app writes an init/update/view skeleton"
+     (contains_substring app_src "def init"
+     && contains_substring app_src "def update"
+     && contains_substring app_src "def view"));
   let init_manifest = Workspace.parse_manifest project_init_root in
   Workspace.check_project init_manifest;
   let init_build = Workspace.build init_manifest in
