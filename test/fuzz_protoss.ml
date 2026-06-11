@@ -1,13 +1,14 @@
 (* Deterministic robustness fuzzer for Protoss input surfaces.
 
    Goal (G3): exercise the four untrusted input decoders plus the type checker
-   and assert that for ANY input — valid, mutated, or hostile — that surface
+   and the reference evaluator, and assert that for ANY input — valid, mutated,
+   or hostile — that surface
    either succeeds or fails through the project's structured error mechanism. A
    raw, unstructured crash (Stack_overflow, a bare Failure from int_of_string,
    Not_found, Invalid_argument, Match_failure, ...) is a robustness bug and is
    reported here.
 
-   The five targets and the exceptions treated as STRUCTURED (i.e. a clean,
+   The six targets and the exceptions treated as STRUCTURED (i.e. a clean,
    acceptable failure) for each:
 
    1. S-expression parser
@@ -46,6 +47,14 @@
        inputs are depth-bounded, so it terminates. Its only intended elaboration
        failure is a located Kernel.Error, so any other exception is a totality or
        robustness bug.)
+
+   6. Reference evaluator
+        Protoss.Kernel.check_program  then  Protoss.Runtime.normalize_all
+      structured: Parser.Error | Sexp.Error | Elm_syntax.Error | Kernel.Error
+      (a well-typed program is normalized, forcing every definition to a value;
+       the language is total so evaluation terminates on bounded inputs.
+       Runtime.fail = Kernel.fail, so an eval error is a structured Kernel.Error
+       and any other exception is a real runtime robustness bug.)
 
    Determinism: all randomness comes from a single Random.State seeded with a
    fixed integer (overridable via argv). Two runs with the same seed test the
@@ -258,6 +267,15 @@ let run_check (input : string) : unit =
      terminates. *)
   let program = Parser.parse_string input in
   ignore (Kernel.check_program program)
+
+let run_eval (input : string) : unit =
+  (* Drive the reference evaluator past the checker: a well-typed program is
+     normalized, forcing every definition to a value. The language is total, so
+     on the depth-bounded seeds this terminates. Runtime.fail = Kernel.fail, so
+     an evaluation error is a structured Kernel.Error; any other exception
+     (Stack_overflow, Match_failure, Not_found...) is a real runtime bug. *)
+  let checked = Kernel.check_program (Parser.parse_string input) in
+  ignore (Runtime.normalize_all checked)
 
 (* ------------------------------------------------------------------ *)
 (* Seed corpus (embedded, so the fuzzer is self-contained)            *)
@@ -1014,6 +1032,15 @@ let () =
         name = "checker";
         structured = structured_check;
         run = run_check;
+        next = next_sexp_input;
+        seeds = sexp_seeds;
+      };
+      {
+        (* Eval failures are Kernel.Error too (Runtime.fail = Kernel.fail), so the
+           checker's structured predicate applies unchanged. *)
+        name = "evaluator";
+        structured = structured_check;
+        run = run_eval;
         next = next_sexp_input;
         seeds = sexp_seeds;
       };
