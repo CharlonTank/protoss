@@ -287,6 +287,26 @@ let harness_proof () =
     Fail "a failing harness reported pass"
   else Pass
 
+(* §8.3: a Process suspends on a request, then the ledger resumes it
+   deterministically with the supplied response. *)
+let ledger_replay () =
+  let checked =
+    check_source "(capabilities Human.ask)\n(def ask (Process String) (Human.ask \"Name?\"))"
+  in
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "protoss-doctor-ledger-%d" (Unix.getpid ()))
+  in
+  rm_rf dir;
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let r =
+        Invariants.check_ledger_process_checked ~ledger:dir "<doctor>" checked "ask" "\"Ada\""
+      in
+      if contains "Ada" r.Invariants.result then Pass
+      else Fail ("ledger replay did not resume with the response: " ^ r.Invariants.result))
+
 (* §5.3: a real build writes a UniverseRoot and the project audits clean. *)
 let store_universe_root () =
   with_golden_base (fun base ->
@@ -501,8 +521,8 @@ let checks : check list =
     {
       id = "ledger-replay";
       section = "8.3";
-      description = "deterministic ledger replay of a Process";
-      run = (fun () -> Not_yet "checklist §8.3: wire via runtime world/ledger");
+      description = "a Process suspends on a request and the ledger resumes it deterministically";
+      run = ledger_replay;
     };
     {
       id = "patch-check-audit";
@@ -550,7 +570,11 @@ let checks : check list =
       id = "self-hosted-canonicalizer-parity";
       section = "17";
       description = "Protoss canonicalizer matches the kernel byte-for-byte";
-      run = (fun () -> Not_yet "checklist §17: heavy (prelude eval); wire via self-host suite");
+      run =
+        (fun () ->
+          Not_yet
+            "checklist §17: proven by the @selftest __canon_parity_* sweep; not duplicated \
+             in the doctor (full prelude eval)");
     };
     {
       id = "self-hosted-patch-validator-parity";

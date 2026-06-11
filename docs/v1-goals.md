@@ -307,3 +307,7 @@ satisfaites.
   (auto-suffisant, sans I/O). Doctor = 21 pass / 0 fail / 4 not-yet restants
   (ledger-replay §8.3, parités self-hosted canonicalizer/patch-validator §17,
   benchmarks §20) ; `@fulltest` vert.
+- 2026-06-11 — Doctor : preuve `ledger-replay` (§8.3) branchée —
+  `Invariants.check_ledger_process_checked` sur un Process `Human.ask` embarqué,
+  ledger tmp pid-qualifié nettoyé, le replay resume avec la réponse fournie.
+  Doctor = 22 pass / 0 fail / 3 not-yet (parités self-hosted §17, benchmarks §20).
