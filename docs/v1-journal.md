@@ -120,3 +120,12 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   `p2:56db7b…`). Valide de bout en bout le travail d'inférence des vues de ce cycle. Investigation
   runtime/effets : effets dispo (Human.ask/Clock.read/Http.get/Server.request/Local.save), cycle Process
   run→resume→replay testé par le doctor (`ledger-replay` PASS) ; modèle de base sain, pas de trou évident.
+- 2026-06-12 — **Fuzzer → invariant round-trip canonique FAIT** (commit 5eb70e9, harnais de test seul).
+  Saut qualitatif : le fuzzer vérifiait « pas de crash » ; il vérifie désormais une PROPRIÉTÉ DE
+  CORRECTION. 7e target `canonical-roundtrip` : pour chaque programme VALIDE, le graphe canonique doit
+  round-tripper vers la même sérialisation canonique ET re-dériver un checked depuis le graphe préserve
+  le program hash (l'invariant central du content-addressing). Une violation lève `Invariant_violation`
+  (NON structurée) → rapportée comme bug, distincte d'une erreur de check ordinaire. Résultat :
+  success=325, **0 violation** → l'invariant central tient sur des milliers de programmes aléatoires
+  mutés, pas seulement les fixtures fixes. `@fulltest` vert (targets=7). Fuzzer couvre maintenant :
+  4 parsers + checker + évaluateur + invariant de correction.
