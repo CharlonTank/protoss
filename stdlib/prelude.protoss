@@ -9706,6 +9706,17 @@
     (lambda (children (List (View Msg)))
       (node "div" attrs children))))
 
+; Wrap an element in a keyed div so the VDOM runtime reconciles a list of these
+; by their key (move/insert/delete by identity) instead of by position. Use a
+; stable, distinct key per list item to preserve focus/state across reorders.
+(defpoly Html.keyed (params Msg)
+  (-> String (-> (View Msg) (View Msg)))
+  (lambda (k String)
+    (lambda (el (View Msg))
+      (node "div"
+        (Cons (Attr Msg) (attr "key" k) (Nil (Attr Msg)))
+        (Cons (View Msg) el (Nil (View Msg)))))))
+
 (defpoly Html.span (params Msg)
   (-> (List (Attr Msg)) (-> (List (View Msg)) (View Msg)))
   (lambda (attrs (List (Attr Msg)))
