@@ -1546,6 +1546,35 @@ let command_self_patch_check compare store_or_project patch_path =
         (Printf.sprintf "self patch-check parity mismatch: kernel=%b self=%b" kernel_ok component_ok);
       exit 1)
 
+(* The self-hosted normalizer (Protoss.normalizeText) on the supported
+   fold/lambda-free fragment. --compare checks byte-for-byte against the kernel
+   normal form (Runtime.normalize_all). Outside the fragment it returns Err. *)
+let command_self_nf compare file =
+  let source = read_source file in
+  let _, value =
+    self_eval ~typ:"(Result String String)" ("Protoss.normalizeText " ^ Protoss.Ast.quote source)
+  in
+  match value with
+  | Protoss.Runtime.VVariant (_, "Ok", Protoss.Runtime.VString text) ->
+      if not compare then print_string text
+      else
+        let checked = parse_and_check file in
+        let kernel_text =
+          Protoss.Runtime.normalize_all checked
+          |> List.map (fun (n, v) -> n ^ " = " ^ Protoss.Runtime.value_to_string v ^ "\n")
+          |> String.concat ""
+        in
+        if String.equal text kernel_text then print_endline "Self normalizer parity OK"
+        else (
+          prerr_endline "self nf parity mismatch:";
+          prerr_endline ("kernel: " ^ kernel_text);
+          prerr_endline ("self:   " ^ text);
+          exit 1)
+  | Protoss.Runtime.VVariant (_, "Err", Protoss.Runtime.VString msg) ->
+      print_error "self nf error" msg
+  | other ->
+      print_error "self nf error" ("unexpected result: " ^ Protoss.Runtime.value_to_string other)
+
 let command_self = function
   | [ "parse"; file ] -> print_endline (self_string "Protoss.selfParseJson" file)
   | [ "fmt"; "--check"; file ] -> command_self_fmt true file
@@ -1568,6 +1597,8 @@ let command_self = function
   | [ "patch-check"; "--compare"; store; patch ] | [ "patch-check"; store; patch; "--compare" ] ->
       command_self_patch_check true store patch
   | [ "patch-check"; store; patch ] -> command_self_patch_check false store patch
+  | [ "nf"; "--compare"; file ] | [ "nf"; file; "--compare" ] -> command_self_nf true file
+  | [ "nf"; file ] -> command_self_nf false file
   | _ -> usage ()
 
 let command_bench = function

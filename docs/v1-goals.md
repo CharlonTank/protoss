@@ -155,7 +155,7 @@ satisfaites.
 - **Done** : sweep de parité de verdict vert avec plancher + cas de divergence
   volontaire ; spec check OK ; fulltest vert.
 
-### G9 — Normalizer self-hosted [session dédiée — cadré]
+### G9 — Normalizer self-hosted [done]
 - **Périmètre** : idem G8 — orchestrateur uniquement.
 - **Dépendances** : G8 (file du prélude). **Agent** : non.
 - **Goal** : normalizer en Protoss sur le fragment pur supporté, parité
@@ -377,3 +377,29 @@ satisfaites.
   — typage whole-program, MigrateType — n'est pas self-hosté), honnêteté maintenue.
   Doctor : self-hosted-patch-validator-parity pointe le sweep selftest. `@fulltest`
   attendu vert.
+- 2026-06-11 — G9 Normalizer self-hosté : `Protoss.normalizeText` (prélude) —
+  évaluateur structurel total du fragment **sans fold/lambda** (littéraux Nat/Bool/
+  String/Unit, `succ`, refs via env construit par fixpoint, records triés, variants,
+  `case` Bool/variant avec binder, `get`), valeurs `NValue` + `nValueToString`
+  fidèle au format de `nf`. CLI `protoss self nf <file> [--compare]` : **parité
+  byte-à-byte** avec `Runtime.normalize_all` (prouvée + sweep `@selftest __nfpar_*` :
+  nat/ref/succ, record+variant+case, bool-case). Hors fragment → Err « unsupported ».
+  **Obstacle théorique consigné** : un langage total et fortement normalisant ne peut
+  pas héberger un évaluateur général (il ne peut pas prouver sa propre terminaison
+  sur le fragment lambda/app/fold) — c'est précisément pourquoi le canonicalizer
+  *canonicalise* (structurel) au lieu de *normaliser*. **§17 normalizer NON recoché**
+  (fragment seulement). Doctor : self-hosted-normalizer-parity (§17) pointe le sweep
+  selftest ; 25 pass / 0 fail / 3 not-yet (les 3 parités self-hostées, prouvées
+  ailleurs). `@fulltest` attendu vert.
+
+## Bilan final de la file
+
+G1–G14 traités. G1–G7, G10–G14 **done** ; G8 **done** (validateur structure+deps à
+parité) ; G9 **done** (normalizer du fragment fold/lambda-free à parité byte-à-byte).
+Le `protoss doctor --v1` exécute 25 preuves, 0 échec ; les 3 not-yet restants sont
+les parités self-hostées §17 (canonicalizer/patch-validator/normalizer), chacune
+prouvée par un sweep `@selftest`, non dupliquée dans le doctor (eval prélude lourd).
+Cases spec non recochées en toute honnêteté : 664/986 (patch validator complet) et
+§17 normalizer (langage total ⇒ pas d'évaluateur général) — limites de design
+documentées, pas des oublis. `scripts/v1-gate.sh` (G14) déroule la validation
+complète depuis un checkout propre.

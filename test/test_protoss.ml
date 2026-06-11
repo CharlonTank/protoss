@@ -8607,6 +8607,32 @@ let () =
     "{\"op\":\"DeleteDef\",\"name\":\"extra\",\"deps\":[]}";
   patch_parity "add_already_exists" "(def base Nat 2)\n"
     "{\"op\":\"AddDef\",\"name\":\"base\",\"deps\":[],\"type\":\"Nat\",\"expr\":[\"succ\",\"1\"]}";
+  (* G9: self-hosted normalizer byte-for-byte parity with the kernel normal
+     form, on the supported fold/lambda-free fragment (literals, succ, refs,
+     records, variants, case, get). *)
+  let nf_parity label prog =
+    let checked = Parser.parse_string prog |> Kernel.check_program in
+    let kernel_text =
+      Runtime.normalize_all checked
+      |> List.map (fun (n, v) -> n ^ " = " ^ Runtime.value_to_string v ^ "\n")
+      |> String.concat ""
+    in
+    register ("__nfpar_" ^ label) "(Result String String)"
+      ("Protoss.normalizeText " ^ Ast.quote prog)
+      (fun got ->
+        assert_true
+          (Printf.sprintf "normalizer parity %s (kernel=%s component=%s)" label
+             (String.escaped kernel_text) (String.escaped got))
+          (String.equal got kernel_text))
+  in
+  nf_parity "nat" "(def a Nat 2)\n(def b Nat (succ a))\n";
+  nf_parity "record_variant_case"
+    "(record P (x Nat) (y Bool))\n\
+     (def p P (record (x 1) (y true)))\n\
+     (variant C (L Unit) (R Nat))\n\
+     (def r C (variant R 5))\n\
+     (def s Nat (case r (L u 0) (R n n)))\n";
+  nf_parity "bool_case" "(def t Bool true)\n(def n Nat (case t (true 1) (false 0)))\n";
   (* §14.4 priority demo (heavy: builds the full prelude). Gated with the
      self-host section so the core dev-loop stays fast; the demo migrates the
      todo app to add a per-item priority through a checked+applied patch. *)

@@ -671,6 +671,15 @@ let checks : check list =
              in the doctor (full prelude eval)");
     };
     {
+      id = "self-hosted-normalizer-parity";
+      section = "17";
+      description = "Protoss normalizer matches the kernel nf on the fold/lambda-free fragment";
+      run =
+        (fun () ->
+          Not_yet
+            "checklist §17: proven by the @selftest __nfpar_* sweep (fold/lambda-free              fragment; a total language cannot host a general evaluator)");
+    };
+    {
       id = "self-hosted-patch-validator-parity";
       section = "17";
       description = "Protoss patch validator matches Patch.check verdicts (AddDef/ReplaceDef/DeleteDef)";

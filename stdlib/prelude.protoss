@@ -12787,6 +12787,304 @@
       (Err err (Json.render (Protoss.jsonError err)))
       (Ok formatted ((Protoss.selfComponentOkJson "protoss-h-pretty-printer") "Protoss.formatText")))))
 
+(record NEntry (name String) (value NValue))
+(record NVariantVal (constructor String) (payload NValue))
+(variant NValue
+  (NVNat Nat)
+  (NVBool Bool)
+  (NVString String)
+  (NVUnit Unit)
+  (NVRecord (List NEntry))
+  (NVVariant NVariantVal)
+  (NVList (List NValue)))
+
+(defrec Protoss.nValueToString (-> NValue String)
+  (variant v)
+  (NVNat n (Nat.toString n))
+  (NVBool b (case b (true "true") (false "false")))
+  (NVString s (Sexp.renderFlatString s))
+  (NVUnit ignored "unit")
+  (NVRecord fields
+    ((String.concat "{")
+      ((String.concat
+        (foldList fields String.empty
+          (lambda (entry NEntry)
+            (lambda (acc String)
+              (let (piece String
+                ((String.concat (get entry name))
+                  ((String.concat " = ") (recur (get entry value)))))
+                (case (String.isEmpty acc)
+                  (true piece)
+                  (false ((String.concat piece) ((String.concat ", ") acc)))))))))
+        "}")))
+  (NVVariant vv
+    ((String.concat (get vv constructor))
+      ((String.concat " ") (recur (get vv payload)))))
+  (NVList items
+    ((String.concat "[")
+      ((String.concat
+        (foldList items String.empty
+          (lambda (item NValue)
+            (lambda (acc String)
+              (let (piece String (recur item))
+                (case (String.isEmpty acc)
+                  (true piece)
+                  (false ((String.concat piece) ((String.concat ", ") acc)))))))))
+        "]"))))
+
+(def Protoss.nEnvLookup (-> (List NEntry) (-> String (Maybe NValue)))
+  (lambda (env (List NEntry))
+    (lambda (name String)
+      (foldList env (variant (Maybe NValue) None unit)
+        (lambda (entry NEntry)
+          (lambda (acc (Maybe NValue))
+            (case ((String.eqString (get entry name)) name)
+              (true (variant Some (get entry value)))
+              (false acc))))))))
+
+(record NInsertState (placed Bool) (out (List NEntry)))
+
+(def Protoss.nInsertStep (-> NEntry (-> NEntry (-> NInsertState NInsertState)))
+  (lambda (x NEntry)
+    (lambda (h NEntry)
+      (lambda (acc NInsertState)
+        (case (get acc placed)
+          (true (record (placed true) (out (Cons NEntry h (get acc out)))))
+          (false
+            (case ((Nat.eqNat ((Protoss.canonCmpOrder (get h name)) (get x name))) 2)
+              (true (record (placed true) (out (Cons NEntry h (Cons NEntry x (get acc out))))))
+              (false (record (placed false) (out (Cons NEntry h (get acc out))))))))))))
+
+(def Protoss.nInsertEntry (-> NEntry (-> (List NEntry) (List NEntry)))
+  (lambda (x NEntry)
+    (lambda (xs (List NEntry))
+      (let (scan (foldList xs (record (placed false) (out (Nil NEntry))) (Protoss.nInsertStep x)))
+        (case (get scan placed)
+          (true ((inst List.reverse NEntry) (get scan out)))
+          (false ((inst List.reverse NEntry) (Cons NEntry x (get scan out)))))))))
+
+(type NEvalK (-> (List NEntry) (Result String NValue)))
+(record NBranchK (constructor String) (binder (Maybe String)) (bodyK NEvalK))
+(record NFieldK (name String) (valueK NEvalK))
+
+(def Protoss.nUnsupported (-> String NEvalK)
+  (lambda (what String)
+    (lambda (env (List NEntry))
+      (variant Err ((String.concat "unsupported in self-hosted normalizer: ") what)))))
+
+(def Protoss.nEvalFields (-> (List NFieldK) (-> (List NEntry) (Result String (List NEntry))))
+  (lambda (fieldKs (List NFieldK))
+    (lambda (env (List NEntry))
+      (foldList fieldKs (variant (Result String (List NEntry)) Ok (Nil NEntry))
+        (lambda (field NFieldK)
+          (lambda (acc (Result String (List NEntry)))
+            (case acc
+              (Err err (variant Err err))
+              (Ok done
+                (case ((get field valueK) env)
+                  (Err err (variant Err err))
+                  (Ok v
+                    (variant Ok
+                      ((Protoss.nInsertEntry (record (name (get field name)) (value v))) done))))))))))))
+
+(def Protoss.nSelectBranch (-> (List NBranchK) (-> String (Maybe NBranchK)))
+  (lambda (branches (List NBranchK))
+    (lambda (con String)
+      (foldList branches (variant (Maybe NBranchK) None unit)
+        (lambda (b NBranchK)
+          (lambda (acc (Maybe NBranchK))
+            (case ((String.eqString (get b constructor)) con)
+              (true (variant Some b))
+              (false acc))))))))
+
+(defrec Protoss.nEval (-> ProtossExpr NEvalK)
+  (variant e)
+  (PEUnit ignored (lambda (env (List NEntry)) (variant Ok (variant NVUnit unit))))
+  (PEBool b (lambda (env (List NEntry)) (variant Ok (variant NVBool b))))
+  (PEString s (lambda (env (List NEntry)) (variant Ok (variant NVString s))))
+  (PEVar name
+    (lambda (env (List NEntry))
+      (case (Protoss.canonNatOfDigits name)
+        (Some n (variant Ok (variant NVNat n)))
+        (None
+          (case ((Protoss.nEnvLookup env) name)
+            (Some v (variant Ok v))
+            (None (variant Err ((String.concat "unknown name in normalizer: ") name))))))))
+  (PERecord fields
+    (let (fieldKs
+      (foldList fields (Nil NFieldK)
+        (lambda (field ProtossRecordFieldExpr)
+          (lambda (acc (List NFieldK))
+            (Cons NFieldK (record (name (get field name)) (valueK (recur (get field expr)))) acc)))))
+      (lambda (env (List NEntry))
+        (case ((Protoss.nEvalFields fieldKs) env)
+          (Err err (variant Err err))
+          (Ok entries (variant Ok (variant NVRecord entries)))))))
+  (PEField fieldE
+    (let (targetK (recur (get fieldE target)))
+      (lambda (env (List NEntry))
+        (case (targetK env)
+          (Err err (variant Err err))
+          (Ok v
+            (case v
+              (NVRecord entries
+                (case ((Protoss.nEnvLookup entries) (get fieldE field))
+                  (Some fv (variant Ok fv))
+                  (None (variant Err ((String.concat "unknown record field: ") (get fieldE field))))))
+              (_ (variant Err "field access on non-record"))))))))
+  (PEVariant variantE
+    (let (payloadK (recur (get variantE payload)))
+      (lambda (env (List NEntry))
+        (case (payloadK env)
+          (Err err (variant Err err))
+          (Ok pv
+            (variant Ok
+              (variant NVVariant
+                (record (constructor (get variantE constructor)) (payload pv)))))))))
+  (PECase caseE
+    (let (scrutK (recur (get caseE scrutinee)))
+      (let (branchKs
+        (foldList (get caseE branches) (Nil NBranchK)
+          (lambda (br ProtossCaseBranch)
+            (lambda (acc (List NBranchK))
+              (Cons NBranchK
+                (record (constructor (get br constructor)) (binder (get br binder)) (bodyK (recur (get br body))))
+                acc)))))
+        (lambda (env (List NEntry))
+          (case (scrutK env)
+            (Err err (variant Err err))
+            (Ok scrut
+              (case scrut
+                (NVBool b
+                  (case ((Protoss.nSelectBranch branchKs) (case b (true "true") (false "false")))
+                    (None (variant Err "non-exhaustive Bool case in normalizer"))
+                    (Some br ((get br bodyK) env))))
+                (NVVariant vv
+                  (case ((Protoss.nSelectBranch branchKs) (get vv constructor))
+                    (None (variant Err "non-exhaustive variant case in normalizer"))
+                    (Some br
+                      (case (get br binder)
+                        (Some bn ((get br bodyK) (Cons NEntry (record (name bn) (value (get vv payload))) env)))
+                        (None ((get br bodyK) env))))))
+                (_ (variant Err "case on non-Bool/variant in normalizer")))))))))
+  (PEApply call
+    (let (argKs
+      (foldList (get call args) (Nil NEvalK)
+        (lambda (arg ProtossExpr)
+          (lambda (acc (List NEvalK))
+            (Cons NEvalK (recur arg) acc)))))
+      (lambda (env (List NEntry))
+        (case (get call fn)
+          (PEVar fnName
+            (case ((String.eqString fnName) "succ")
+              (false (variant Err ((String.concat "unsupported application in normalizer: ") fnName)))
+              (true
+                (caseList argKs
+                  (Nil (variant Err "succ needs one argument"))
+                  (Cons argK rest
+                    (caseList rest
+                      (Nil
+                        (case (argK env)
+                          (Err err (variant Err err))
+                          (Ok v
+                            (case v
+                              (NVNat n (variant Ok (variant NVNat (succ n))))
+                              (_ (variant Err "succ on non-Nat"))))))
+                      (Cons more moreRest (variant Err "succ needs exactly one argument"))))))))
+          (_ (variant Err "unsupported application head in normalizer"))))))
+  (PELambda lam (Protoss.nUnsupported "lambda"))
+  (PEFoldNat f (Protoss.nUnsupported "foldNat"))
+  (PEFoldList f (Protoss.nUnsupported "foldList"))
+  (PEFoldVariant f (Protoss.nUnsupported "foldVariant"))
+  (PEInst i (Protoss.nUnsupported "inst"))
+  (PELet l (Protoss.nUnsupported "let"))
+  (PECons c (Protoss.nUnsupported "Cons"))
+  (PENil n (Protoss.nUnsupported "Nil"))
+  (PECaseList c (Protoss.nUnsupported "caseList"))
+  (PERecur r (Protoss.nUnsupported "recur"))
+  (PEBind b (Protoss.nUnsupported "bind"))
+  (PEDone d (Protoss.nUnsupported "done"))
+  (PERequest r (Protoss.nUnsupported "request")))
+
+(record NDef (name String) (expr ProtossExpr))
+
+(def Protoss.nExtractDefs (-> (List ProtossDecl) (Result String (List NDef)))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (variant (Result String (List NDef)) Ok (Nil NDef))
+      (lambda (decl ProtossDecl)
+        (lambda (acc (Result String (List NDef)))
+          (case acc
+            (Err err (variant Err err))
+            (Ok done
+              (case decl
+                (PDDef def (variant Ok (Cons NDef (record (name (get def name)) (expr (get def expr))) done)))
+                (PDDefCap def (variant Err "unsupported in normalizer: defcap"))
+                (PDDefPoly def (variant Err "unsupported in normalizer: defpoly"))
+                (PDDefPolyCap def (variant Err "unsupported in normalizer: defpolycap"))
+                (PDDefRec def (variant Err "unsupported in normalizer: defrec"))
+                (_ (variant Ok done))))))))))
+
+(def Protoss.nEnvHas (-> (List NEntry) (-> String Bool))
+  (lambda (env (List NEntry))
+    (lambda (name String)
+      (case ((Protoss.nEnvLookup env) name)
+        (Some v true)
+        (None false)))))
+
+(def Protoss.nBuildPass (-> (List NDef) (-> (List NEntry) (List NEntry)))
+  (lambda (defs (List NDef))
+    (lambda (env0 (List NEntry))
+      (foldList defs env0
+        (lambda (d NDef)
+          (lambda (env (List NEntry))
+            (case ((Protoss.nEnvHas env) (get d name))
+              (true env)
+              (false
+                (case ((Protoss.nEval (get d expr)) env)
+                  (Err err env)
+                  (Ok v (Cons NEntry (record (name (get d name)) (value v)) env)))))))))))
+
+(def Protoss.nBuildEnv (-> (List NDef) (List NEntry))
+  (lambda (defs (List NDef))
+    (foldNat ((inst List.length NDef) defs) (Nil NEntry)
+      (lambda (env (List NEntry)) ((Protoss.nBuildPass defs) env)))))
+
+(def Protoss.nFormat (-> (List NDef) (-> (List NEntry) (Result String String)))
+  (lambda (defs (List NDef))
+    (lambda (env (List NEntry))
+      (case
+        (foldList defs (variant (Result String (List String)) Ok (Nil String))
+          (lambda (d NDef)
+            (lambda (acc (Result String (List String)))
+              (case acc
+                (Err err (variant Err err))
+                (Ok names
+                  (case ((Protoss.nEnvLookup env) (get d name))
+                    (None (variant Err ((String.concat "unsupported in normalizer: ") (get d name))))
+                    (Some v
+                      (case (((Protoss.canonInsertString true)
+                              ((String.concat (get d name)) ((String.concat " = ") (Protoss.nValueToString v))))
+                             names)
+                        (Err err (variant Err err))
+                        (Ok inserted (variant Ok inserted))))))))))
+        (Err err (variant Err err))
+        (Ok lines
+          (variant Ok
+            (foldList lines String.empty
+              (lambda (line String)
+                (lambda (acc String)
+                  ((String.concat line) ((String.concat "
+") acc)))))))))))
+
+(def Protoss.normalizeText (-> String (Result String String))
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (variant Err err))
+      (Ok decls
+        (case (Protoss.nExtractDefs decls)
+          (Err err (variant Err err))
+          (Ok defs ((Protoss.nFormat defs) (Protoss.nBuildEnv defs))))))))
+
 (def Protoss.selfNormalizerJson (-> String String)
   (lambda (source String)
     (case (Protoss.staticReportText source)
