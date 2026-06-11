@@ -1,0 +1,8 @@
+name = "bench-web-min"
+version = "0.1.0"
+entrypoints = ["src/app.protoss"]
+stdlib = "../../../stdlib/prelude.protoss"
+source_dirs = ["src"]
+store_dir = ".protoss/store"
+cache_dir = ".protoss/cache"
+capabilities = ["Local.storage"]

@@ -29,7 +29,7 @@ type check = {
 
 (* Checks that build the full prelude (slow): run by [protoss doctor --v1] but
    skipped by the fast dev-loop test sweep, which must stay near-instant. *)
-let heavy_ids = [ "priority-demo" ]
+let heavy_ids = [ "priority-demo"; "benchmarks-thresholds" ]
 
 let is_heavy (c : check) = List.mem c.id heavy_ids
 
@@ -423,6 +423,32 @@ let priority_demo () =
             ignore (Patch.apply store patch);
             Pass)
 
+(* §20 HEAVY: a full-prelude project build stays under a generous wall-clock
+   ceiling — a coarse "did it get catastrophically slower" gate (the precise,
+   machine-comparable numbers live in benchmarks/run.sh). *)
+let benchmarks_thresholds () =
+  match
+    (find_up (Sys.getcwd ()) "examples/web/todo_app", find_up (Sys.getcwd ()) "stdlib/prelude.protoss")
+  with
+  | None, _ | _, None -> Not_yet "checklist §20: todo_app or prelude not found (best-effort)"
+  | Some app, Some prelude ->
+      let tmp =
+        Filename.concat (Filename.get_temp_dir_name ())
+          (Printf.sprintf "protoss-doctor-bench-%d" (Unix.getpid ()))
+      in
+      rm_rf tmp;
+      copy_tree app tmp;
+      absolutize_stdlib (Filename.concat tmp "protoss.toml") prelude;
+      Fun.protect
+        ~finally:(fun () -> rm_rf tmp)
+        (fun () ->
+          let manifest = Workspace.parse_manifest (Workspace.project_root tmp) in
+          let t0 = Unix.gettimeofday () in
+          ignore (Workspace.build manifest);
+          let secs = Unix.gettimeofday () -. t0 in
+          pass_if (secs < 20.0)
+            (Printf.sprintf "full-prelude build took %.1fs (ceiling 20s)" secs))
+
 (* ----- the check list ---------------------------------------------------- *)
 
 let checks : check list =
@@ -597,8 +623,8 @@ let checks : check list =
     {
       id = "benchmarks-thresholds";
       section = "20";
-      description = "official benchmarks meet critical thresholds";
-      run = (fun () -> Not_yet "checklist §20: wired by goal G12 (benchmarks)");
+      description = "a full-prelude build stays under a generous wall-clock ceiling";
+      run = benchmarks_thresholds;
     };
   ]
 

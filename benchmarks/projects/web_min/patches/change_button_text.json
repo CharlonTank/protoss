@@ -1,0 +1,7 @@
+{
+  "op": "ReplaceDef",
+  "name": "buttonLabel",
+  "deps": [],
+  "type": "String",
+  "expr": { "string": "Add item" }
+}

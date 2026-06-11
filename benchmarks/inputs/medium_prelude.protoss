@@ -1,0 +1,58 @@
+;; medium_prelude.protoss — medium benchmark input that IMPORTS the full prelude.
+;;
+;; Purpose: this is the realistic "typecheck + normalize a real program"
+;; workload. Importing stdlib/prelude.protoss forces the kernel to elaborate
+;; the entire standard library (~740 defs) before checking these defs, so the
+;; cost reflects what every real `check`/`hash`/`nf` of a prelude-using source
+;; pays. This is where typecheck/normalize regressions actually show up.
+;;
+;; The import path is relative to THIS file (benchmarks/inputs/), so the
+;; benchmark is location-stable regardless of the CWD the runner uses.
+(import "../../stdlib/prelude.protoss")
+
+(def xs (List Nat) (Cons Nat 1 (Cons Nat 2 (Cons Nat 3 (Nil Nat)))))
+(def doubled (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ x))))
+(def total Nat ((((inst List.fold Nat Nat) xs) 0) (lambda (a Nat) (lambda (b Nat) (foldNat a b (lambda (x Nat) (succ x)))))))
+
+;; 40 small prelude-using defs so the leaf program is non-trivial on top of
+;; the prelude baseline.
+(def m0 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m1 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m2 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m3 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m4 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m5 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m6 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m7 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m8 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m9 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m10 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m11 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m12 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m13 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m14 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m15 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m16 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m17 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m18 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m19 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m20 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m21 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m22 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m23 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m24 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m25 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m26 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m27 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m28 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m29 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m30 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m31 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m32 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m33 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m34 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m35 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m36 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m37 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m38 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))
+(def m39 (List Nat) (((inst List.map Nat Nat) xs) (lambda (x Nat) (succ (succ x)))))

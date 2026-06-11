@@ -1,0 +1,7 @@
+harness twoExample = example two
+harness twoUnit = unit two == 2
+harness labelUnit = unit label == "ok"
+harness generatedProperty = property isStable with sample
+harness sampleGenerator = generator sample
+harness twoBenchmark = benchmark two
+harness invariantOk = invariant invariantOk == true

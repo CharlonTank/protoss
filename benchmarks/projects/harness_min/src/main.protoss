@@ -1,0 +1,9 @@
+;; Minimal no-prelude project used to benchmark `project build` and `harness run`
+;; without paying prelude-evaluation cost (stdlib = "none"). Mirrors the shape of
+;; examples/harness_project so the smoke harness below exercises every harness
+;; entry kind.
+(def two Nat 2)
+(def label String "ok")
+(def sample Nat 2)
+(def isStable (-> Nat Bool) (lambda (n Nat) true))
+(def invariantOk Bool true)

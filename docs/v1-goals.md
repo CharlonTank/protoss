@@ -187,7 +187,7 @@ satisfaites.
   avec explication) + `protoss edit explain` ; tests des trois cas.
 - **Done** : tests rename/replace/refus verts ; fulltest vert.
 
-### G12 — Benchmarks officiels + seuils doctor [pending]
+### G12 — Benchmarks officiels + seuils doctor [done]
 - **Périmètre agent** : scénarios sous `benchmarks/**` ; seuils branchés dans
   doctor par l'orchestrateur.
 - **Dépendances** : G1. **Agent** : oui pour les scénarios.
@@ -307,6 +307,12 @@ satisfaites.
   (auto-suffisant, sans I/O). Doctor = 21 pass / 0 fail / 4 not-yet restants
   (ledger-replay §8.3, parités self-hosted canonicalizer/patch-validator §17,
   benchmarks §20) ; `@fulltest` vert.
+- 2026-06-11 — G12 Benchmarks : `benchmarks/` (run.sh runner déterministe — médianes
+  wall-clock, garde de stabilité des hashes content-addressed ; inputs purs/prélude ;
+  projets harness_min/web_min ; README avec seuils mesurés). Preuve doctor
+  `benchmarks-thresholds` (§20, **heavy**) : build full-prélude de todo_app sous un
+  plafond généreux (20 s, anti-flaky ; le bench mesure ~3,6 s). Doctor = 23 pass /
+  0 fail / 2 not-yet (parités self-hosted §17). `@fulltest` vert.
 - 2026-06-11 — Doctor : preuve `ledger-replay` (§8.3) branchée —
   `Invariants.check_ledger_process_checked` sur un Process `Human.ask` embarqué,
   ledger tmp pid-qualifié nettoyé, le replay resume avec la réponse fournie.
