@@ -168,7 +168,7 @@ satisfaites.
 
 ## Vague 4 — consolidation release
 
-### G10 — Cache d'évaluation content-addressed (EvalKey) [pending]
+### G10 — Cache d'évaluation content-addressed (EvalKey) [done]
 - **Périmètre** : `lib/runtime.ml`/nouveau module cache — orchestrateur (hot
   path : tout reste opt-in, garde perf CLAUDE.md).
 - **Dépendances** : G1. **Agent** : non.
@@ -325,3 +325,10 @@ satisfaites.
   WORKSPACE001, frontend self-hosté = S-expr only, REPL = expression unique,
   `project interface` exige `project package`, etc.). Vérification mécanique
   adossée aux scripts golden/priority + `doctor --v1` + `spec check` déjà verts.
+- 2026-06-11 — G10 Cache EvalKey : l'infra existait (`Runtime.eval_key` pur =
+  def_id+args_hash+runtime_policy ; `Runtime.process_eval_key` effectful = +world_ref
+  +cap_scope). Preuve doctor `cache-partitioning` (§7.1) : la clé effectful
+  partitionne par scope de capability ET par world_ref (pas de fuite inter-capability
+  ni inter-monde), stable sur entrées identiques ; la clé pure partitionne par
+  arguments. Exécutée en core (non-heavy), clés inchangées (zéro régression perf).
+  Doctor = 24 pass / 0 fail / 2 not-yet. `@fulltest` vert.

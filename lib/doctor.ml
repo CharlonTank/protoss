@@ -287,6 +287,26 @@ let harness_proof () =
     Fail "a failing harness reported pass"
   else Pass
 
+(* §7.1/§6.5: the effect cache key is partitioned by capability scope and
+   world ref (no cross-capability or cross-world cache leak) and stable for
+   identical inputs; the pure key is stable and partitions by def. *)
+let cache_partitioning () =
+  let k caps world =
+    Runtime.process_eval_key ~def_id:"d" ~world_ref:world ~cap_scope:caps ~runtime_policy:"p"
+  in
+  let base = k [ "Http.get" ] "w" in
+  if String.equal base (k [ "Local.storage" ] "w") then
+    Fail "effect cache key does not partition by capability scope (leak risk)"
+  else if String.equal base (k [ "Http.get" ] "w2") then
+    Fail "effect cache key does not partition by world ref"
+  else if not (String.equal base (k [ "Http.get" ] "w")) then
+    Fail "effect cache key is not stable for identical inputs"
+  else
+    let p a = Runtime.eval_key ~def_id:"d" ~args_hash:a ~runtime_policy:"p" in
+    if String.equal (p "a1") (p "a2") then Fail "pure cache key does not partition by arguments"
+    else if not (String.equal (p "a1") (p "a1")) then Fail "pure cache key is not stable"
+    else Pass
+
 (* §8.3: a Process suspends on a request, then the ledger resumes it
    deterministically with the supplied response. *)
 let ledger_replay () =
@@ -514,6 +534,12 @@ let checks : check list =
       section = "4";
       description = "an ill-typed definition is rejected";
       run = (fun () -> expect_reject ~what:"ill-typed definition" ill_typed);
+    };
+    {
+      id = "cache-partitioning";
+      section = "7.1";
+      description = "the eval cache key partitions by capability scope and world (no leak)";
+      run = cache_partitioning;
     };
     {
       id = "capability-enforcement";
