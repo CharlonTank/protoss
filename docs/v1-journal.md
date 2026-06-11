@@ -114,3 +114,9 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   input/list/node/when/on propagent tous le type attendu. Écarté ce tour : inférence HOF `List.map
   (\x -> ...)` (lambda non annotée en 1ʳᵉ position → nécessiterait méta-variables/report d'élaboration,
   chantier majeur, pas un cas check) ; `fmt --human` formes courtes (hash-safe local difficile à garantir).
+- 2026-06-12 — **Exemple tour des vues Protoss/H FAIT** (commit a165b42). `examples/protoss_h_views.pt`
+  exerce TOUS les widgets (column/row/button/input/list/when/on/node) en formes ergonomiques (variants
+  courts, lambdas anonymes, `[...]`) — démo + fixture de régression (test `Loader.check_file`, compile
+  `p2:56db7b…`). Valide de bout en bout le travail d'inférence des vues de ce cycle. Investigation
+  runtime/effets : effets dispo (Human.ask/Clock.read/Http.get/Server.request/Local.save), cycle Process
+  run→resume→replay testé par le doctor (`ledger-replay` PASS) ; modèle de base sain, pas de trou évident.
