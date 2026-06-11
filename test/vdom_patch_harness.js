@@ -37,7 +37,7 @@ let runtimeSource = webMl.slice(open + 2, close);
 runtimeSource = runtimeSource.replace(/^\s*\(function \(\) \{/, "");
 runtimeSource = runtimeSource.replace(/\}\)\(\);\s*$/, "");
 // Append a hook that exports the internals we want to test.
-runtimeSource += "\n;globalThis.__exports = { renderView: renderView, patch: patch, text: text };\n";
+runtimeSource += "\n;globalThis.__exports = { renderView: renderView, patch: patch, text: text, keyOf: keyOf, childrenAreKeyed: childrenAreKeyed, reconcileKeyed: reconcileKeyed };\n";
 
 // ---------------------------------------------------------------------------
 // 2. Minimal mock DOM. Elements track childNodes, attributes, listeners,
@@ -95,6 +95,25 @@ MockElement.prototype.replaceChild = function (next, old) {
   next.parentNode = this;
   old.parentNode = null;
   return old;
+};
+// Faithful DOM insertBefore: if `node` is already in this element it is first
+// detached from its current position (DOM "move" semantics — the same object is
+// repositioned, not cloned), then inserted before `ref`. A null `ref` appends.
+// insertBefore(node, node) is a no-op (matching the spec) since after removing
+// node, `ref` is gone, so we must guard that case explicitly.
+MockElement.prototype.insertBefore = function (node, ref) {
+  if (node === ref) return node; // no-op move onto itself
+  const cur = this.childNodes.indexOf(node);
+  if (cur !== -1) this.childNodes.splice(cur, 1); // detach from old slot
+  if (ref == null) {
+    this.childNodes.push(node);
+  } else {
+    const ri = this.childNodes.indexOf(ref);
+    if (ri === -1) throw new Error("insertBefore: ref not a child");
+    this.childNodes.splice(ri, 0, node);
+  }
+  node.parentNode = this;
+  return node;
 };
 MockElement.prototype.setAttribute = function (name, value) {
   this.attributes[name] = String(value);
@@ -158,9 +177,12 @@ sandbox.window = sandbox; // runtime assigns window.ProtossRuntime = ...
 vm.createContext(sandbox);
 vm.runInContext(runtimeSource, sandbox, { filename: "runtime_js (extracted)" });
 
-const { renderView, patch } = sandbox.__exports;
+const { renderView, patch, keyOf, childrenAreKeyed, reconcileKeyed } = sandbox.__exports;
 if (typeof renderView !== "function") throw new Error("renderView not captured");
 if (typeof patch !== "function") throw new Error("patch not captured");
+if (typeof keyOf !== "function") throw new Error("keyOf not captured");
+if (typeof childrenAreKeyed !== "function") throw new Error("childrenAreKeyed not captured");
+if (typeof reconcileKeyed !== "function") throw new Error("reconcileKeyed not captured");
 
 // ---------------------------------------------------------------------------
 // 3. Assertions.
@@ -186,6 +208,17 @@ const vButton = (label, message) => ({ kind: "button", label, message });
 const vColumn = (...children) => ({ kind: "column", children });
 const vRow = (...children) => ({ kind: "row", children });
 const vNode = (tag, attributes, children) => ({ kind: "node", tag, attributes: attributes || [], children: children || [] });
+// A keyed "node" vnode: carries {kind:"attr", name:"key", value:key}. Extra
+// attributes/children can be appended. This is the ONLY way a child opts into
+// keyed reconciliation (keyOf reads the "key" attr of a "node" kind only).
+const vKeyed = (key, tag, children, extraAttrs) =>
+  ({ kind: "node", tag: tag || "div",
+     attributes: [{ kind: "attr", name: "key", value: key }].concat(extraAttrs || []),
+     children: children || [] });
+// A keyed <input>: a "node" with tag "input" so it both carries a key AND
+// renders to a real INPUT element whose object identity (focus/caret) we track.
+const vKeyedInput = (key, value) =>
+  vKeyed(key, "input", [], [{ kind: "attr", name: "value", value: value || "" }]);
 
 let dispatched = [];
 const dispatch = (m) => { dispatched.push(m); };
@@ -359,6 +392,178 @@ console.log("== Test 8: inline on* attributes stay blocked; {kind:'on'} binds ==
   const n2 = vNode("div", [{ kind: "attr", name: "data-x", value: "1" }], []);
   patch(mount, mount.firstChild, n, n2, dispatch);
   eq("click listener removed when {kind:on} dropped", el._listenerCount("click"), 0);
+}
+
+// ===========================================================================
+// KEYED reconciliation tests. A child opts in by carrying a "key" attribute on
+// a "node" vnode. When EVERY child of a list (old and new) has a distinct key,
+// patchChildren reconciles by key — moving existing DOM nodes — instead of the
+// positional diff. Tests below prove identity-preserving reorder/insert/remove
+// and that an unkeyed (or partially-keyed) list keeps the legacy positional path.
+// ===========================================================================
+
+console.log("== Test 9: keyOf / childrenAreKeyed opt-in semantics ==");
+{
+  eq("keyOf reads the key attr of a node", keyOf(vKeyed("X", "div")), "X");
+  eq("keyOf is null for a node without a key", keyOf(vNode("div", [{ kind: "attr", name: "id", value: "z" }], [])), null);
+  eq("keyOf is null for non-node kinds (text)", keyOf(vText("hi")), null);
+  eq("keyOf is null for non-node kinds (input)", keyOf(vInput("v", "H")), null);
+  check("all-distinct-keyed list opts in", childrenAreKeyed([vKeyed("a", "div"), vKeyed("b", "div")]) === true);
+  check("empty list does NOT opt in", childrenAreKeyed([]) === false);
+  check("a single missing key disqualifies the whole list", childrenAreKeyed([vKeyed("a", "div"), vNode("div", [], [])]) === false);
+  check("duplicate keys disqualify the whole list", childrenAreKeyed([vKeyed("a", "div"), vKeyed("a", "div")]) === false);
+}
+
+console.log("== Test 10 (KEY): reorder [A,B,C] -> [C,A,B] reuses the SAME 3 DOM nodes, reordered ==");
+{
+  const mount = newMount();
+  const t1 = vColumn(vKeyed("A", "div", [vText("a")]), vKeyed("B", "div", [vText("b")]), vKeyed("C", "div", [vText("c")]));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const domA = col.childNodes[0], domB = col.childNodes[1], domC = col.childNodes[2];
+  eq("A rendered with its text", domA.childNodes[0].textContent, "a");
+  eq("B rendered with its text", domB.childNodes[0].textContent, "b");
+  eq("C rendered with its text", domC.childNodes[0].textContent, "c");
+
+  const t2 = vColumn(vKeyed("C", "div", [vText("c")]), vKeyed("A", "div", [vText("a")]), vKeyed("B", "div", [vText("b")]));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  eq("still exactly 3 children", col.childNodes.length, 3);
+  check("slot 0 is the SAME object as old C (moved, not recreated)", col.childNodes[0] === domC);
+  check("slot 1 is the SAME object as old A", col.childNodes[1] === domA);
+  check("slot 2 is the SAME object as old B", col.childNodes[2] === domB);
+  eq("new order matches [C,A,B] by content", col.childNodes.map((n) => n.childNodes[0].textContent).join(","), "c,a,b");
+}
+
+console.log("== Test 11 (KEY, THE PROOF): a keyed <input> moved middle->front stays the SAME DOM object (focus/caret survive) ==");
+{
+  const mount = newMount();
+  const t1 = vColumn(vKeyedInput("A", "av"), vKeyedInput("FOCUSED", "typed-by-user"), vKeyedInput("C", "cv"));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const inputBefore = col.childNodes[1]; // the middle, "focused" input
+  const inputId = inputBefore.__id;
+  eq("middle child is an INPUT element", inputBefore.tagName, "INPUT");
+  // The user's live caret/selection state lives on the very DOM object; here we
+  // stand in for it with a property only this object carries.
+  inputBefore.__caret = 7;
+
+  // Reorder so FOCUSED moves to the front. Value unchanged in the model.
+  const t2 = vColumn(vKeyedInput("FOCUSED", "typed-by-user"), vKeyedInput("A", "av"), vKeyedInput("C", "cv"));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  check("the focused input is now at slot 0", col.childNodes[0] === inputBefore);
+  eq("it is the SAME DOM object (id unchanged) => focus/caret preserved", col.childNodes[0].__id, inputId);
+  eq("its live caret/selection state survived the move", col.childNodes[0].__caret, 7);
+  eq("its value survived the move", col.childNodes[0].getAttribute("value"), "typed-by-user");
+  eq("three inputs total still", col.childNodes.length, 3);
+  eq("order is [FOCUSED,A,C]", col.childNodes.map((n) => n.getAttribute("value")).join(","), "typed-by-user,av,cv");
+}
+
+console.log("== Test 12 (KEY): inserting a key in the middle reuses existing nodes, only the new one is created ==");
+{
+  const mount = newMount();
+  const t1 = vColumn(vKeyed("A", "div", [vText("a")]), vKeyed("C", "div", [vText("c")]));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const domA = col.childNodes[0], domC = col.childNodes[1];
+
+  const t2 = vColumn(vKeyed("A", "div", [vText("a")]), vKeyed("B", "div", [vText("b")]), vKeyed("C", "div", [vText("c")]));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  eq("now 3 children", col.childNodes.length, 3);
+  check("A reused (same object)", col.childNodes[0] === domA);
+  check("C reused (same object)", col.childNodes[2] === domC);
+  check("B is a brand-new object (not A or C)", col.childNodes[1] !== domA && col.childNodes[1] !== domC);
+  eq("B rendered between A and C", col.childNodes[1].childNodes[0].textContent, "b");
+  eq("final order is [A,B,C]", col.childNodes.map((n) => n.childNodes[0].textContent).join(","), "a,b,c");
+}
+
+console.log("== Test 13 (KEY): removing a key in the middle removes the right node, reuses the others ==");
+{
+  const mount = newMount();
+  const t1 = vColumn(vKeyed("A", "div", [vText("a")]), vKeyed("B", "div", [vText("b")]), vKeyed("C", "div", [vText("c")]));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const domA = col.childNodes[0], domB = col.childNodes[1], domC = col.childNodes[2];
+  // Give B a listener so we can prove it was clearDeep'd (detached) on removal.
+  domB.addEventListener("custom", function () {});
+  eq("B has a listener before removal", domB.listeners.length >= 1, true);
+
+  const t2 = vColumn(vKeyed("A", "div", [vText("a")]), vKeyed("C", "div", [vText("c")]));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  eq("now 2 children", col.childNodes.length, 2);
+  check("A reused", col.childNodes[0] === domA);
+  check("C reused", col.childNodes[1] === domC);
+  check("B is no longer a child (removed)", col.childNodes.indexOf(domB) === -1);
+  eq("removed B was detached (parentNode null)", domB.parentNode, null);
+  eq("final order is [A,C]", col.childNodes.map((n) => n.childNodes[0].textContent).join(","), "a,c");
+}
+
+console.log("== Test 14 (KEY): a moved keyed node keeps its listeners (NOT clearDeep'd while reused) ==");
+{
+  const mount = newMount();
+  const withClick = (key) => vKeyed(key, "div", [], [{ kind: "on", event: "click", message: { tag: "Hit-" + key } }]);
+  const t1 = vColumn(withClick("A"), withClick("B"));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const domA = col.childNodes[0], domB = col.childNodes[1];
+  eq("A has one click listener initially", domA._listenerCount("click"), 1);
+
+  // Swap order: B then A.
+  const t2 = vColumn(withClick("B"), withClick("A"));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  check("A moved to slot 1 (same object)", col.childNodes[1] === domA);
+  check("B moved to slot 0 (same object)", col.childNodes[0] === domB);
+  eq("moved A still has exactly one click listener (rebind, not duplicate, not lost)", domA._listenerCount("click"), 1);
+  dispatched = [];
+  domA._fire("click");
+  eq("moved A still dispatches its message", dispatched.length && dispatched[0].tag, "Hit-A");
+}
+
+console.log("== Test 15 (REGRESSION): an UNKEYED list keeps the positional diff (legacy behaviour unchanged) ==");
+{
+  const mount = newMount();
+  // No child carries a key -> childrenAreKeyed is false -> positional path.
+  const t1 = vColumn(vText("one"), vText("two"));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const slot0 = col.childNodes[0], slot1 = col.childNodes[1];
+
+  // "Prepend" zero: positionally, slot0 is re-mutated to "zero" in place (NOT
+  // moved), slot1 re-mutated to "one", and a third node appended for "two".
+  const t2 = vColumn(vText("zero"), vText("one"), vText("two"));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  eq("now 3 children", col.childNodes.length, 3);
+  check("slot 0 is the SAME object as before, re-mutated in place (positional)", col.childNodes[0] === slot0);
+  check("slot 1 is the SAME object as before, re-mutated in place (positional)", col.childNodes[1] === slot1);
+  eq("slot 0 text positionally updated to 'zero'", col.childNodes[0].textContent, "zero");
+  eq("slot 1 text positionally updated to 'one'", col.childNodes[1].textContent, "one");
+  eq("slot 2 appended as 'two'", col.childNodes[2].textContent, "two");
+}
+
+console.log("== Test 16 (REGRESSION): a PARTIALLY-keyed list falls back to the positional diff ==");
+{
+  const mount = newMount();
+  // One child keyed, one not -> NOT fully keyed -> positional path.
+  const t1 = vColumn(vKeyed("A", "div", [vText("a")]), vNode("div", [], [vText("b")]));
+  patch(mount, mount.firstChild, null, t1, dispatch);
+  const col = mount.firstChild;
+  const slot0 = col.childNodes[0];
+
+  // Swap the vnode order. Under positional diff both slots have the same
+  // structural signature ("node:div"), so each is updated in place by index —
+  // the DOM objects are NOT moved, proving we did NOT take the keyed path.
+  const t2 = vColumn(vNode("div", [], [vText("b")]), vKeyed("A", "div", [vText("a")]));
+  patch(mount, mount.firstChild, t1, t2, dispatch);
+
+  eq("still 2 children", col.childNodes.length, 2);
+  check("slot 0 is the SAME object (positional in-place update, not a keyed move)", col.childNodes[0] === slot0);
+  eq("slot 0 updated in place to the new child's content 'b'", col.childNodes[0].childNodes[0].textContent, "b");
+  eq("slot 0 lost its key attr (overwritten in place)", col.childNodes[0].getAttribute("key"), null);
 }
 
 // ---------------------------------------------------------------------------

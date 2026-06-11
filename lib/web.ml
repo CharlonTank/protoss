@@ -798,14 +798,111 @@ let runtime_js =
     });
     syncNodeListeners(el, newAttributes, dispatch);
   }
-  // Positional child diff: walk old/new children in parallel, patching the DOM
-  // child at each index. NOTE: this is intentionally NOT keyed — reordered lists
-  // are diffed by position, so a prepend re-patches every following node rather
-  // than moving existing DOM nodes. Sufficient for focus/scroll preservation of
-  // in-place edits; keyed reconciliation is a future step.
+  // Opt-in keyed reconciliation. A child's key is the value of an
+  // {kind:"attr", name:"key", value:K} attribute on a "node" vnode; any other
+  // kind (or a node without that attribute) has no key. Keys make reordering
+  // cheap and identity-preserving: an existing DOM node is MOVED (insertBefore)
+  // to its new slot instead of being mutated in place at a fixed index.
+  function keyOf(node) {
+    if (!node || node.kind !== "node") return null;
+    var attrs = node.attributes || [];
+    for (var i = 0; i < attrs.length; i++) {
+      var attr = attrs[i];
+      if (attr && attr.kind === "attr" && String(attr.name || "") === "key") {
+        return String(attr.value == null ? "" : attr.value);
+      }
+    }
+    return null;
+  }
+  // A child list opts into keyed reconciliation only when it is non-empty and
+  // EVERY child carries a non-null key AND all keys are distinct. Any missing or
+  // duplicate key disqualifies the whole list, which then falls back to the
+  // positional diff — so unkeyed lists behave exactly as before.
+  function childrenAreKeyed(children) {
+    if (!children || children.length === 0) return false;
+    var seen = Object.create(null);
+    for (var i = 0; i < children.length; i++) {
+      var k = keyOf(children[i]);
+      if (k === null) return false;
+      var slot = "k:" + k;
+      if (seen[slot]) return false;
+      seen[slot] = true;
+    }
+    return true;
+  }
+  // Keyed list reconciliation. Pre-state: domEl.childNodes is parallel to
+  // oldChildren (same length, same order — guaranteed by how the previous render
+  // built/patched it). Strategy (simple and correct over optimal):
+  //   1. Index oldKey -> { vnode, domNode } by walking both in lockstep.
+  //   2. Walk newChildren left-to-right. For each new child, if its key was in
+  //      the old set: patch the surviving DOM node in place, then MOVE it to the
+  //      current target slot via insertBefore (so its object identity — and a
+  //      focused <input>'s focus/caret — survives the reorder). Otherwise render
+  //      a fresh node and insert it at the target slot.
+  //   3. Whatever old keys went unconsumed are stale: clearDeep + remove them.
+  // Building the target sequence by reusing/inserting and removing leftovers
+  // avoids the off-by-one index bugs of in-place positional shuffles.
+  function reconcileKeyed(domEl, oldChildren, newChildren, dispatch) {
+    var oldByKey = Object.create(null);
+    for (var i = 0; i < oldChildren.length; i++) {
+      var ok = keyOf(oldChildren[i]);
+      // childrenAreKeyed(oldChildren) held, so every key is present and unique.
+      oldByKey["k:" + ok] = { vnode: oldChildren[i], domNode: domEl.childNodes[i] };
+    }
+    var consumed = Object.create(null);
+    // Walk new children; after step j, domEl.childNodes[0..j] are the first j+1
+    // target nodes in their final order. The node currently sitting at index j
+    // (before we place this one) is our insertBefore reference.
+    for (var j = 0; j < newChildren.length; j++) {
+      var newChild = newChildren[j];
+      var nk = keyOf(newChild);
+      var slot = "k:" + nk;
+      var prior = oldByKey[slot];
+      var refNode = domEl.childNodes[j] || null;
+      if (prior) {
+        // Update the surviving node in place. patch() with a matching parent
+        // reuses prior.domNode (same structural signature ⇒ in-place update);
+        // it must NOT be clearDeep'd — we are moving, not discarding, it.
+        var updated = patch(domEl, prior.domNode, prior.vnode, newChild, dispatch);
+        var moveNode = updated || prior.domNode;
+        // Move into the target slot. If it is already the ref node, this is a
+        // no-op reposition; insertBefore(x, x) is a defined no-op in the DOM.
+        if (moveNode !== refNode) domEl.insertBefore(moveNode, refNode);
+        consumed[slot] = true;
+      } else {
+        var created = renderView(newChild, dispatch);
+        domEl.insertBefore(created, refNode);
+      }
+    }
+    // Remove any old DOM nodes whose key was not reused. They have been shifted
+    // toward the tail by the insertBefore moves, so collect-then-remove rather
+    // than relying on positions.
+    var stale = [];
+    for (var key in oldByKey) {
+      if (!consumed[key]) stale.push(oldByKey[key].domNode);
+    }
+    for (var s = 0; s < stale.length; s++) {
+      var deadNode = stale[s];
+      if (deadNode && deadNode.parentNode === domEl) {
+        clearDeep(deadNode);
+        domEl.removeChild(deadNode);
+      }
+    }
+  }
+  // Child diff dispatcher. When BOTH the old and new child lists are fully keyed
+  // (see childrenAreKeyed) we reconcile by key, moving existing DOM nodes. In
+  // every other case we keep the original positional diff UNCHANGED: walk
+  // old/new in parallel, patching the DOM child at each index. The positional
+  // path is intentionally NOT keyed — a prepend re-patches every following node
+  // rather than moving nodes — and stays byte-for-byte the legacy behaviour for
+  // any list that does not fully opt in via per-child "key" attributes.
   function patchChildren(domEl, oldChildren, newChildren, dispatch) {
     oldChildren = oldChildren || [];
     newChildren = newChildren || [];
+    if (childrenAreKeyed(oldChildren) && childrenAreKeyed(newChildren)) {
+      reconcileKeyed(domEl, oldChildren, newChildren, dispatch);
+      return;
+    }
     var max = Math.max(oldChildren.length, newChildren.length);
     for (var i = 0; i < max; i++) {
       // domEl.childNodes[i] is the DOM node currently rendering oldChildren[i].
