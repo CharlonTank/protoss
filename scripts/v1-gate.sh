@@ -55,11 +55,35 @@ step "priority demo" examples/web/todo_app/priority_demo.sh "${PROTOSS[*]}"
 # 6. The whole conformance suite.
 step "fulltest" dune build @fulltest --force
 
+# 7. The CLI actually installs and runs OUTSIDE a checkout, with no
+#    PROTOSS_STDLIB: a "V1" you can only run via `dune exec` is not shipped.
+#    Hermetic: installs to a throwaway prefix and exercises it from a temp dir
+#    that is not under the repo, so the prelude must be found via the installed
+#    layout (<prefix>/share/protoss/prelude.protoss), not the source tree.
+install_smoke() {
+  local prefix demo ok=0
+  prefix="$(mktemp -d)"; demo="$(mktemp -d)"
+  if dune build @install >/dev/null 2>&1 \
+     && dune install --prefix "${prefix}" protoss >/dev/null 2>&1 \
+     && ( cd "${demo}" && env -u PROTOSS_STDLIB "${prefix}/bin/protoss" project init app >/dev/null ) \
+     && printf '(def x Nat 1)\n' > "${demo}/app/x.protoss" \
+     && ( cd "${demo}" && env -u PROTOSS_STDLIB "${prefix}/bin/protoss" self nf "${demo}/app/x.protoss" ) \
+          | grep -q 'x = 1'; then
+    ok=0
+  else
+    ok=1
+  fi
+  rm -rf "${prefix}" "${demo}"
+  return "${ok}"
+}
+step "install smoke (CLI runs outside a checkout)" install_smoke
+
 echo
 if [ "${fail}" -eq 0 ]; then
   echo "V1.0 gate: PASS (every available proof is green)"
-  echo "Note: the doctor still reports the §17 self-hosted patch-validator parity"
-  echo "as not-yet (goal G8); V1.0 is not SHIPPED until that is green."
+  echo "Note: the doctor reports the §17 self-hosted parities (canonicalizer /"
+  echo "patch-validator / normalizer) as not-yet; each is proven by an @selftest"
+  echo "sweep (run under fulltest above), not duplicated in the doctor."
   exit 0
 else
   echo "V1.0 gate: FAIL"

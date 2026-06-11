@@ -1202,14 +1202,28 @@ let rec find_up dir rel =
     let parent = Filename.dirname dir in
     if String.equal parent dir then None else find_up parent rel
 
+(* Installed layout (dune install): the binary lives at <prefix>/bin/protoss and
+   the prelude is packaged at <prefix>/share/protoss/prelude.protoss. Derive it
+   from the executable's own path so an installed protoss is self-contained. *)
+let installed_prelude_path () =
+  let exe_dir = Filename.dirname Sys.executable_name in
+  let candidate =
+    Filename.concat exe_dir
+      (Filename.concat Filename.parent_dir_name "share/protoss/prelude.protoss")
+  in
+  if Sys.file_exists candidate then Some candidate else None
+
 let prelude_path () =
   match Sys.getenv_opt "PROTOSS_STDLIB" with
   | Some p -> p
   | None -> (
       match find_up (Sys.getcwd ()) "stdlib/prelude.protoss" with
       | Some p -> p
-      | None ->
-          Protoss.Kernel.fail "cannot locate stdlib/prelude.protoss (set PROTOSS_STDLIB)")
+      | None -> (
+          match installed_prelude_path () with
+          | Some p -> p
+          | None ->
+              Protoss.Kernel.fail "cannot locate stdlib/prelude.protoss (set PROTOSS_STDLIB)"))
 
 let read_source path =
   let ic = open_in_bin path in

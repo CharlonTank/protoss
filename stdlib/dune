@@ -1,0 +1,8 @@
+; Package the self-hosted prelude so `dune install` ships it alongside the
+; binary at <prefix>/share/protoss/prelude.protoss. The installed `protoss`
+; locates it relative to its own path (see bin/main.ml: installed_prelude_path),
+; so check/self/nf work outside a checkout without PROTOSS_STDLIB.
+(install
+ (section share)
+ (package protoss)
+ (files prelude.protoss))
