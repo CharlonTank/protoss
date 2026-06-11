@@ -7,9 +7,14 @@ chaque chose finie ; changements kernel/risqués via agent isolé en worktree av
 déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégration.
 
 ## En cours
-- **Exemple full-stack réel : app todo en Protoss/H** — agent isolé `ac3e66` (background). Réécriture de
-  `examples/web/todo_app/src/app.protoss` (S-exp → Elm-like) à HASH IDENTIQUE, en préservant noms/types
-  (pour garder `priority_demo.sh` + `add_priority.json` valides). Test d'expressivité §14.
+- (rien — prochain item à décider au réveil)
+
+## Note opérationnelle
+- 2026-06-12 — L'agent worktree `ac3e66` (todo Protoss/H) a échoué à REPRENDRE via SendMessage :
+  « Not logged in · Please run /login » (0 token, échec immédiat — hoquet d'auth transitoire). Son
+  PREMIER run (rapport d'investigation) avait réussi. J'ai donc fait le fix kernel input/list moi-même
+  (pattern éprouvé + preuves complètes). Leçon : si un agent échoue sur le login, ne pas insister —
+  faire le travail soi-même quand il est bien cadré et prouvable.
 
 ## Audit V1 (ce tour)
 - `protoss doctor --v1` : **25 pass, 0 fail, 3 not-yet** — et les 3 not-yet (canon/nf/patch self-host parity)
@@ -28,12 +33,14 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
 - [x] Variants courts (`Increment unit` / bare `Reset`) — FAIT, commit 4071106
 - [x] Scaffold `protoss init` en Protoss/H (alias + `[...]` + variants courts, hash identique) — FAIT, 29e2795
 - [x] Messages d'erreur : seuil « did you mean » relatif à la longueur (plus de `Nope`→`bad`) — FAIT, 5c7769e
-- [ ] Robustesse runtime/ledger/Process : cas limites des effets typés, resume/replay (en cours)
+- [x] Inférence lambdas anonymes input/list (widgets `input`/`list`) — FAIT, 8f1592e
+- [x] Exemple full-stack réel : app todo réécrite en Protoss/H, hash identique, priority_demo PASS — FAIT, 51e78ae
 - [ ] Constructeurs de variant comme candidats de suggestion (`Nome`→`None`) — découvert ce tour
 - [ ] `fmt --human` émet les formes courtes (`[...]`, variants courts) au lieu de Cons/Nil/variant explicites
-- [ ] Inférence du type de param des lambdas anonymes (HOF type `List.map (\x -> ...) xs`) — kernel, suite du fix bidirectionnel
+- [ ] Inférence lambda anonyme en 1ʳᵉ position (`List.map (\x -> ...) xs`) — kernel, reste du fix HOF
+- [ ] Cas check pour les widgets restants (`on`, `image`, `when`) si une lambda/variant court y est attendu
+- [ ] Robustesse runtime/ledger/Process (audit ce tour : mûr — approfondir les cas limites resume/replay)
 - [ ] Fuzzer : nouvelle passe sur parser/checker/runtime pour débusquer des crashs non structurés
-- [ ] Exemple d'app full-stack réel et propre en Protoss/H (todo réécrit avec `[...]`, keyed, alias)
 - [ ] Audit spec : features de protoss-spec.md / ship-checklist marquées faibles ou incomplètes
 - [ ] Doc : cheatsheet de la syntaxe humaine Protoss/H
 
@@ -63,3 +70,12 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   vraies typos toujours suggérées (`incremen`→`increment`). Error-path pur (code mort pour tout
   programme valide → zéro hash bouge), test de régression ajouté. Trou identifié : constructeurs de
   variant pas candidats (`Nome`→`None`) → item séparé.
+- 2026-06-12 — **Inférence input/list + app todo en Protoss/H FAIT** (8f1592e fix kernel, 51e78ae exemple).
+  L'agent `ac3e66` avait caractérisé le trou (EInput/EListView sans cas `check_elab` → lambda anonyme sans
+  type attendu) puis échoué à reprendre (login). Fix fait moi-même : 2 cas `check_elab` sous TView (handler
+  contre `TFun(String, msg_ty)` ; render contre `TFun(item_ty, View msg_ty)`), miroir exact des cas infer →
+  cterm byte-identique. Preuves : app todo originale S-exp ET réécrite Protoss/H buildent toutes deux à
+  `p2:f90aa6e…fd17` ; sweep examples/ 103 fichiers 0-diff parent vs patché ; test unitaire input/list
+  inféré==annoté `p2:f359c2…` ; `priority_demo.sh` PASS (15 checks, patch+migration intacts) ; `@fulltest` vert.
+  Série widgets bidirectionnels complète : column/row (7e82b31) → button (4071106) → input/list (8f1592e).
+  Protoss/H exprime désormais une app full-stack entière à hash identique.
