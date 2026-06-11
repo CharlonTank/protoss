@@ -96,3 +96,12 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   donne « Did you mean None? ». Error-path pur (0 hash), test ajouté, `@fulltest` vert. README : ajout
   des variants courts + inférence lambdas input/list à la description de la surface Elm-like. Note :
   `examples/web/site_vitrine` existe déjà comme app Protoss/H complète (en plus du todo réécrit).
+- 2026-06-12 — **Fuzzer → évaluateur FAIT** (commit 7a4cf4d, harnais de test seul, 0 hash) + investigation
+  perf (négatif utile). 6e target `evaluator` (check + `Runtime.normalize_all`, total → termine sur seeds
+  bornés ; `Runtime.fail = Kernel.fail` → erreurs structurées). success=327, **0 crash** → évaluateur
+  robuste, pas de divergence. `@fulltest` ~25s inchangé. **Perf dev-loop** mesurée : `app check` 0.83s,
+  @coretest 1.15s, @selftest 7.3s (goulot = éval interprétée du frontend self-hosté). L'évaluateur est
+  DÉJÀ optimisé : `eval_app` court-circuite le hash de clé de cache quand le cache est off (piège CLAUDE.md
+  déjà corrigé), `trace` gardé, concaténations après court-circuit. Seul lookup linéaire restant : `nth_env`
+  (env De Bruijn en liste, O(i)) — optimisation liste→array invasive, gain incertain, écartée pour l'instant.
+  Robustesse parser+checker+eval désormais toute sous fuzzing (6 targets).
