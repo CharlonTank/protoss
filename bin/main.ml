@@ -49,7 +49,7 @@ let usage () =
      \       protoss invariants ledger --graph <graph.json> --entry <name> --response <value> [--ledger <root>]\n\
      \       protoss invariants ledger --store-graph <project-or-store> <graphHash> --entry <name> --response <value> [--ledger <root>]\n\
      \       protoss invariants package <project>\n\
-     \       protoss fmt [--check] <file>\n\
+     \       protoss fmt [--human] [--check] <file>\n\
      \       protoss graph <project> --out <graph.json> | --dot <graph.dot>\n\
      \       protoss graph --stats <graph.json> | --roots <graph.json> | --deps <graph.json> [nameOrDefId] | --capabilities <graph.json> | --capability <graph.json> <nameOrCapRef> | --capability-scopes <graph.json> [nameOrCapRef] | --host-contract <graph.json> | --check-host-contract <graph.json> <contract.json> | --node <graph.json> <nodeRef> | --def <graph.json> <nameOrDefId>\n\
      \       protoss graph --store-graph <project-or-store> <graphHash> --out <graph.json> | --dot <graph.dot> | --stats | --roots | --deps [nameOrDefId] | --capabilities | --capability <nameOrCapRef> | --capability-scopes [nameOrCapRef] | --host-contract | --check-host-contract <contract.json> | --node <nodeRef> | --def <nameOrDefId>\n\
@@ -883,6 +883,35 @@ let command_invariants = function
         (Protoss.Invariants.describe_package (Protoss.Invariants.check_package project))
   | _ -> usage ()
 
+(* Render the Protoss/H projection, refusing to emit text whose canonical
+   hash would diverge from the source's: the view must match the canon. When
+   the file does not check in isolation (unresolved imports), the re-parse is
+   still required to succeed but the hash guard is skipped. *)
+let render_human file =
+  let program = Protoss.Parser.parse_file file in
+  let rendered =
+    try Protoss.Surface_syntax.render_program program
+    with Protoss.Surface_syntax.Unrenderable msg ->
+      Protoss.Kernel.fail ("no Protoss/H projection for " ^ file ^ ": " ^ msg)
+  in
+  let reparsed =
+    try Protoss.Parser.parse_string rendered
+    with Protoss.Parser.Error msg ->
+      Protoss.Kernel.fail ("Protoss/H projection does not re-parse: " ^ msg)
+  in
+  let checked_hash program =
+    try Some (Protoss.Kernel.hash_program (Protoss.Kernel.check_program program))
+    with Protoss.Kernel.Error _ -> None
+  in
+  (match checked_hash program with
+  | None -> ()
+  | Some original_hash -> (
+      match checked_hash reparsed with
+      | Some rendered_hash when String.equal original_hash rendered_hash -> ()
+      | Some _ -> Protoss.Kernel.fail ("Protoss/H projection changes the hash of " ^ file)
+      | None -> Protoss.Kernel.fail ("Protoss/H projection does not check: " ^ file)));
+  rendered
+
 let command_fmt = function
   | [ file ] -> print_string (Protoss.Ast.string_of_program (Protoss.Parser.parse_file file))
   | [ "--check"; file ] ->
@@ -890,6 +919,11 @@ let command_fmt = function
       let formatted = Protoss.Ast.string_of_program (Protoss.Parser.parse_file file) in
       if String.equal original formatted then print_endline "OK"
       else Protoss.Kernel.fail ("format check failed: " ^ file)
+  | [ "--human"; file ] -> print_string (render_human file)
+  | [ "--human"; "--check"; file ] ->
+      let original = Protoss.Store.read_file file in
+      if String.equal original (render_human file) then print_endline "OK"
+      else Protoss.Kernel.fail ("human format check failed: " ^ file)
   | _ -> usage ()
 
 let command_graph = function

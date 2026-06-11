@@ -171,7 +171,7 @@ Elm-like, modules humains et "human official grammar" dans
   exemples (`==`, `/=`, `<`, `<=`, `>`, `>=`, `not`, `&&`, `||`).
   Preuves: `examples/elm_like.protoss`, `examples/elm_like_equiv.protoss`,
   `test/test_protoss.ml` assertions "Elm-like Nat equality" et `README.md`.
-- [x] Ajouter un formatter Protoss/H idempotent pour toute la grammaire.
+- [ ] Ajouter un formatter Protoss/H idempotent pour toute la grammaire.
   Preuves: `Ast.string_of_program`, commande `protoss fmt [--check] <file>`,
   assertion "Protoss/H formatter full grammar idempotent" dans
   `test/test_protoss.ml`, `README.md`.
@@ -534,7 +534,7 @@ parser", "harness report" et "harness failing" dans `test/test_protoss.ml`,
   Preuves: `Harness.Generator`, application de generateur dans
   `Harness.run_one`, assertion "harness generator actual" dans
   `test/test_protoss.ml`, fixture `examples/harness_project/harness/smoke.pth`.
-- [x] Supporter benchmarks.
+- [ ] Supporter benchmarks.
   Preuves: `Harness.Benchmark`, syntaxe `benchmark def`, assertion "harness
   benchmark passes" dans `test/test_protoss.ml`, `README.md`.
 - [x] Supporter invariants metier.
@@ -549,10 +549,10 @@ parser", "harness report" et "harness failing" dans `test/test_protoss.ml`,
 - [x] Supporter politiques de securite.
   Preuves: `Harness.Security`, syntaxe `security def == expected`, assertion
   "harness security policy passes" dans `test/test_protoss.ml`.
-- [x] Supporter prompts de diagnostic.
+- [ ] Supporter prompts de diagnostic.
   Preuves: `Harness.Diagnostic`, syntaxe `diagnostic prompt`, assertion
   "harness diagnostic prompt actual" dans `test/test_protoss.ml`.
-- [x] Supporter evaluations IA.
+- [ ] Supporter evaluations IA.
   Preuves: `Harness.AiEval`, syntaxe `ai-eval def == expected`, assertion
   "harness ai evaluation passes" dans `test/test_protoss.ml`, `README.md`.
 - [x] Faire echouer les patches qui regressent un harness attache.
@@ -617,7 +617,7 @@ factorisation des doublons via `Agent_protocol.factor_identical_json`,
   compare-branches`, assertions "ledger harness branch comparison reports
   diff" et "ledger harness branch comparison passes identical branch" dans
   `test/test_protoss.ml`, `README.md`.
-- [x] Generer des vues humaines lisibles depuis le graphe.
+- [ ] Generer des vues humaines lisibles depuis le graphe.
 - [x] Interdire aux agents l'ecriture directe du programme canonique.
   Preuves: `Agent_protocol.guard_write_json`,
   `Agent_protocol.commit_patch_json`, commandes `protoss agent guard-write` et
@@ -639,21 +639,21 @@ et typecheck dans `test/test_protoss.ml`.
 - [x] Fournir checks static self-hosted.
 - [x] Fournir typecheck report self-hosted execute par le noyau OCaml.
 - [x] Fournir golden tests conformance self-host.
-- [x] Ecrire le parser Protoss/H complet en Protoss.
+- [ ] Ecrire le parser Protoss/H complet en Protoss.
   Preuves: `Protoss.parseText`, `Protoss.selfHumanParserJson`,
   assertion "__self_human_parser" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Ecrire le pretty-printer Protoss/H complet en Protoss.
+- [ ] Ecrire le pretty-printer Protoss/H complet en Protoss.
   Preuves: `Protoss.renderType`, `Protoss.renderExpr`,
   `Protoss.renderDecl`, `Protoss.formatText`,
   `Protoss.selfHumanPrettyPrinterJson`, assertion
   "__self_human_pretty_printer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Ecrire le canonicalizer en Protoss.
+- [ ] Ecrire le canonicalizer en Protoss.
   Preuves: `Protoss.selfCanonicalizerJson` via `Protoss.formatText`,
   assertion "__self_canonicalizer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Ecrire le normalizer en Protoss.
+- [ ] Ecrire le normalizer en Protoss.
   Preuves: `Protoss.selfNormalizerJson`,
   assertion "__self_normalizer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
@@ -661,32 +661,32 @@ et typecheck dans `test/test_protoss.ml`.
   Preuves: `Protoss.tcText`, `Protoss.selfTypecheckerJson`,
   assertions "__self_typechecker", "__tc_valid" et "__tc_invalid" dans
   `test/test_protoss.ml`, `docs/self-hosted-typechecker.md`.
-- [x] Ecrire le patch validator en Protoss.
+- [ ] Ecrire le patch validator en Protoss.
   Preuves: `Protoss.selfPatchValidatorJson`,
   assertion "__self_patch_validator" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Ecrire le harness runner en Protoss.
+- [ ] Ecrire le harness runner en Protoss.
   Preuves: `Protoss.selfHarnessRunnerJson`,
   assertion "__self_harness_runner" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Ecrire le package resolver en Protoss.
+- [ ] Ecrire le package resolver en Protoss.
   Preuves: `PackageRegistry.resolveLocalGlobal`,
   `Protoss.selfPackageResolverJson`, assertion "__self_package_resolver"
   dans `test/test_protoss.ml`, `docs/self-hosting.md`.
-- [x] Ecrire le serveur MCP en Protoss.
+- [ ] Ecrire le serveur MCP en Protoss.
   Preuves: `Protoss.selfMcpServerJson`,
   assertion "__self_mcp_server" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`; le serveur compatible MCP reste expose par
   `Mcp_server.handle_message`.
-- [x] Ecrire l'optimizer en Protoss.
+- [ ] Ecrire l'optimizer en Protoss.
   Preuves: `Protoss.selfOptimizerJson`,
   assertion "__self_optimizer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Ecrire un compiler backend en Protoss.
+- [ ] Ecrire un compiler backend en Protoss.
   Preuves: `Protoss.selfCompilerBackendJson`,
   assertion "__self_compiler_backend" dans `test/test_protoss.ml`,
   `Workspace.build_compiler_backend` et manifestes backend.
-- [x] Reduire le TCB aux hashes, format binaire, type verifier noyau,
+- [ ] Reduire le TCB aux hashes, format binaire, type verifier noyau,
   validator patch et runtime effets.
   Preuves: `Protoss.selfTrustedBoundaryJson`, assertion
   "__self_trusted_boundary" dans `test/test_protoss.ml`,
@@ -707,28 +707,28 @@ bundle deterministe dans `test/test_protoss.ml`.
 - [x] Inclure `index.html`, `protoss-runtime.js`, `protoss-app.json`,
   `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-host-contract.json`,
   `protoss-capabilities.json`, `protoss-world.json`.
-- [x] Ajouter backend bytecode Protoss VM.
+- [ ] Ajouter backend bytecode Protoss VM.
   Preuves: cible `project build --target bytecode`,
   `Workspace.build_compiler_backend`, manifeste
   `protoss-vm-bytecode-manifest`, assertions "backend bytecode ..." dans
   `test/test_protoss.ml`, `README.md`.
-- [x] Ajouter backend WebAssembly.
+- [ ] Ajouter backend WebAssembly.
   Preuves: cible `project build --target wasm`,
   manifeste `webassembly-module-manifest`, assertions "backend wasm ..." dans
   `test/test_protoss.ml`, `README.md`.
-- [x] Ajouter backend LLVM/native.
+- [ ] Ajouter backend LLVM/native.
   Preuves: cible `project build --target llvm`, manifeste
   `llvm-native-manifest`, assertions "backend llvm ..." dans
   `test/test_protoss.ml`, `README.md`.
-- [x] Ajouter backend JavaScript hors runtime web actuel.
+- [ ] Ajouter backend JavaScript hors runtime web actuel.
   Preuves: cible `project build --target javascript`, manifeste
   `standalone-javascript-manifest`, assertions "backend javascript ..." dans
   `test/test_protoss.ml`, `README.md`.
-- [x] Ajouter backend SQL/dataflow.
+- [ ] Ajouter backend SQL/dataflow.
   Preuves: cible `project build --target sql-dataflow`, manifeste
   `sql-dataflow-manifest`, assertions "backend sql-dataflow ..." dans
   `test/test_protoss.ml`, `README.md`.
-- [x] Ajouter backend GPU kernels.
+- [ ] Ajouter backend GPU kernels.
   Preuves: cible `project build --target gpu-kernel`, manifeste
   `gpu-kernel-manifest`, assertions "backend gpu-kernel ..." dans
   `test/test_protoss.ml`, `README.md`.
@@ -979,19 +979,19 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 - [x] Parser partiel ecrit en Protoss.
 - [x] Typechecker report ecrit en Protoss avec noyau OCaml trusted.
-- [x] Canonicalizer ecrit en Protoss.
+- [ ] Canonicalizer ecrit en Protoss.
   Preuves: `Protoss.selfCanonicalizerJson`,
   assertion "__self_canonicalizer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Patch validator ecrit en Protoss.
+- [ ] Patch validator ecrit en Protoss.
   Preuves: `Protoss.selfPatchValidatorJson`,
   assertion "__self_patch_validator" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [x] Compiler self-hosted.
+- [ ] Compiler self-hosted.
   Preuves: `Protoss.selfCompilerBackendJson`,
   assertion "__self_compiler_backend" dans `test/test_protoss.ml`,
   cibles `project build --target bytecode|wasm|llvm|javascript|sql-dataflow|gpu-kernel`.
-- [x] Remplacement progressif du trusted host.
+- [ ] Remplacement progressif du trusted host.
   Preuves: `Protoss.selfBootstrapPlanJson`,
   `Protoss.selfTrustedBoundaryJson`, assertions "__self_bootstrap_plan" et
   "__self_trusted_boundary" dans `test/test_protoss.ml`,
@@ -999,7 +999,7 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 ## 21. Definition de done globale
 
-- [x] Toutes les cases ci-dessus sont cochees.
+- [ ] Toutes les cases ci-dessus sont cochees.
   Preuves: `rg -n "\[ \]" protoss-spec.md` ne liste plus que zero case
   apres cette mise a jour; `protoss spec check protoss-spec.md`.
 - [x] Chaque case cochee pointe vers test, fixture, doc ou commande probante.
@@ -1030,7 +1030,7 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
   Preuves: `Secrets.seal_json`, assertion "sealed secret JSON marks value
   un-hashed" et verification que "raw-secret-a" est absent du JSON scelle dans
   `test/test_protoss.ml`.
-- [x] Le self-hosted path couvre parser, canonicalizer, normalizer, typechecker,
+- [ ] Le self-hosted path couvre parser, canonicalizer, normalizer, typechecker,
   patch validator, harness runner, package resolver et MCP server.
   Preuves: fonctions `Protoss.selfHumanParserJson`,
   `Protoss.selfCanonicalizerJson`, `Protoss.selfNormalizerJson`,

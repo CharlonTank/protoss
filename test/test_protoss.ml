@@ -604,6 +604,107 @@ let () =
   assert_equal "Elm-like inferred add call normalizes" "7"
     (Runtime.value_to_string elm_like_inferred_total);
 
+  (* Protoss/H emitter: rendering a program to human syntax and re-parsing it
+     must preserve the canonical hash, and the rendering must be idempotent. *)
+  let human_projection label source =
+    let original = check source in
+    let rendered = Surface_syntax.render_program (Parser.parse_string source) in
+    let reparsed = check rendered in
+    assert_equal (label ^ " hash round-trip") (Kernel.hash_program original)
+      (Kernel.hash_program reparsed);
+    assert_equal (label ^ " idempotent") rendered
+      (Surface_syntax.render_program (Parser.parse_string rendered));
+    rendered
+  in
+  let human_rich_source =
+    "(module Demo.Shop)\n\
+     (export Status User total fetch)\n\
+     (capabilities Http.get)\n\
+     (record User (name String) (vip Bool))\n\
+     (variant Status (params A) (Open A) (Closed Unit))\n\
+     (def total (-> (List Nat) Nat) (lambda (xs (List Nat)) \
+     (foldList xs 0 (lambda x (lambda acc (foldNat x acc (lambda n (succ n))))))))\n\
+     (defcap fetch (capabilities Http.get) (Process (capabilities Http.get) String) \
+     (bind (Http.get \"https://example\") (lambda (r String) (done r))))\n\
+     (def user User (record (name \"Ada\") (vip true)))\n\
+     (def renamed User (recordUpdate user (name \"Grace\")))\n\
+     (def pick (-> Bool Nat) (lambda (f Bool) (case f (true 1) (false 0))))\n\
+     (def nums (List Nat) (Cons 1 (Cons 2 Nil)))\n\
+     (def hd Nat (caseList nums (Nil 0) (Cons h t h)))\n\
+     (def opened (Status Nat) (variant (Status Nat) Open 4))\n\
+     (def vipFlag Bool (get user vip))\n\
+     (def leadName String (letRecord user ((name n)) n))\n\
+     (def scoped Nat (let (a Nat 1) (let (b (succ a)) \
+     (foldNat a b (lambda acc (succ acc))))))"
+  in
+  let human_rich = human_projection "Protoss/H emitter rich program" human_rich_source in
+  assert_true "Protoss/H emitter renders if sugar"
+    (contains_substring human_rich "if f then 1 else 0");
+  assert_true "Protoss/H emitter renders + sugar" (contains_substring human_rich "x + acc");
+  assert_true "Protoss/H emitter renders list literal"
+    (contains_substring human_rich "[1, 2]");
+  assert_true "Protoss/H emitter renders field access"
+    (contains_substring human_rich ".vip");
+  assert_true "Protoss/H emitter renders record literal"
+    (contains_substring human_rich "{ name = \"Ada\", vip = true }");
+  assert_true "Protoss/H emitter renders record update"
+    (contains_substring human_rich "| name = \"Grace\" }");
+  assert_true "Protoss/H emitter renders capability signature"
+    (contains_substring human_rich "Process { Http.get } String");
+  assert_true "Protoss/H emitter renders union declaration"
+    (contains_substring human_rich "type Demo.Shop.Status A = Closed | Open A");
+  assert_true "Protoss/H emitter renders list patterns"
+    (contains_substring human_rich "Cons h t -> h");
+  ignore
+    (human_projection "Protoss/H emitter Elm-origin program"
+       "double : Nat -> Nat\n\
+        double x =\n\
+       \    x + x\n\n\
+        selected : Nat\n\
+        selected =\n\
+       \    case true of\n\
+       \        true -> double 2\n\
+       \        false -> 0\n");
+  (try
+     ignore
+       (Surface_syntax.render_program
+          (Parser.parse_string "(defpoly id (params A) (-> A A) (lambda (x A) x))"));
+     fail "defpoly should have no Protoss/H projection"
+   with Surface_syntax.Unrenderable _ -> ());
+  (try
+     ignore
+       (Surface_syntax.render_program
+          (Parser.parse_string "(capabilities Clock.read)\n(def now (Process Nat) (Clock.read))"));
+     fail "Clock.read should have no Protoss/H projection"
+   with Surface_syntax.Unrenderable _ -> ());
+  (* Every example fixture that checks in isolation must either round-trip
+     through the Protoss/H projection hash-identically or be explicitly
+     unrenderable; the minimum count guards against the loop going hollow. *)
+  let examples_dir = Filename.dirname basic_protoss_path in
+  let human_round_trips = ref 0 in
+  Sys.readdir examples_dir |> Array.to_list |> List.sort String.compare
+  |> List.iter (fun name ->
+         if Filename.check_suffix name ".protoss" then
+           let source = Store.read_file (Filename.concat examples_dir name) in
+           match (try Some (check source) with Kernel.Error _ | Parser.Error _ -> None) with
+           | None -> () (* imports or intentional error fixtures *)
+           | Some original -> (
+               match
+                 try Some (Surface_syntax.render_program (Parser.parse_string source))
+                 with Surface_syntax.Unrenderable _ -> None
+               with
+               | None -> ()
+               | Some rendered ->
+                   incr human_round_trips;
+                   let reparsed = check rendered in
+                   assert_equal ("Protoss/H projection hash round-trip: " ^ name)
+                     (Kernel.hash_program original) (Kernel.hash_program reparsed);
+                   assert_equal ("Protoss/H projection idempotent: " ^ name) rendered
+                     (Surface_syntax.render_program (Parser.parse_string rendered))));
+  assert_true "Protoss/H projection covers the example fixtures"
+    (!human_round_trips >= 20);
+  trace_test "Protoss/H emitter";
+
   let alpha_a = check "(def main (-> Nat Nat) (lambda (x Nat) (succ x)))" in
   let alpha_b = check "(def main (-> Nat Nat) (lambda (y Nat) (succ y)))" in
   assert_equal "alpha hash" (Kernel.hash_program alpha_a) (Kernel.hash_program alpha_b);

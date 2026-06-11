@@ -33,6 +33,11 @@ at least one `--harness` file and rejects failing harness reports before mutatin
 `protoss grammar kernel` is the stable executable grammar surface for the trusted core; update
 `Kernel.executable_grammar_text` when adding core forms. `protoss grammar human` is the shipped
 Protoss/H grammar surface; update `Surface_syntax.human_grammar_text` when adding human syntax.
+`Surface_syntax.render_program` is the Protoss/H emitter (AST → Elm-like text) behind
+`protoss fmt --human`; it must stay hash-round-trip safe (re-parsing rendered text yields the
+identical canonical hash) and raise `Unrenderable` for forms without a human projection rather
+than emit text that re-parses differently. When extending the Elm-like parser, extend the
+emitter (and its round-trip tests) in the same change.
 `Store.put_object` interns through `PROTOSS_GLOBAL_STORE` or `$HOME/.protoss/global-store` and
 hardlinks project objects to that global payload when possible; preserve content-addressed writes.
 Patch audits carry `previous-root`/`root-ref` and write native `store/provenance` root-state plus
