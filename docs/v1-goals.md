@@ -21,12 +21,18 @@ satisfaites.
 4. **Aucune case de `protoss_v1_ship_checklist.md` ni de `protoss-spec.md` n'est
    cochée par un agent.** Les coches passent par les preuves exécutées
    (`protoss doctor --v1`, `protoss spec check`) et par l'orchestrateur.
-5. **Déterminisme sacré** (CLAUDE.md) : tout goal qui ferait hasher différemment des
-   sources équivalentes est bloqué et remonté, pas contourné.
+5. **Déterminisme sacré** (CLAUDE.md) : interdiction de faire hasher différemment des
+   sources équivalentes ; si un goal semble l'exiger, c'est le goal qu'on reconçoit,
+   pas l'invariant.
+6. **Pas de statut bloqué.** Toute ambiguïté découverte en cours de goal est tranchée
+   par l'orchestrateur dans l'esprit des arbitrages de la section 1 de la ship
+   checklist ; l'arbitrage est consigné (section 1 + une ligne au journal ici) et le
+   goal continue. Les arbitrages pris en route sont récapitulés à l'utilisateur en
+   fin de session — le travail ne s'arrête jamais en attente d'une réponse.
 
 ## Statuts
 
-`pending` → `in-progress` → `done <commit>` (ou `blocked <raison>`).
+`pending` → `in-progress` → `done <commit>`.
 
 ---
 
