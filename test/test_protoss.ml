@@ -496,6 +496,23 @@ let () =
     (Printf.sprintf "bytecode sweep covers a healthy floor of fixtures (%d, need >= 20)" !covered)
     (!covered >= 20)
 
+(* Regression guards for crashes found by the deterministic fuzzer (G3). *)
+let () =
+  (* "case ofx": find_sub used to match the space inside "case ", driving
+     String.sub negative (Invalid_argument). Must now be a structured error. *)
+  (match Parser.parse_string "f : Nat\nf = case ofx\n" with
+   | _ -> fail "case ofx should be a structured parse error"
+   | exception (Parser.Error _ | Kernel.Error _) -> ()
+   | exception e -> fail ("case ofx crashed unstructured: " ^ Printexc.to_string e));
+  (* JSON round-trip: to_string emits \u00XX for control bytes; parse must
+     decode \u (it previously dropped the escape, breaking parse(to_string v)=v). *)
+  List.iter
+    (fun s ->
+      let v = Json.String s in
+      assert_true ("json round-trips control bytes: " ^ String.escaped s)
+        (Json.parse (Json.to_string v) = v))
+    [ "\x01"; "\x1f\x00 ok"; "tab\tnewline\n" ]
+
 let () =
   let valid = "(def main Nat (succ 1))" in
   let invalid = "(def main Nat (succ 1)" in

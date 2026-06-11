@@ -25,6 +25,18 @@ let error_at input offset msg =
   let line, col = line_col input offset in
   fail (string_of_int line ^ ":" ^ string_of_int col ^ ": " ^ msg)
 
+(* Encode a Unicode code point as UTF-8. For cp < 0x80 this is a single byte,
+   the exact inverse of to_string's "\u%04x" control-byte escape. *)
+let add_utf8 buf cp =
+  if cp < 0x80 then Buffer.add_char buf (Char.chr cp)
+  else if cp < 0x800 then (
+    Buffer.add_char buf (Char.chr (0xc0 lor (cp lsr 6)));
+    Buffer.add_char buf (Char.chr (0x80 lor (cp land 0x3f))))
+  else (
+    Buffer.add_char buf (Char.chr (0xe0 lor (cp lsr 12)));
+    Buffer.add_char buf (Char.chr (0x80 lor ((cp lsr 6) land 0x3f)));
+    Buffer.add_char buf (Char.chr (0x80 lor (cp land 0x3f))))
+
 let parse input =
   let len = String.length input in
   let rec skip i =
@@ -44,6 +56,17 @@ let parse input =
     else
       match input.[i] with
       | '"' -> (Buffer.contents buf, i + 1)
+      | '\\' when i + 1 < len && input.[i + 1] = 'u' ->
+          (* \uXXXX: the inverse of to_string's "\u%04x" for control bytes;
+             decode the 4 hex digits to a code point and emit it as UTF-8
+             (a single byte for cp < 0x80, the exact inverse of the emitter). *)
+          if i + 5 >= len then error_at input i "truncated JSON \\u escape"
+          else (
+            match int_of_string_opt ("0x" ^ String.sub input (i + 2) 4) with
+            | None -> error_at input i "invalid JSON \\u escape"
+            | Some cp ->
+                add_utf8 buf cp;
+                parse_string start buf (i + 6))
       | '\\' when i + 1 < len ->
           let c =
             match input.[i + 1] with

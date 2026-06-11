@@ -256,3 +256,13 @@ satisfaites.
   Corrections d'entrée invalide uniquement → aucun hash de programme valide
   affecté. Finding mineur restant (Sexp.Error wrappé INTERNAL001 en loader/patch)
   noté, non bloquant (déjà structuré).
+- 2026-06-11 — G3 (suivi) : une 2e passe de fuzzing (harness alternatif, propriétés
+  de round-trip) a trouvé 2 bugs que la 1re a manqués, **corrigés** : crash brut
+  `Invalid_argument "String.sub"` sur `case ofx` (`lib/elm_syntax.ml` —
+  `find_sub " of"` matchait l'espace de `case ` ; fix : chercher après `case `) ;
+  round-trip JSON cassé (`lib/json.ml` émettait `\u00XX` sans le parser ; fix :
+  décodage `\u` → UTF-8, inverse exact de l'émetteur). Gardes de régression dans
+  la section core (parse `case ofx` structuré, `Json.parse (to_string v) = v` sur
+  octets de contrôle) + corpus `clean_case_ofx.elm`. Fuzzer strict toujours à
+  0 crash. Corrections d'entrée invalide / round-trip uniquement — aucun hash de
+  programme valide affecté.

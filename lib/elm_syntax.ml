@@ -547,8 +547,12 @@ and parse_case_expr text =
   match lines with
   | header :: branch_lines when starts_with header.text "case " && String.length header.text >= 8 ->
       let scrutinee =
-        match find_sub header.text " of" with
-        | Some i -> trim (String.sub header.text 5 (i - 5))
+        (* Search for the " of" separator only past "case " so the space of
+           "case " itself cannot be matched (which made i < 5 and crashed
+           String.sub on "case ofx"). *)
+        let after = String.sub header.text 5 (String.length header.text - 5) in
+        match find_sub after " of" with
+        | Some i -> trim (String.sub after 0 i)
         | None -> fail "case syntax is: case expr of"
       in
       if branch_lines = [] then fail "case expression requires branches";
