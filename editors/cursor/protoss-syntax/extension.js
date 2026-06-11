@@ -2,6 +2,7 @@
 
 const childProcess = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_.]*/g;
@@ -200,6 +201,100 @@ function fallbackCheckCommand(vscode, document, config) {
   return { command: "dune", args: ["exec", "protoss", "--", "check"] };
 }
 
+// When `protoss` is not on PATH but we are inside the source checkout, fall back
+// to `dune exec protoss --` (base args, the subcommand is appended by the caller).
+function fallbackDuneExec(vscode, document, config) {
+  if (config.command !== "protoss") {
+    return null;
+  }
+  const root = workspaceRootForDocument(vscode, document);
+  if (!fs.existsSync(path.join(root, "dune-project"))) {
+    return null;
+  }
+  return { command: "dune", args: ["exec", "protoss", "--"] };
+}
+
+// Switch the active buffer between the two Protoss surfaces by piping its text
+// through `protoss fmt` (kernel S-expression) or `protoss fmt --human`
+// (Elm-like). Both projections are hash-stable: the canonical program — and so
+// the content hash — is unchanged; only the surface differs. We format the
+// current (possibly unsaved) buffer via a temp file and replace the document in
+// place, so the switch is a single undoable edit.
+function runProtossFmt(vscode, document, human) {
+  const config = commandConfig(vscode);
+  const cwd = workspaceRootForDocument(vscode, document);
+  const tmp = path.join(os.tmpdir(), `protoss-fmt-${process.pid}-${Date.now()}.protoss`);
+  try {
+    fs.writeFileSync(tmp, document.getText());
+  } catch (err) {
+    vscode.window.showErrorMessage(`Protoss: cannot write temp file: ${err.message}`);
+    return;
+  }
+  const fmtArgs = human ? ["fmt", "--human"] : ["fmt"];
+  const cleanup = () => {
+    try {
+      fs.unlinkSync(tmp);
+    } catch (_) {
+      // best effort
+    }
+  };
+
+  const applyFormatted = (formatted) => {
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(document.getText().length)
+    );
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, fullRange, formatted);
+    vscode.workspace.applyEdit(edit).then((ok) => {
+      if (ok) {
+        vscode.window.setStatusBarMessage(
+          human
+            ? "Protoss: switched to human syntax (Elm-like)"
+            : "Protoss: switched to kernel syntax (S-expression)",
+          2500
+        );
+      }
+    });
+  };
+
+  const run = (command, baseArgs, allowFallback) =>
+    childProcess.execFile(
+      command,
+      [...baseArgs, ...fmtArgs, tmp],
+      { cwd, timeout: 15000 },
+      (error, stdout, stderr) => {
+        if (allowFallback && error && error.code === "ENOENT") {
+          const fallback = fallbackDuneExec(vscode, document, config);
+          if (fallback) {
+            run(fallback.command, fallback.args, false);
+            return;
+          }
+        }
+        cleanup();
+        if (error) {
+          const message = String(stderr || stdout || error.message).trim();
+          // `fmt --human` raises Unrenderable for forms with no human projection;
+          // surface that verbatim rather than silently producing wrong text.
+          vscode.window.showErrorMessage(`Protoss fmt failed: ${message}`);
+          return;
+        }
+        applyFormatted(stdout);
+      }
+    );
+
+  run(config.command, [], true);
+}
+
+function formatActiveEditor(vscode, human) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== "protoss") {
+    vscode.window.showWarningMessage("Protoss: open a .protoss file to switch syntax.");
+    return;
+  }
+  runProtossFmt(vscode, editor.document, human);
+}
+
 function activate(context) {
   const vscode = require("vscode");
   const diagnostics = vscode.languages.createDiagnosticCollection("protoss");
@@ -367,7 +462,9 @@ function activate(context) {
       diagnostics.delete(document.uri);
     }),
     vscode.languages.registerDefinitionProvider({ language: "protoss", scheme: "file" }, provider),
-    vscode.languages.registerDefinitionProvider({ language: "protoss", scheme: "untitled" }, provider)
+    vscode.languages.registerDefinitionProvider({ language: "protoss", scheme: "untitled" }, provider),
+    vscode.commands.registerCommand("protoss.toHuman", () => formatActiveEditor(vscode, true)),
+    vscode.commands.registerCommand("protoss.toKernel", () => formatActiveEditor(vscode, false))
   );
 }
 
@@ -377,6 +474,7 @@ module.exports = {
   activate,
   deactivate,
   fallbackCheckCommand,
+  fallbackDuneExec,
   scanDefinitions,
   findDefinitionInText,
   parseProtossDiagnostic,
