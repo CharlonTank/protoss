@@ -1070,7 +1070,13 @@ let suggestion ctx n =
   |> List.map (fun candidate -> (edit_distance n candidate, candidate))
   |> List.sort (fun (a, _) (b, _) -> Int.compare a b)
   |> function
-  | (distance, candidate) :: _ when distance <= 4 -> " Did you mean " ^ candidate ^ "?"
+  (* Scale the acceptable edit distance to the typed name's length instead of a
+     flat <= 4: on a 4-letter name a distance of 4 is a total rewrite, so the
+     old threshold suggested nonsense ("Nope" -> "bad"). A third of the length
+     (floor, min 1) keeps genuine typos ("Nope" -> "None", distance 1) while
+     dropping unrelated names. *)
+  | (distance, candidate) :: _ when distance <= max 1 (String.length n / 3) ->
+      " Did you mean " ^ candidate ^ "?"
   | _ -> ""
 
 let require_type expected actual where =

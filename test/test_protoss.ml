@@ -996,6 +996,31 @@ let () =
        (def shadowed (-> Msg Nat) (lambda (Increment Msg) (useMsg Increment)))"
   in
   ignore shadowing_binder;
+  (* Name suggestions scale the edit-distance threshold to the typed name's
+     length: a genuine typo near a real name is suggested, but an unrelated
+     short name (a total rewrite) is not -- the old flat <= 4 threshold made
+     "Nope" suggest the 4-edits-away "bad". *)
+  assert_equal "edit_distance close typo (Nope/None)" "1"
+    (string_of_int (Kernel.edit_distance "Nope" "None"));
+  assert_equal "edit_distance unrelated short (Nope/bad)" "4"
+    (string_of_int (Kernel.edit_distance "Nope" "bad"));
+  expect_check_error_contains
+    "(def increment (-> Nat Nat) (lambda (x Nat) (succ x)))\n\
+     (def main Nat (incremen 0))"
+    "Did you mean increment?";
+  (try
+     let p =
+       Parser.parse_string
+         "(type Msg (Variant (Increment Unit) (Reset Unit)))\n\
+          (def useMsg (-> Msg Nat) (lambda (m Msg) 0))\n\
+          (def bad Nat (useMsg (Nope unit)))"
+     in
+     ignore (Kernel.check_program p);
+     fail "expected check error for unknown name Nope"
+   with Kernel.Error msg | Parser.Error msg ->
+     assert_true "unknown name Nope is reported" (contains_substring msg "unknown name: Nope");
+     assert_true ("no nonsense suggestion for Nope, got: " ^ msg)
+       (not (contains_substring msg "Did you mean")));
   (* The empty list literal also receives its element type from context. *)
   ignore (check "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column []");
   (* A genuinely ill-typed element under a container keyword stays rejected. *)
