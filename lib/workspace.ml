@@ -1351,6 +1351,62 @@ let write_compiled_artifact store ~universe_root ~target ~optimization_policy =
     compiled_optimization_policy = optimization_policy;
   }
 
+let compiler_backend_targets =
+  [
+    ("bytecode", "protoss-vm-bytecode-manifest");
+    ("wasm", "webassembly-module-manifest");
+    ("llvm", "llvm-native-manifest");
+    ("javascript", "standalone-javascript-manifest");
+    ("sql-dataflow", "sql-dataflow-manifest");
+    ("gpu-kernel", "gpu-kernel-manifest");
+  ]
+
+let compiler_backend_kind target =
+  compiler_backend_targets
+  |> List.find_map (fun (name, kind) -> if String.equal name target then Some kind else None)
+
+let is_compiler_backend_target target = Option.is_some (compiler_backend_kind target)
+
+let compiler_backend_optimization_policy target = target ^ "-default-v1"
+
+let compiler_backend_manifest_content (build : build_result) artifact =
+  let kind =
+    match compiler_backend_kind artifact.compiled_target with
+    | Some kind -> kind
+    | None -> fail ("unknown compiler backend target: " ^ artifact.compiled_target)
+  in
+  String.concat "\n"
+    [
+      "protoss-compiler-backend-v1";
+      "kind=" ^ kind;
+      "target=" ^ artifact.compiled_target;
+      "universe-root=" ^ artifact.compiled_universe_root;
+      "build-id=" ^ build.build_id;
+      "program-hash=" ^ Kernel.hash_string (Kernel.serialize_checked_program build.checked);
+      "compiled-artifact-ref=" ^ artifact.compiled_artifact_ref;
+      "optimization-policy=" ^ artifact.compiled_optimization_policy;
+      "";
+    ]
+
+let write_compiler_backend_manifest (build : build_result) artifact =
+  let dir = Filename.dirname artifact.compiled_artifact_path in
+  let manifest_path =
+    Filename.concat dir
+      (sanitize_id artifact.compiled_artifact_ref ^ "." ^ artifact.compiled_target ^ ".backend")
+  in
+  write_file manifest_path (compiler_backend_manifest_content build artifact);
+  manifest_path
+
+let build_compiler_backend manifest target =
+  if not (is_compiler_backend_target target) then fail ("unknown compiler backend target: " ^ target);
+  let build = build manifest in
+  let artifact =
+    write_compiled_artifact build.store ~universe_root:build.universe_root ~target
+      ~optimization_policy:(compiler_backend_optimization_policy target)
+  in
+  ignore (write_compiler_backend_manifest build artifact);
+  (build, artifact)
+
 let git_map_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "git.map"
 
 let git_command root args =

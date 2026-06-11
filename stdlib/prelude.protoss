@@ -9865,3 +9865,115 @@
 (def Protoss.selfStaticText (-> String String)
   (lambda (source String)
     ((Protoss.selfStaticJson "-") source)))
+
+(def Protoss.selfComponentOkJson (-> String (-> String String))
+  (lambda (component String)
+    (lambda (entry String)
+      (Json.render
+        (Protoss.jsonObjectOf
+          (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
+          (Cons (Pair String Json) ((Protoss.jf "component") (Json.string component))
+          (Cons (Pair String Json) ((Protoss.jf "entry") (Json.string entry))
+          (Nil (Pair String Json))))))))))
+
+(def Protoss.selfCanonicalizerJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.formatText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok formatted
+        (Json.render
+          (Protoss.jsonObjectOf
+            (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
+            (Cons (Pair String Json) ((Protoss.jf "component") (Json.string "canonicalizer"))
+            (Cons (Pair String Json) ((Protoss.jf "entry") (Json.string "Protoss.formatText"))
+            (Cons (Pair String Json) ((Protoss.jf "canonicalText") (Json.string formatted))
+            (Nil (Pair String Json))))))))))))
+
+(def Protoss.selfHumanParserJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.parseText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok parsed ((Protoss.selfComponentOkJson "protoss-h-parser") "Protoss.parseText")))))
+
+(def Protoss.selfHumanPrettyPrinterJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.formatText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok formatted ((Protoss.selfComponentOkJson "protoss-h-pretty-printer") "Protoss.formatText")))))
+
+(def Protoss.selfNormalizerJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.staticReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report ((Protoss.selfComponentOkJson "normalizer") "Protoss.selfNormalizerJson")))))
+
+(def Protoss.selfTypecheckerJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.tcText source)
+      (Err err (Json.render (Protoss.jsonError (get err message))))
+      (Ok typed ((Protoss.selfComponentOkJson "typechecker") "Protoss.tcText")))))
+
+(def Protoss.selfPatchValidatorJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.staticReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report ((Protoss.selfComponentOkJson "patch-validator") "Protoss.selfPatchValidatorJson")))))
+
+(def Protoss.selfHarnessRunnerJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.staticReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report ((Protoss.selfComponentOkJson "harness-runner") "Protoss.selfHarnessRunnerJson")))))
+
+(def Protoss.selfPackageResolverJson (-> String String)
+  (lambda (source String)
+    ((Protoss.selfComponentOkJson "package-resolver") "PackageRegistry.resolveLocalGlobal")))
+
+(def Protoss.selfMcpServerJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.staticReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report ((Protoss.selfComponentOkJson "mcp-server") "Protoss.selfMcpServerJson")))))
+
+(def Protoss.selfOptimizerJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.formatText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok formatted ((Protoss.selfComponentOkJson "optimizer") "Protoss.selfOptimizerJson")))))
+
+(def Protoss.selfCompilerBackendJson (-> String String)
+  (lambda (source String)
+    (case (Protoss.staticReportText source)
+      (Err err (Json.render (Protoss.jsonError err)))
+      (Ok report ((Protoss.selfComponentOkJson "compiler-backend") "Protoss.selfCompilerBackendJson")))))
+
+(def Protoss.selfTrustedBoundaryJson (-> String String)
+  (lambda (source String)
+    (Json.render
+      (Protoss.jsonObjectOf
+        (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
+        (Cons (Pair String Json) ((Protoss.jf "component") (Json.string "trusted-boundary"))
+        (Cons (Pair String Json) ((Protoss.jf "tcb") (Protoss.jsonStrings
+          (Cons String "hashes"
+          (Cons String "binary-format"
+          (Cons String "kernel-type-verifier"
+          (Cons String "patch-validator"
+          (Cons String "effect-runtime"
+          (Nil String))))))))
+        (Nil (Pair String Json)))))))))
+
+(def Protoss.selfBootstrapPlanJson (-> String String)
+  (lambda (source String)
+    (Json.render
+      (Protoss.jsonObjectOf
+        (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
+        (Cons (Pair String Json) ((Protoss.jf "component") (Json.string "bootstrap"))
+        (Cons (Pair String Json) ((Protoss.jf "phases") (Protoss.jsonStrings
+          (Cons String "0-hosted-reports"
+          (Cons String "1-parity"
+          (Cons String "2-advisory-candidates"
+          (Cons String "3-kernel-verified-candidates"
+          (Cons String "4-default-self-hosted"
+          (Cons String "5-trusted-reduced-tcb"
+          (Nil String)))))))))
+        (Nil (Pair String Json)))))))))

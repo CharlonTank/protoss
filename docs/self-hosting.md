@@ -22,6 +22,8 @@ evaluated through the normal Protoss evaluator:
 | Dependency ordering | `Protoss.staticReportText` → `termOrder` / `typeEnv.order` (`ProtossDepOrder`) |
 | Static report (aggregate) | `Protoss.staticReportText : String -> Result String ProtossStaticReport` |
 | JSON report rendering | `Protoss.selfStaticJson`, `Protoss.selfParseJson`, … via `Json.render` |
+| Component status reports | `Protoss.selfHumanParserJson`, `Protoss.selfHumanPrettyPrinterJson`, `Protoss.selfCanonicalizerJson`, `Protoss.selfNormalizerJson`, `Protoss.selfTypecheckerJson`, `Protoss.selfPatchValidatorJson`, `Protoss.selfHarnessRunnerJson`, `Protoss.selfPackageResolverJson`, `Protoss.selfMcpServerJson`, `Protoss.selfOptimizerJson`, `Protoss.selfCompilerBackendJson` |
+| Bootstrap and TCB reports | `Protoss.selfBootstrapPlanJson`, `Protoss.selfTrustedBoundaryJson` |
 
 These cover: parsing of `module`/`import`/`export`/`capabilities`,
 `def`/`defcap`/`defpoly`/`defpolycap`/`defrec`/`defrecpoly`, `type`/`alias`,
@@ -31,6 +33,14 @@ name resolution (missing/duplicate terms, types, exports); type-environment
 arity and duplicate checks; capability declaration/use/scope checks; and
 deterministic topological ordering of the term and type dependency graphs
 (recursive variants self-reference only through guarded `recur`).
+
+The component status reports are intentionally explicit about the current
+boundary. They are ordinary Protoss functions that exercise the corresponding
+prelude entry point and return a JSON `status`, `component`, and `entry`
+description. They make the self-hosted path inspectable for parser,
+pretty-printer, canonicalizer, normalizer, typechecker, patch-validator,
+harness-runner, package-resolver, MCP, optimizer, compiler-backend, bootstrap,
+and trusted-boundary work without moving final trust away from the kernel.
 
 ## What remains the OCaml trusted kernel
 
@@ -43,9 +53,12 @@ and friends):
 - content-addressed hashing (`p2:` / sha256) and DefIds,
 - the graph store, runtime `Process` effects, ledger, and patch audit chain.
 
-The self-hosted frontend **reports**; the kernel **decides**. A
-`ProtossResolveReport` saying a name is missing is advisory until the kernel
-agrees; the canonical graph and its hashes are produced only by the kernel.
+The self-hosted frontend and component entries **report**; the kernel
+**decides**. A `ProtossResolveReport` saying a name is missing is advisory until
+the kernel agrees; a component report saying `canonicalizer` or `normalizer`
+ran is evidence for the Protoss-authored path, not a replacement for trusted
+canonical graph construction. The canonical graph and its hashes are produced
+only by the kernel.
 
 ## How the Protoss frontend is evaluated
 
@@ -88,14 +101,15 @@ via `protoss hash` / the store.
 This keeps a single source of truth for identity even while analysis migrates
 into Protoss.
 
-## Future path
+## Bootstrap path
 
-- self-hosted **typechecker** producing a `ProtossType` environment the kernel
-  can cross-check against (parity first, trust later);
-- self-hosted **canonicalizer** emitting candidate `cterm`s, verified against
-  the kernel's canonical form before any hash is trusted;
-- positioned **diagnostics** (`Diagnostic` with `SourceSpan`) threaded through
-  the lexer/parser so malformed source reports `line:column`;
-- once parity is exhaustive and audited, promote self-hosted passes from
-  *advisory* to *trusted*, shrinking the OCaml kernel to canonicalization +
-  hashing + runtime.
+`Protoss.selfBootstrapPlanJson` exposes the documented 0 -> 5 progression:
+hosted reports, parity, advisory candidates, kernel-verified candidates,
+default self-hosted execution, then a reduced trusted boundary. The companion
+`Protoss.selfTrustedBoundaryJson` names the intended reduced TCB: hashes,
+binary format, kernel type verifier, patch validator, and effect runtime.
+
+The next trust transition is not a new unchecked rewrite. It is to expand
+parity fixtures, have the Protoss component entries emit richer candidates
+where needed, and require the OCaml kernel to verify those candidates before
+any hash, patch, package, or backend artifact becomes trusted.

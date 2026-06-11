@@ -644,6 +644,13 @@ let command_project_build args =
         let web = Protoss.Web.build root in
         compiled_artifact := Some web.Protoss.Web.compiled_artifact;
         web.Protoss.Web.build
+    | Some other when Protoss.Workspace.is_compiler_backend_target other ->
+        if locked then ignore (Protoss.Workspace.check_lock manifest);
+        let build, artifact =
+          Protoss.Workspace.build_compiler_backend manifest other
+        in
+        compiled_artifact := Some artifact;
+        build
     | Some other -> Protoss.Workspace.fail ("unknown build target: " ^ other)
     | None ->
         if locked then Protoss.Workspace.build_locked manifest

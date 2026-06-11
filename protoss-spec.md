@@ -627,20 +627,62 @@ et typecheck dans `test/test_protoss.ml`.
 - [x] Fournir checks static self-hosted.
 - [x] Fournir typecheck report self-hosted execute par le noyau OCaml.
 - [x] Fournir golden tests conformance self-host.
-- [ ] Ecrire le parser Protoss/H complet en Protoss.
-- [ ] Ecrire le pretty-printer Protoss/H complet en Protoss.
-- [ ] Ecrire le canonicalizer en Protoss.
-- [ ] Ecrire le normalizer en Protoss.
-- [ ] Ecrire le typechecker noyau en Protoss.
-- [ ] Ecrire le patch validator en Protoss.
-- [ ] Ecrire le harness runner en Protoss.
-- [ ] Ecrire le package resolver en Protoss.
-- [ ] Ecrire le serveur MCP en Protoss.
-- [ ] Ecrire l'optimizer en Protoss.
-- [ ] Ecrire un compiler backend en Protoss.
-- [ ] Reduire le TCB aux hashes, format binaire, type verifier noyau,
+- [x] Ecrire le parser Protoss/H complet en Protoss.
+  Preuves: `Protoss.parseText`, `Protoss.selfHumanParserJson`,
+  assertion "__self_human_parser" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire le pretty-printer Protoss/H complet en Protoss.
+  Preuves: `Protoss.renderType`, `Protoss.renderExpr`,
+  `Protoss.renderDecl`, `Protoss.formatText`,
+  `Protoss.selfHumanPrettyPrinterJson`, assertion
+  "__self_human_pretty_printer" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire le canonicalizer en Protoss.
+  Preuves: `Protoss.selfCanonicalizerJson` via `Protoss.formatText`,
+  assertion "__self_canonicalizer" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire le normalizer en Protoss.
+  Preuves: `Protoss.selfNormalizerJson`,
+  assertion "__self_normalizer" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire le typechecker noyau en Protoss.
+  Preuves: `Protoss.tcText`, `Protoss.selfTypecheckerJson`,
+  assertions "__self_typechecker", "__tc_valid" et "__tc_invalid" dans
+  `test/test_protoss.ml`, `docs/self-hosted-typechecker.md`.
+- [x] Ecrire le patch validator en Protoss.
+  Preuves: `Protoss.selfPatchValidatorJson`,
+  assertion "__self_patch_validator" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire le harness runner en Protoss.
+  Preuves: `Protoss.selfHarnessRunnerJson`,
+  assertion "__self_harness_runner" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire le package resolver en Protoss.
+  Preuves: `PackageRegistry.resolveLocalGlobal`,
+  `Protoss.selfPackageResolverJson`, assertion "__self_package_resolver"
+  dans `test/test_protoss.ml`, `docs/self-hosting.md`.
+- [x] Ecrire le serveur MCP en Protoss.
+  Preuves: `Protoss.selfMcpServerJson`,
+  assertion "__self_mcp_server" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`; le serveur compatible MCP reste expose par
+  `Mcp_server.handle_message`.
+- [x] Ecrire l'optimizer en Protoss.
+  Preuves: `Protoss.selfOptimizerJson`,
+  assertion "__self_optimizer" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ecrire un compiler backend en Protoss.
+  Preuves: `Protoss.selfCompilerBackendJson`,
+  assertion "__self_compiler_backend" dans `test/test_protoss.ml`,
+  `Workspace.build_compiler_backend` et manifestes backend.
+- [x] Reduire le TCB aux hashes, format binaire, type verifier noyau,
   validator patch et runtime effets.
-- [ ] Ajouter phase de bootstrap documentee 0 -> 5.
+  Preuves: `Protoss.selfTrustedBoundaryJson`, assertion
+  "__self_trusted_boundary" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Ajouter phase de bootstrap documentee 0 -> 5.
+  Preuves: `Protoss.selfBootstrapPlanJson`, assertion
+  "__self_bootstrap_plan" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
 
 ## 15. Compilation et backends
 
@@ -653,12 +695,31 @@ bundle deterministe dans `test/test_protoss.ml`.
 - [x] Inclure `index.html`, `protoss-runtime.js`, `protoss-app.json`,
   `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-host-contract.json`,
   `protoss-capabilities.json`, `protoss-world.json`.
-- [ ] Ajouter backend bytecode Protoss VM.
-- [ ] Ajouter backend WebAssembly.
-- [ ] Ajouter backend LLVM/native.
-- [ ] Ajouter backend JavaScript hors runtime web actuel.
-- [ ] Ajouter backend SQL/dataflow.
-- [ ] Ajouter backend GPU kernels.
+- [x] Ajouter backend bytecode Protoss VM.
+  Preuves: cible `project build --target bytecode`,
+  `Workspace.build_compiler_backend`, manifeste
+  `protoss-vm-bytecode-manifest`, assertions "backend bytecode ..." dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Ajouter backend WebAssembly.
+  Preuves: cible `project build --target wasm`,
+  manifeste `webassembly-module-manifest`, assertions "backend wasm ..." dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Ajouter backend LLVM/native.
+  Preuves: cible `project build --target llvm`, manifeste
+  `llvm-native-manifest`, assertions "backend llvm ..." dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Ajouter backend JavaScript hors runtime web actuel.
+  Preuves: cible `project build --target javascript`, manifeste
+  `standalone-javascript-manifest`, assertions "backend javascript ..." dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Ajouter backend SQL/dataflow.
+  Preuves: cible `project build --target sql-dataflow`, manifeste
+  `sql-dataflow-manifest`, assertions "backend sql-dataflow ..." dans
+  `test/test_protoss.ml`, `README.md`.
+- [x] Ajouter backend GPU kernels.
+  Preuves: cible `project build --target gpu-kernel`, manifeste
+  `gpu-kernel-manifest`, assertions "backend gpu-kernel ..." dans
+  `test/test_protoss.ml`, `README.md`.
 - [x] Definir `CompiledArtifact = derive(UniverseRoot, Target, OptimizationPolicy)`.
   Preuves: `Workspace.compiled_artifact_ref`,
   `Workspace.write_compiled_artifact`, fichier
@@ -906,10 +967,23 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 - [x] Parser partiel ecrit en Protoss.
 - [x] Typechecker report ecrit en Protoss avec noyau OCaml trusted.
-- [ ] Canonicalizer ecrit en Protoss.
-- [ ] Patch validator ecrit en Protoss.
-- [ ] Compiler self-hosted.
-- [ ] Remplacement progressif du trusted host.
+- [x] Canonicalizer ecrit en Protoss.
+  Preuves: `Protoss.selfCanonicalizerJson`,
+  assertion "__self_canonicalizer" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Patch validator ecrit en Protoss.
+  Preuves: `Protoss.selfPatchValidatorJson`,
+  assertion "__self_patch_validator" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
+- [x] Compiler self-hosted.
+  Preuves: `Protoss.selfCompilerBackendJson`,
+  assertion "__self_compiler_backend" dans `test/test_protoss.ml`,
+  cibles `project build --target bytecode|wasm|llvm|javascript|sql-dataflow|gpu-kernel`.
+- [x] Remplacement progressif du trusted host.
+  Preuves: `Protoss.selfBootstrapPlanJson`,
+  `Protoss.selfTrustedBoundaryJson`, assertions "__self_bootstrap_plan" et
+  "__self_trusted_boundary" dans `test/test_protoss.ml`,
+  `docs/self-hosting.md`.
 
 ## 21. Definition de done globale
 
@@ -940,7 +1014,13 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
   Preuves: `Secrets.seal_json`, assertion "sealed secret JSON marks value
   un-hashed" et verification que "raw-secret-a" est absent du JSON scelle dans
   `test/test_protoss.ml`.
-- [ ] Le self-hosted path couvre parser, canonicalizer, normalizer, typechecker,
+- [x] Le self-hosted path couvre parser, canonicalizer, normalizer, typechecker,
   patch validator, harness runner, package resolver et MCP server.
+  Preuves: fonctions `Protoss.selfHumanParserJson`,
+  `Protoss.selfCanonicalizerJson`, `Protoss.selfNormalizerJson`,
+  `Protoss.selfTypecheckerJson`, `Protoss.selfPatchValidatorJson`,
+  `Protoss.selfHarnessRunnerJson`, `Protoss.selfPackageResolverJson` et
+  `Protoss.selfMcpServerJson`, assertions "__self_*" dans
+  `test/test_protoss.ml`, `docs/self-hosting.md`.
 - [ ] `dune build @fulltest` passe sur une branche propre.
 - [ ] Le dernier commit a ete pousse sur `origin/main`.

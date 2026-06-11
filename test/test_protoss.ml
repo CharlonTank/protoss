@@ -5727,6 +5727,36 @@ let () =
   assert_true "project build normalized defs" (build_a.Workspace.stats.Workspace.normalized > 0);
   assert_true "project universe root is content addressed"
     (contains_substring build_a.Workspace.universe_root "p2:");
+  List.iter
+    (fun (target, kind) ->
+      let backend_build, artifact = Workspace.build_compiler_backend manifest_a target in
+      assert_equal ("backend " ^ target ^ " reuses universe root") build_a.universe_root
+        backend_build.universe_root;
+      assert_equal ("backend " ^ target ^ " artifact ref")
+        (Workspace.compiled_artifact_ref ~universe_root:build_a.universe_root ~target
+           ~optimization_policy:(Workspace.compiler_backend_optimization_policy target))
+        artifact.Workspace.compiled_artifact_ref;
+      let manifest_path =
+        Filename.concat
+          (Filename.dirname artifact.compiled_artifact_path)
+          (Workspace.sanitize_id artifact.compiled_artifact_ref ^ "." ^ target ^ ".backend")
+      in
+      let manifest_content = Store.read_file manifest_path in
+      assert_true ("backend " ^ target ^ " manifest")
+        (contains_substring manifest_content "protoss-compiler-backend-v1"
+        && contains_substring manifest_content ("kind=" ^ kind)
+        && contains_substring manifest_content ("target=" ^ target)
+        && contains_substring manifest_content ("universe-root=" ^ build_a.universe_root)
+        && contains_substring manifest_content
+             ("compiled-artifact-ref=" ^ artifact.compiled_artifact_ref)))
+    [
+      ("bytecode", "protoss-vm-bytecode-manifest");
+      ("wasm", "webassembly-module-manifest");
+      ("llvm", "llvm-native-manifest");
+      ("javascript", "standalone-javascript-manifest");
+      ("sql-dataflow", "sql-dataflow-manifest");
+      ("gpu-kernel", "gpu-kernel-manifest");
+    ];
   let universe_root_file = Workspace.universe_root_path build_a.store in
   let universe_root_content_file = Workspace.universe_root_content_path build_a.store in
   assert_equal "project universe root pointer" build_a.Workspace.universe_root
@@ -7723,6 +7753,28 @@ let () =
     "(record T (a Nat)) (record T (b Nat))" "\"duplicateTypes\":[\"T\"]" false;
   parity "__par_dupfield" "Protoss.selfResolveJson"
     "(record T (a Nat)) (record T (b Nat))" "\"duplicateTypes\":[\"T\"]" false;
+  let component_report name fn component =
+    register name "String"
+      (fn ^ " " ^ Ast.quote "(def x Nat 1)")
+      (fun got ->
+        assert_true (name ^ " reports ok") (contains_substring got "\"status\":\"ok\"");
+        assert_true (name ^ " reports component")
+          (contains_substring got ("\"component\":\"" ^ component ^ "\"")))
+  in
+  component_report "__self_human_parser" "Protoss.selfHumanParserJson" "protoss-h-parser";
+  component_report "__self_human_pretty_printer" "Protoss.selfHumanPrettyPrinterJson"
+    "protoss-h-pretty-printer";
+  component_report "__self_canonicalizer" "Protoss.selfCanonicalizerJson" "canonicalizer";
+  component_report "__self_normalizer" "Protoss.selfNormalizerJson" "normalizer";
+  component_report "__self_typechecker" "Protoss.selfTypecheckerJson" "typechecker";
+  component_report "__self_patch_validator" "Protoss.selfPatchValidatorJson" "patch-validator";
+  component_report "__self_harness_runner" "Protoss.selfHarnessRunnerJson" "harness-runner";
+  component_report "__self_package_resolver" "Protoss.selfPackageResolverJson" "package-resolver";
+  component_report "__self_mcp_server" "Protoss.selfMcpServerJson" "mcp-server";
+  component_report "__self_optimizer" "Protoss.selfOptimizerJson" "optimizer";
+  component_report "__self_compiler_backend" "Protoss.selfCompilerBackendJson" "compiler-backend";
+  component_report "__self_trusted_boundary" "Protoss.selfTrustedBoundaryJson" "trusted-boundary";
+  component_report "__self_bootstrap_plan" "Protoss.selfBootstrapPlanJson" "bootstrap";
   register "__tc_valid" "String"
     ("Protoss.tcTextJson " ^ Ast.quote "(def x Nat 1)")
     (fun got ->
