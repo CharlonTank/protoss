@@ -1,46 +1,33 @@
-(def buttonLabel String "Add")
+type alias Model =
+    { draft : String
+    , items : List String
+    , next : Nat
+    }
 
-(def init
-  (Process (Record (draft String) (items (List String)) (next Nat)))
-  (done (record
-    (draft "")
-    (items (Nil String))
-    (next 0))))
+type alias Msg =
+    Variant (AddTodo Unit) (NewTodoChanged String)
 
-(def update
-  (-> (Variant (AddTodo Unit) (NewTodoChanged String))
-      (-> (Record (draft String) (items (List String)) (next Nat))
-          (Process (Record (draft String) (items (List String)) (next Nat)))))
-  (lambda (msg (Variant (AddTodo Unit) (NewTodoChanged String)))
-    (lambda (model (Record (draft String) (items (List String)) (next Nat)))
-      (case msg
-        (AddTodo _
-          (bind (Local.save "todos" "updated")
-            (lambda (saved Unit)
-              (done (record
-                (draft "")
-                (items (Cons String (get model draft) (get model items)))
-                (next (succ (get model next))))))))
-        (NewTodoChanged s
-          (done (record
-            (draft s)
-            (items (get model items))
-            (next (get model next)))))))))
+buttonLabel : String
+buttonLabel =
+    "Add"
 
-(def view
-  (-> (Record (draft String) (items (List String)) (next Nat))
-      (View (Variant (AddTodo Unit) (NewTodoChanged String))))
-  (lambda (model (Record (draft String) (items (List String)) (next Nat)))
-    (column
-      (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String)))
-        (text "Todos")
-        (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String)))
-          (input (get model draft)
-            (lambda (s String)
-              (variant (Variant (AddTodo Unit) (NewTodoChanged String)) NewTodoChanged s)))
-          (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String)))
-            (button buttonLabel
-              (variant (Variant (AddTodo Unit) (NewTodoChanged String)) AddTodo unit))
-            (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String)))
-              (list (get model items) (lambda (item String) (text item)))
-              (Nil (View (Variant (AddTodo Unit) (NewTodoChanged String)))))))))))
+init : Process Model
+init =
+    done { draft = "", items = Nil String, next = 0 }
+
+update : Msg -> Model -> Process Model
+update msg model =
+    case msg of
+        AddTodo _ ->
+            bind (Local.save "todos" "updated") (\saved -> done { draft = "", items = Cons model.draft model.items, next = succ model.next })
+        NewTodoChanged s ->
+            done { draft = s, items = model.items, next = model.next }
+
+view : Model -> View Msg
+view model =
+    column
+        [ text "Todos"
+        , input model.draft (\s -> NewTodoChanged s)
+        , button buttonLabel (AddTodo unit)
+        , list model.items (\item -> text item)
+        ]
