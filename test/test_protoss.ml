@@ -1058,6 +1058,39 @@ let () =
   assert_equal "input/list unannotated lambda == annotated S-expression hash"
     (Kernel.hash_program input_list_annotated)
     (Kernel.hash_program input_list_inferred);
+  (* The same expected-type push reaches a conditional view's body ([when]) and an
+     event handler's message ([on]), so short variant constructors work there too,
+     elaborating to the explicit form's hash. *)
+  let when_inferred =
+    check
+      "(def vv (-> Bool (View (Variant (Tick Unit))))\n\
+      \  (lambda (c Bool) (when c (button \"x\" (Tick unit)))))"
+  in
+  let when_explicit =
+    check
+      "(def vv (-> Bool (View (Variant (Tick Unit))))\n\
+      \  (lambda (c Bool) (when c (button \"x\" (variant (Variant (Tick Unit)) Tick unit)))))"
+  in
+  assert_equal "when short variant constructor == explicit hash"
+    (Kernel.hash_program when_explicit) (Kernel.hash_program when_inferred);
+  let on_inferred =
+    check
+      (String.concat "\n"
+         [ "(def va (-> (Variant (Tick Unit)) (View (Variant (Tick Unit))))";
+           "  (lambda (m (Variant (Tick Unit))) (node \"div\" (Cons (Attr (Variant (Tick \
+            Unit))) (on \"click\" (Tick unit)) (Nil (Attr (Variant (Tick Unit))))) (Nil (View \
+            (Variant (Tick Unit)))))))" ])
+  in
+  let on_explicit =
+    check
+      (String.concat "\n"
+         [ "(def va (-> (Variant (Tick Unit)) (View (Variant (Tick Unit))))";
+           "  (lambda (m (Variant (Tick Unit))) (node \"div\" (Cons (Attr (Variant (Tick \
+            Unit))) (on \"click\" (variant (Variant (Tick Unit)) Tick unit)) (Nil (Attr (Variant \
+            (Tick Unit))))) (Nil (View (Variant (Tick Unit)))))))" ])
+  in
+  assert_equal "on short variant constructor == explicit hash"
+    (Kernel.hash_program on_explicit) (Kernel.hash_program on_inferred);
   (* The empty list literal also receives its element type from context. *)
   ignore (check "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column []");
   (* A genuinely ill-typed element under a container keyword stays rejected. *)

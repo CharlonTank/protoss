@@ -1887,6 +1887,17 @@ and check_elab ctx expected expr =
           let _, render = check_elab ctx (TFun (item_ty, TView msg_ty)) render in
           (expected, EListView (items, render))
       | t -> fail ("list expects List input, got " ^ string_of_typ t))
+  (* Same push for a conditional view's body and an event handler's dispatched
+     message, so short variant constructors (and bare lambdas/Nil) fire inside
+     [when]/[on] too. Mirrors the infer_elab cases, so the cterm is identical. *)
+  | TView msg_ty, EWhenView (cond, view) ->
+      let _, cond = check_elab ctx TBool cond in
+      let _, view = check_elab ctx (TView msg_ty) view in
+      (expected, EWhenView (cond, view))
+  | TAttr msg_ty, EOn (event, msg) ->
+      let _, event = check_elab ctx TString event in
+      let _, msg = check_elab ctx msg_ty msg in
+      (expected, EOn (event, msg))
   | TList item_ty, ECons (actual_item_ty, head, tail) ->
       require_type item_ty actual_item_ty "Cons type";
       let _, head = check_elab ctx item_ty head in
