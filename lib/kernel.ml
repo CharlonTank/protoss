@@ -1859,6 +1859,24 @@ and check_elab ctx expected expr =
       let _, label = check_elab ctx TString label in
       let _, msg = check_elab ctx msg_ty msg in
       (expected, EButton (label, msg))
+  (* Push the expected message type into an input's handler and a list's
+     renderer so an unannotated Protoss/H lambda there receives its parameter
+     type -- Protoss/H lambdas are never annotated, so [input]/[list] could not
+     otherwise be written with a bare [\s -> ...] / [\item -> ...]. This mirrors
+     the bottom-up [infer_elab] cases for EInput/EListView (the handler/renderer
+     is checked against exactly the function type those cases derive), so an
+     already-typeable widget elaborates to the identical cterm. *)
+  | TView msg_ty, EInput (value, handler) ->
+      let _, value = check_elab ctx TString value in
+      let _, handler = check_elab ctx (TFun (TString, msg_ty)) handler in
+      (expected, EInput (value, handler))
+  | TView msg_ty, EListView (items, render) -> (
+      let items_ty, items = infer_elab ctx items in
+      match items_ty with
+      | TList item_ty ->
+          let _, render = check_elab ctx (TFun (item_ty, TView msg_ty)) render in
+          (expected, EListView (items, render))
+      | t -> fail ("list expects List input, got " ^ string_of_typ t))
   | TList item_ty, ECons (actual_item_ty, head, tail) ->
       require_type item_ty actual_item_ty "Cons type";
       let _, head = check_elab ctx item_ty head in

@@ -1021,6 +1021,36 @@ let () =
      assert_true "unknown name Nope is reported" (contains_substring msg "unknown name: Nope");
      assert_true ("no nonsense suggestion for Nope, got: " ^ msg)
        (not (contains_substring msg "Did you mean")));
+  (* An unannotated Protoss/H lambda in input's handler / list's renderer gets
+     its parameter type from the expected View type (the EInput/EListView
+     check_elab cases), elaborating to EXACTLY the annotated-lambda S-expression
+     form -- identical canonical hash. Protoss/H lambdas are never annotated, so
+     without those check cases [input]/[list] could not be written in Protoss/H. *)
+  let input_list_inferred =
+    check
+      (String.concat "\n"
+         [ "type alias Msg = Variant (Changed String) (Cleared Unit)";
+           "view : String -> View Msg";
+           "view s =";
+           "    column [ input s (\\t -> Changed t), list (Cons s (Nil String)) (\\item -> text \
+            item) ]" ])
+  in
+  let input_list_annotated =
+    check
+      (String.concat "\n"
+         [ "(def view (-> String (View (Variant (Changed String) (Cleared Unit))))";
+           "  (lambda (s String)";
+           "    (column";
+           "      (Cons (View (Variant (Changed String) (Cleared Unit)))";
+           "        (input s (lambda (t String) (variant (Variant (Changed String) (Cleared \
+            Unit)) Changed t)))";
+           "        (Cons (View (Variant (Changed String) (Cleared Unit)))";
+           "          (list (Cons String s (Nil String)) (lambda (item String) (text item)))";
+           "          (Nil (View (Variant (Changed String) (Cleared Unit)))))))))" ])
+  in
+  assert_equal "input/list unannotated lambda == annotated S-expression hash"
+    (Kernel.hash_program input_list_annotated)
+    (Kernel.hash_program input_list_inferred);
   (* The empty list literal also receives its element type from context. *)
   ignore (check "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column []");
   (* A genuinely ill-typed element under a container keyword stays rejected. *)
