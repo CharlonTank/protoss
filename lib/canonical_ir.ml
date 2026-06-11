@@ -804,10 +804,12 @@ let graph_definition_of_json def =
       | None -> Kernel.capability_scope_ref capability_scope);
   }
 
+let graph_definitions_of_json graph =
+  json_array_field "defs" graph |> List.map graph_definition_of_json
+
 let graph_definitions input =
   ignore (checked_of_graph input);
-  let graph = parse_graph_json input in
-  json_array_field "defs" graph |> List.map graph_definition_of_json
+  graph_definitions_of_json (parse_graph_json input)
 
 let graph_definition_in defs id =
   match
@@ -932,10 +934,12 @@ let graph_capability_of_json desc =
       json_array_field "requests" desc |> List.map graph_capability_request_of_json;
   }
 
+let graph_capabilities_of_json graph =
+  json_array_field "capabilityDescriptors" graph |> List.map graph_capability_of_json
+
 let graph_capabilities input =
   ignore (checked_of_graph input);
-  let graph = parse_graph_json input in
-  json_array_field "capabilityDescriptors" graph |> List.map graph_capability_of_json
+  graph_capabilities_of_json (parse_graph_json input)
 
 let graph_capability input id =
   match
@@ -999,6 +1003,11 @@ let sort_graph_capability_scopes scopes =
       | 0 -> String.compare a.graph_scope_def_name b.graph_scope_def_name
       | n -> n)
     scopes
+
+let graph_capability_scopes_of_json graph =
+  graph_definitions_of_json graph
+  |> List.concat_map graph_capability_scopes_for_def
+  |> sort_graph_capability_scopes
 
 let graph_capability_scopes input =
   graph_definitions input
@@ -1078,16 +1087,12 @@ let graph_capability_scope_to_contract_json scope =
       Kernel.json_field "capabilityRef" (Kernel.json_string scope.graph_scope_capability_ref);
     ]
 
-let graph_host_contract input =
-  ignore (checked_of_graph input);
-  let graph = parse_graph_json input in
-  let capabilities = graph_capabilities input in
-  let scopes = graph_capability_scopes input in
+let host_contract_of_parts ~graph_hash ~program_hash ~capabilities ~scopes =
   let format_field = Kernel.json_field "format" (Kernel.json_string "protoss-host-contract-v1") in
   let contract_body_fields =
     [
-      Kernel.json_field "graphHash" (Kernel.json_string (json_string_field "graphHash" graph));
-      Kernel.json_field "programHash" (Kernel.json_string (json_string_field "programHash" graph));
+      Kernel.json_field "graphHash" (Kernel.json_string graph_hash);
+      Kernel.json_field "programHash" (Kernel.json_string program_hash);
       Kernel.json_field "hashAlgorithm" (Kernel.json_string Kernel.hash_algorithm);
       Kernel.json_field "hashPrefix" (Kernel.json_string Kernel.hash_prefix);
       Kernel.json_field "hostCodecVersion" (Kernel.json_string host_codec_version);
@@ -1103,6 +1108,62 @@ let graph_host_contract input =
     :: Kernel.json_field "contractHash" (Kernel.json_string contract_hash)
     :: contract_body_fields)
   ^ "\n"
+
+(* [validate] re-parses the graph string back into a checked program to
+   reject malformed/tampered graphs read from disk or other untrusted inputs.
+   Workspace builds already hold the authoritative checked program that just
+   produced [input] deterministically, so they pass [~validate:false] to skip
+   that ~1.6s round-trip. The contract bytes are derived purely from the graph
+   JSON fields and are byte-identical either way. *)
+let graph_host_contract ?(validate = true) input =
+  if validate then ignore (checked_of_graph input);
+  let graph = parse_graph_json input in
+  host_contract_of_parts
+    ~graph_hash:(json_string_field "graphHash" graph)
+    ~program_hash:(json_string_field "programHash" graph)
+    ~capabilities:(graph_capabilities_of_json graph)
+    ~scopes:(graph_capability_scopes_of_json graph)
+
+(* Workspace builds hold the authoritative [checked] program; derive the host
+   contract directly from it instead of forcing the full graph JSON (megabytes
+   of node graph + per-def term/type trees) only to parse it straight back to
+   read the capability/scope fields. Capabilities are parsed from the same
+   [capabilities_to_graph_json] used by the full graph, and scopes are built
+   from the same per-def values ([capability_ref]/[capability_scope_ref]) and
+   re-sorted by [sort_graph_capability_scopes], so the contract bytes are
+   byte-identical to [graph_host_contract (checked_to_graph_json checked)]. *)
+let host_contract_of_checked checked =
+  let capabilities =
+    (* Same source bytes as the full graph's [capabilityDescriptors] field. *)
+    match Json.array (Json.parse (Kernel.capabilities_to_graph_json checked.Kernel.program.capabilities)) with
+    | Some descs -> List.map graph_capability_of_json descs
+    | None -> fail "canonical graph capability descriptors must be array"
+  in
+  let scope_of_def (d : Kernel.checked_def) =
+    let refs =
+      d.capabilities
+      |> List.map (fun cap ->
+             match Kernel.capability_ref cap with
+             | Some ref -> ref
+             | None -> fail ("unknown capability in canonical graph scope: " ^ cap))
+    in
+    List.map2
+      (fun cap ref ->
+        {
+          graph_scope_def_name = d.def.Ast.name;
+          graph_scope_def_id = d.def_id;
+          graph_scope_def_hash = d.hash;
+          graph_scope_ref = Kernel.capability_scope_ref d.capabilities;
+          graph_scope_capability = cap;
+          graph_scope_capability_ref = ref;
+        })
+      d.capabilities refs
+  in
+  let scopes =
+    checked.Kernel.defs |> List.concat_map scope_of_def |> sort_graph_capability_scopes
+  in
+  host_contract_of_parts ~graph_hash:(Kernel.checked_to_graph_content_hash checked)
+    ~program_hash:(Kernel.hash_program checked) ~capabilities ~scopes
 
 let contract_hash_of_json obj =
   try json_string_field "contractHash" obj with Kernel.Error _ -> "-"

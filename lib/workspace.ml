@@ -406,8 +406,11 @@ let host_contract_graph_hash contract_json =
       | None -> fail "host contract field must be string: graphHash")
   | None -> fail "host contract field missing: graphHash"
 
-let write_host_contract store graph_json =
-  let contract_json = Canonical_ir.graph_host_contract graph_json in
+let write_host_contract store checked =
+  (* The build holds the authoritative checked program; derive the contract
+     directly from it (see Canonical_ir.host_contract_of_checked) instead of
+     re-parsing the full graph JSON. *)
+  let contract_json = Canonical_ir.host_contract_of_checked checked in
   let contract_hash = host_contract_hash contract_json in
   write_file (host_contract_path store) contract_json;
   write_file (host_contract_object_path store contract_hash) contract_json;
@@ -1039,7 +1042,7 @@ let prepared_graph_hash prepared =
   Kernel.checked_to_graph_content_hash prepared.checked
 
 let prepared_host_contract_hash prepared =
-  host_contract_hash (Canonical_ir.graph_host_contract (Lazy.force prepared.program_graph))
+  host_contract_hash (Canonical_ir.host_contract_of_checked prepared.checked)
 
 let lock_item name values =
   "(" ^ name
@@ -1222,14 +1225,16 @@ let universe_root_content manifest prepared world_refs =
     prepared.checked.program.type_aliases
     |> List.map universe_type_item |> List.sort String.compare
   in
+  let graph_hash = prepared_graph_hash prepared in
+  let host_hash = prepared_host_contract_hash prepared in
   lock_item "universe-root-v1"
     [
       lock_item "package" [ lock_string manifest.name ];
       lock_item "version" [ lock_string manifest.version ];
       lock_item "program-hash" [ prepared.build_id ];
       lock_item "program-canonical-hash" [ Kernel.hash_string prepared.program_canonical ];
-      lock_item "program-graph-hash" [ prepared_graph_hash prepared ];
-      lock_item "host-contract-hash" [ prepared_host_contract_hash prepared ];
+      lock_item "program-graph-hash" [ graph_hash ];
+      lock_item "host-contract-hash" [ host_hash ];
       lock_item "packages" package_deps;
       lock_item "defs" def_items;
       lock_item "types" type_items;
@@ -1330,7 +1335,7 @@ let build_prepared ?(write = true) ?lock_hash manifest prepared =
       Store.write_type_aliases store prepared.checked.program.type_aliases;
       write_file (Filename.concat store "program.canon") (prepared.program_canonical ^ "\n");
       write_program_graph store prepared.checked (Lazy.force prepared.program_graph);
-      ignore (write_host_contract store (Lazy.force prepared.program_graph));
+      ignore (write_host_contract store prepared.checked);
       cleanup_removed_defs store (List.map (fun d -> d.Kernel.def.name) prepared.checked.defs);
       List.iter
         (write_project_def store (cache_root manifest) prepared.checked prepared.stats prepared.build_id)
