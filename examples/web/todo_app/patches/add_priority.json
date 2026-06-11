@@ -1,0 +1,59 @@
+{
+  "ops": [
+    {
+      "op": "MigrateType",
+      "name": "migrate_v1_v2",
+      "deps": ["List.map"],
+      "type": {
+        "source": "(-> (Record (draft String) (items (List String)) (next Nat)) (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat)))"
+      },
+      "expr": {
+        "source": "(lambda (old (Record (draft String) (items (List String)) (next Nat))) (record (draft (get old draft)) (items (((inst List.map String (Record (label String) (priority (Variant (Low Unit) (High Unit))))) (get old items)) (lambda (s String) (record (label s) (priority (variant (Variant (Low Unit) (High Unit)) Low unit)))))) (next (get old next))))"
+      }
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "init",
+      "deps": [],
+      "type": {
+        "source": "(Process (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat)))"
+      },
+      "expr": {
+        "source": "(done (record (draft \"\") (items (Nil (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next 0)))"
+      }
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "update",
+      "deps": [],
+      "type": {
+        "source": "(-> (Variant (AddTodo Unit) (NewTodoChanged String)) (-> (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat)) (Process (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat)))))"
+      },
+      "expr": {
+        "source": "(lambda (msg (Variant (AddTodo Unit) (NewTodoChanged String))) (lambda (model (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat))) (case msg (AddTodo _ (bind (Local.save \"todos\" \"updated\") (lambda (saved Unit) (done (record (draft \"\") (items (Cons (Record (label String) (priority (Variant (Low Unit) (High Unit)))) (record (label (get model draft)) (priority (variant (Variant (Low Unit) (High Unit)) High unit))) (get model items))) (next (succ (get model next)))))))) (NewTodoChanged s (done (record (draft s) (items (get model items)) (next (get model next))))))))"
+      }
+    },
+    {
+      "op": "ReplaceDef",
+      "name": "view",
+      "deps": ["buttonLabel"],
+      "type": {
+        "source": "(-> (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat)) (View (Variant (AddTodo Unit) (NewTodoChanged String))))"
+      },
+      "expr": {
+        "source": "(lambda (model (Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat))) (column (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (text \"Todos\") (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (input (get model draft) (lambda (s String) (variant (Variant (AddTodo Unit) (NewTodoChanged String)) NewTodoChanged s))) (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (button buttonLabel (variant (Variant (AddTodo Unit) (NewTodoChanged String)) AddTodo unit)) (Cons (View (Variant (AddTodo Unit) (NewTodoChanged String))) (list (get model items) (lambda (item (Record (label String) (priority (Variant (Low Unit) (High Unit))))) (text (get item label)))) (Nil (View (Variant (AddTodo Unit) (NewTodoChanged String))))))))))"
+      }
+    },
+    {
+      "op": "AddDef",
+      "name": "samplePrioritized",
+      "deps": ["migrate_v1_v2"],
+      "type": {
+        "source": "(Record (draft String) (items (List (Record (label String) (priority (Variant (Low Unit) (High Unit)))))) (next Nat))"
+      },
+      "expr": {
+        "source": "(migrate_v1_v2 (record (draft \"\") (items (Cons String \"buy milk\" (Nil String))) (next 1)))"
+      }
+    }
+  ]
+}

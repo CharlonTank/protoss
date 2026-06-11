@@ -253,8 +253,14 @@ let () =
 
 (* protoss doctor --v1: the executable V1.0 acceptance proofs. *)
 let () =
-  (* Every wired proof passes on the kernel as shipped. *)
-  let results = List.map (fun (c : Doctor.check) -> (c, Doctor.run_one c)) Doctor.checks in
+  (* Every wired proof passes on the kernel as shipped. Heavy proofs (full
+     prelude build) are exercised by the gated integration section, not here —
+     the core sweep must stay near-instant. *)
+  let results =
+    List.map
+      (fun (c : Doctor.check) -> (c, Doctor.run_one c))
+      (List.filter (fun c -> not (Doctor.is_heavy c)) Doctor.checks)
+  in
   List.iter
     (fun ((c : Doctor.check), st) ->
       match st with
@@ -8559,4 +8565,11 @@ let () =
     Printf.printf "self canonicalizer parity: %d byte-identical, %d explicit errors\n"
       !canon_parity_ok
       (List.length !canon_unsupported);
+  (* §14.4 priority demo (heavy: builds the full prelude). Gated with the
+     self-host section so the core dev-loop stays fast; the demo migrates the
+     todo app to add a per-item priority through a checked+applied patch. *)
+  (match Doctor.priority_demo () with
+   | Doctor.Pass -> ()
+   | Doctor.Fail m -> fail ("priority demo failed: " ^ m)
+   | Doctor.Not_yet m -> fail ("priority demo not runnable: " ^ m));
   print_endline "self-host frontend tests ok"

@@ -125,7 +125,7 @@ satisfaites.
 - **Done** : serveur lancé + client de test vert sur toutes les méthodes ; test
   d'injection refusée (apply sans check) ; fulltest vert.
 
-### G7 — Démo full-stack `priority` [pending]
+### G7 — Démo full-stack `priority` [done]
 - **Périmètre** : `examples/web/todo_app/**`, `patches/**` (nouveaux fichiers),
   script de démo ; intégration tests par l'orchestrateur.
 - **Dépendances** : G1 (pour le branchement doctor) ; idéalement G6 pour la voie
@@ -283,3 +283,15 @@ satisfaites.
   <file>` / `bytecode run <file> --entry <name>`. Doctor = 16 pass / 0 fail ;
   `@fulltest` vert. Raffinement noté : `project build --target bytecode` reste un
   manifeste descriptif ; la VM réelle est exposée via `protoss bytecode`, à parité.
+- 2026-06-11 — G7 Démo full-stack `priority` : `examples/web/todo_app/patches/
+  add_priority.json` (batch 5 ops — MigrateType de l'item `String` →
+  `Record{label,priority:Variant Low|High}`, ReplaceDef init/update/view, AddDef
+  `samplePrioritized`) + `priority_demo.sh` (build → check → apply → audit → eval,
+  store nettoyé, 15 checks). Preuve doctor `priority-demo` (§14.4, **heavy** :
+  copie pid-qualifiée + stdlib absolutisé → build/`Patch.check`/`Patch.apply`,
+  repo non pollué). Flag `heavy` ajouté : la commande `doctor --v1` exécute la
+  preuve, le sweep de test core la saute (dev-loop rapide) ; run gardé dans
+  `@selftest`. Doctor complet = 17 pass / 0 fail (~7,6 s). `@fulltest` vert.
+  Écarts §14.4 honnêtes (item `String`→record via MigrateType faute de record
+  top-level, `priority` variant structurel, pas de marqueur `web_app` au build
+  par défaut) consignés dans le rapport.

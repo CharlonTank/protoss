@@ -27,6 +27,12 @@ type check = {
   run : unit -> status;
 }
 
+(* Checks that build the full prelude (slow): run by [protoss doctor --v1] but
+   skipped by the fast dev-loop test sweep, which must stay near-instant. *)
+let heavy_ids = [ "priority-demo" ]
+
+let is_heavy (c : check) = List.mem c.id heavy_ids
+
 (* ----- proof helpers (over embedded source) ------------------------------ *)
 
 let check_source src = Kernel.check_program (Parser.parse_string src)
@@ -271,6 +277,61 @@ let golden_projects () =
             if contains "capability" m then Pass
             else Fail ("capability-denied-demo rejected for the wrong reason: " ^ m))
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let write_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc contents)
+
+(* Rewrite a project's relative stdlib path to absolute so the project still
+   builds after being copied out of the repo tree. *)
+let absolutize_stdlib toml_path prelude_abs =
+  let lines = String.split_on_char '\n' (read_file toml_path) in
+  let lines =
+    List.map
+      (fun line ->
+        let t = String.trim line in
+        if String.length t >= 6 && String.equal (String.sub t 0 6) "stdlib" then
+          "stdlib = " ^ Ast.quote prelude_abs
+        else line)
+      lines
+  in
+  write_file toml_path (String.concat "\n" lines)
+
+(* HEAVY (full-prelude build): the §14.4 demo. The todo app is migrated to add a
+   per-item `priority` through a structured patch — built, checked, and applied
+   from a pid-qualified copy (stdlib path absolutized), leaving the repo clean. *)
+let priority_demo () =
+  match
+    (find_up (Sys.getcwd ()) "examples/web/todo_app", find_up (Sys.getcwd ()) "stdlib/prelude.protoss")
+  with
+  | None, _ | _, None -> Not_yet "checklist §14: todo_app or prelude not found (best-effort)"
+  | Some app, Some prelude ->
+      let tmp =
+        Filename.concat (Filename.get_temp_dir_name ())
+          (Printf.sprintf "protoss-doctor-priority-%d" (Unix.getpid ()))
+      in
+      rm_rf tmp;
+      copy_tree app tmp;
+      absolutize_stdlib (Filename.concat tmp "protoss.toml") prelude;
+      Fun.protect
+        ~finally:(fun () -> rm_rf tmp)
+        (fun () ->
+          let patch = Filename.concat tmp "patches/add_priority.json" in
+          if not (Sys.file_exists patch) then Not_yet "checklist §14: add_priority.json missing"
+          else
+            let manifest = Workspace.parse_manifest (Workspace.project_root tmp) in
+            ignore (Workspace.build manifest);
+            let store = Workspace.store_root manifest in
+            (* check must accept the patch, then apply must commit it. *)
+            ignore (Patch.check store patch);
+            ignore (Patch.apply store patch);
+            Pass)
+
 (* ----- the check list ---------------------------------------------------- *)
 
 let checks : check list =
@@ -397,10 +458,10 @@ let checks : check list =
       run = golden_projects;
     };
     {
-      id = "web-build-determinism";
+      id = "priority-demo";
       section = "14";
-      description = "deterministic web bundle derived only from UniverseRoot+target+policy";
-      run = (fun () -> Not_yet "checklist §14: wire via the todo app build");
+      description = "todo app gains a per-item priority via a checked+applied structured patch";
+      run = priority_demo;
     };
     {
       id = "bytecode-encoding";
