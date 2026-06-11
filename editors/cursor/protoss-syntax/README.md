@@ -6,14 +6,14 @@ Install from this repository:
 
 ```sh
 mkdir -p ~/.cursor/extensions
-cp -R editors/cursor/protoss-syntax ~/.cursor/extensions/protoss.protoss-syntax-0.4.0
+cp -R editors/cursor/protoss-syntax ~/.cursor/extensions/protoss.protoss-syntax-0.5.0
 ```
 
 For Cursor Remote/WSL, also install it in the remote extension host:
 
 ```sh
 mkdir -p ~/.cursor-server/extensions
-cp -R editors/cursor/protoss-syntax ~/.cursor-server/extensions/protoss.protoss-syntax-0.4.0
+cp -R editors/cursor/protoss-syntax ~/.cursor-server/extensions/protoss.protoss-syntax-0.5.0
 ```
 
 Restart Cursor and open any `.protoss` or `.pt` file. Cursor should select the `Protoss` language automatically.
@@ -46,6 +46,18 @@ has no human projection, `fmt --human` reports `Unrenderable` and the buffer is
 left untouched rather than rewritten incorrectly. Like diagnostics, the commands
 use `protoss` from `PATH` and fall back to `dune exec protoss --` inside this
 checkout.
+
+The toggle is also **completely reversible**: each switch stashes the buffer
+text it replaced, and invoking the opposite switch — while the buffer is still
+exactly the text the first switch produced — restores the previous text
+verbatim (bytes, comments and hand formatting included) instead of
+re-canonicalizing through `protoss fmt`. So `human -> kernel -> human` gives
+back your original human-syntax file, not its canonical re-rendering. Any edit
+between the two switches expires the stash and the command falls back to
+running `protoss fmt` as usual; restoring never changes the program, since
+both stashed sides project the same canonical hash. The stash is per document,
+in memory only, and crosses surfaces only (a pure same-syntax
+re-canonicalization is never undone by a repeated switch).
 
 ## Diagnostics
 

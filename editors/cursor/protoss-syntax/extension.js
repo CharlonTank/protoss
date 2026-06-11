@@ -214,6 +214,97 @@ function fallbackDuneExec(vscode, document, config) {
   return { command: "dune", args: ["exec", "protoss", "--"] };
 }
 
+// Strip only `--` line comments, mirroring Elm_syntax.strip_line_comment in
+// the compiler (unlike stripLineComment above, `;` is not a comment marker in
+// the human surface).
+function stripDashComment(line) {
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (!inString && ch === "-" && line[i + 1] === "-") {
+      return line.slice(0, i);
+    }
+    if (ch === "\"" && !escaped) {
+      inString = !inString;
+      escaped = false;
+      continue;
+    }
+    if (inString && ch === "\\" && !escaped) {
+      escaped = true;
+      continue;
+    }
+    escaped = false;
+  }
+  return line;
+}
+
+function isName(word) {
+  return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(word);
+}
+
+function hasSignatureSeparator(line) {
+  const i = line.indexOf(":");
+  return i >= 0 && isName(line.slice(0, i).trim());
+}
+
+function hasValueSeparator(line) {
+  const i = line.indexOf("=");
+  if (i < 0) {
+    return false;
+  }
+  const words = line.slice(0, i).split(" ").map((w) => w.trim()).filter((w) => w !== "");
+  return words.length > 0 && words.every(isName);
+}
+
+// JS mirror of the compiler's Elm_syntax.looks_like surface auto-detection.
+// Used to label the stashed side of a syntax toggle so a later switch only
+// restores it when the requested target syntax matches.
+function looksLikeHuman(text) {
+  return text.split("\n").some((raw) => {
+    const line = stripDashComment(raw).trim();
+    if (line === "" || line.startsWith("(")) {
+      return false;
+    }
+    return (
+      line.startsWith("type ") ||
+      line.startsWith("module ") ||
+      line.startsWith("export ") ||
+      line.startsWith("import ") ||
+      line.startsWith("capabilities ") ||
+      hasSignatureSeparator(line) ||
+      hasValueSeparator(line)
+    );
+  });
+}
+
+// Per-document toggle memory making the two switch commands completely
+// reversible: a switch stashes the pair (text before, text produced), each
+// side labeled with its surface syntax. Invoking a switch while the buffer
+// still equals one side of the pair restores the other side verbatim — bytes,
+// comments and hand formatting included — instead of re-canonicalizing through
+// `protoss fmt`. Any edit in between makes the equality check fail, so the
+// stash silently expires and the CLI path runs as before. Restoring text the
+// buffer held moments ago never changes the program: both sides project the
+// same canonical hash.
+const syntaxToggleMemory = new Map();
+
+function planSyntaxSwitch(memory, currentText, wantHuman) {
+  // Only a pair that genuinely crosses the two surfaces is restorable: a
+  // same-syntax pair (e.g. non-canonical kernel -> canonical kernel) must not
+  // bounce back to the rough text on a repeated same-direction switch.
+  if (!memory || memory.textA === memory.textB || memory.humanA === memory.humanB) {
+    return null;
+  }
+  if (currentText === memory.textB && memory.humanA === wantHuman) {
+    return memory.textA;
+  }
+  if (currentText === memory.textA && memory.humanB === wantHuman) {
+    return memory.textB;
+  }
+  return null;
+}
+
 // Switch the active buffer between the two Protoss surfaces by piping its text
 // through `protoss fmt` (kernel S-expression) or `protoss fmt --human`
 // (Elm-like). Both projections are hash-stable: the canonical program — and so
@@ -221,11 +312,42 @@ function fallbackDuneExec(vscode, document, config) {
 // current (possibly unsaved) buffer via a temp file and replace the document in
 // place, so the switch is a single undoable edit.
 function runProtossFmt(vscode, document, human) {
+  const memoryKey = document.uri.toString();
+  const originalText = document.getText();
+
+  const applyText = (newText, message, onApplied) => {
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(document.getText().length)
+    );
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, fullRange, newText);
+    vscode.workspace.applyEdit(edit).then((ok) => {
+      if (ok) {
+        vscode.window.setStatusBarMessage(message, 2500);
+        if (onApplied) {
+          onApplied();
+        }
+      }
+    });
+  };
+
+  const restored = planSyntaxSwitch(syntaxToggleMemory.get(memoryKey), originalText, human);
+  if (restored !== null) {
+    applyText(
+      restored,
+      human
+        ? "Protoss: restored previous human syntax text (Elm-like)"
+        : "Protoss: restored previous kernel syntax text (S-expression)"
+    );
+    return;
+  }
+
   const config = commandConfig(vscode);
   const cwd = workspaceRootForDocument(vscode, document);
   const tmp = path.join(os.tmpdir(), `protoss-fmt-${process.pid}-${Date.now()}.protoss`);
   try {
-    fs.writeFileSync(tmp, document.getText());
+    fs.writeFileSync(tmp, originalText);
   } catch (err) {
     vscode.window.showErrorMessage(`Protoss: cannot write temp file: ${err.message}`);
     return;
@@ -240,22 +362,24 @@ function runProtossFmt(vscode, document, human) {
   };
 
   const applyFormatted = (formatted) => {
-    const fullRange = new vscode.Range(
-      document.positionAt(0),
-      document.positionAt(document.getText().length)
-    );
-    const edit = new vscode.WorkspaceEdit();
-    edit.replace(document.uri, fullRange, formatted);
-    vscode.workspace.applyEdit(edit).then((ok) => {
-      if (ok) {
-        vscode.window.setStatusBarMessage(
-          human
-            ? "Protoss: switched to human syntax (Elm-like)"
-            : "Protoss: switched to kernel syntax (S-expression)",
-          2500
-        );
+    applyText(
+      formatted,
+      human
+        ? "Protoss: switched to human syntax (Elm-like)"
+        : "Protoss: switched to kernel syntax (S-expression)",
+      () => {
+        // Stash the switch so the opposite command can restore originalText
+        // verbatim. A formatting no-op must not clobber a useful stash.
+        if (formatted !== originalText) {
+          syntaxToggleMemory.set(memoryKey, {
+            textA: originalText,
+            humanA: looksLikeHuman(originalText),
+            textB: formatted,
+            humanB: human
+          });
+        }
       }
-    });
+    );
   };
 
   const run = (command, baseArgs, allowFallback) =>
@@ -459,6 +583,7 @@ function activate(context) {
         clearTimeout(existing);
         pendingDiagnostics.delete(key);
       }
+      syntaxToggleMemory.delete(key);
       diagnostics.delete(document.uri);
     }),
     vscode.languages.registerDefinitionProvider({ language: "protoss", scheme: "file" }, provider),
@@ -479,5 +604,8 @@ module.exports = {
   findDefinitionInText,
   parseProtossDiagnostic,
   stripLineComment,
+  stripDashComment,
+  looksLikeHuman,
+  planSyntaxSwitch,
   symbolAtTextOffset
 };
