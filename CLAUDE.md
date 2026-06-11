@@ -91,6 +91,15 @@ dune exec protoss -- <args>      # run the CLI (see README for the full command 
   re-load byte-identical programs under fresh identities. Determinism makes content keys
   sound: same canonical hash ⇒ byte-identical artifacts. Only successful checks are cached;
   failures keep their exact error behavior.
+- Checking is incremental per definition: `check_program` caches each definition's
+  elaboration + canonical term under (digest of the resolved def AST + aliases +
+  capabilities + `__record*` names) plus the recorded trace of `lookup_global` calls
+  (`global_lookup_trace`) — editing unrelated defs never invalidates, changing a referenced
+  type always does. Whole-def canonical serialization is memoized by physical cterm identity
+  plus the resolved ref-id signature. If the elaborator gains a new way to consult the
+  environment, it must be visible to that key (trace it or add it to the static part);
+  there is a regression test for the referenced-type-change case. PROTOSS_PERF_STATS=1
+  dumps cache hit/miss counters at exit.
 - SHA-256 dispatches to a hardware-accelerated C stub on macOS (`protoss_sha256_stubs.c`,
   CommonCrypto) and falls back to the pure-OCaml `Hashcons.digest_pure` elsewhere; both are
   asserted bit-identical in the core tests. The same stub file exposes `Store.try_clone`

@@ -872,8 +872,20 @@ let instantiate_type name params typ args =
 
 let type_body = function TForall (_, body) -> body | t -> t
 
+(* When set, every global type lookup made by the elaborator is recorded
+   (name -> looked-up binding, including absent ones). The per-definition
+   check cache uses the recorded trace as the dynamic part of its key: a
+   cached elaboration is reusable under a new program iff every recorded
+   lookup yields the same binding there. Lookups whose result is unused are
+   recorded too - a sound over-approximation. *)
+let global_lookup_trace : (string, global_type option) Hashtbl.t option ref = ref None
+
 let lookup_global ctx n =
-  assoc_opt n ctx.globals
+  let r = assoc_opt n ctx.globals in
+  (match !global_lookup_trace with
+  | Some tbl -> if not (Hashtbl.mem tbl n) then Hashtbl.add tbl n r
+  | None -> ());
+  r
 
 let rec subst_named_type_params vars = function
   | TUnit -> TUnit
@@ -2606,9 +2618,70 @@ and cbranch_to_canonical_v2 def_id_of = function
   | CBBool (false, e) -> "(false " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
   | CBVariant (con, e) -> "(" ^ con ^ " " ^ cterm_to_canonical_v2 def_id_of e ^ ")"
 
+module Phys_cterm_tbl = Hashtbl.Make (struct
+  type t = cterm
+
+  let equal = ( == )
+
+  let hash t = Hashtbl.hash_param 64 256 t
+end)
+
+module Phys_typ_tbl = Hashtbl.Make (struct
+  type t = typ
+
+  let equal = ( == )
+
+  let hash t = Hashtbl.hash_param 64 256 t
+end)
+
+(* Whole-definition canonical serialization is requested once per def by
+   def-id derivation, once per def by store/program serialization, and again
+   by every re-check of a reloaded program. The serialized body is a pure
+   function of the term plus the def ids its global refs resolve to, and the
+   per-definition elaboration cache hands back physically shared cterms
+   across checks - so memoizing by physical term identity plus the resolved
+   ref signature removes whole-program re-serialization from those flows
+   (byte-identical output: same term, same ref ids => same string). The refs
+   of a term are themselves cached by physical identity, making cache hits
+   O(refs) instead of O(term size). *)
+let cterm_refs_cache : string list Phys_cterm_tbl.t = Phys_cterm_tbl.create 4096
+
+let cterm_global_refs_cached term =
+  match Phys_cterm_tbl.find_opt cterm_refs_cache term with
+  | Some refs -> refs
+  | None ->
+      let refs = cterm_global_refs term in
+      if Phys_cterm_tbl.length cterm_refs_cache >= 65536 then
+        Phys_cterm_tbl.reset cterm_refs_cache;
+      Phys_cterm_tbl.add cterm_refs_cache term refs;
+      refs
+
+let cterm_canon_v2_cache : (string * string) list ref Phys_cterm_tbl.t =
+  Phys_cterm_tbl.create 4096
+
+let cterm_to_canonical_v2_cached def_id_of term =
+  let refs = cterm_global_refs_cached term in
+  let refs_sig = String.concat "\x00" (List.map def_id_of refs) in
+  let entries =
+    match Phys_cterm_tbl.find_opt cterm_canon_v2_cache term with
+    | Some entries -> entries
+    | None ->
+        let entries = ref [] in
+        if Phys_cterm_tbl.length cterm_canon_v2_cache >= 16384 then
+          Phys_cterm_tbl.reset cterm_canon_v2_cache;
+        Phys_cterm_tbl.add cterm_canon_v2_cache term entries;
+        entries
+  in
+  match List.assoc_opt refs_sig !entries with
+  | Some serialized -> serialized
+  | None ->
+      let serialized = cterm_to_canonical_v2 def_id_of term in
+      entries := (refs_sig, serialized) :: List.filteri (fun i _ -> i < 3) !entries;
+      serialized
+
 let serialize_def_payload name def_id typ body def_id_of =
   "(def " ^ name ^ " " ^ def_id ^ " " ^ type_to_canonical typ ^ " "
-  ^ cterm_to_canonical_v2 def_id_of body ^ ")"
+  ^ cterm_to_canonical_v2_cached def_id_of body ^ ")"
 
 let serialize_def name def_id typ body def_id_of =
   "(" ^ canonical_version ^ " " ^ serialize_def_payload name def_id typ body def_id_of ^ ")"
@@ -3201,22 +3274,6 @@ let canonical_node_json id kind tag canonical payload edges =
    construction needs the ids of every child again. Memoizing serializations
    and ids by physical node identity inside one graph construction removes the
    repeated full-subtree serializations (the output stays byte-identical). *)
-module Phys_cterm_tbl = Hashtbl.Make (struct
-  type t = cterm
-
-  let equal = ( == )
-
-  let hash t = Hashtbl.hash_param 64 256 t
-end)
-
-module Phys_typ_tbl = Hashtbl.Make (struct
-  type t = typ
-
-  let equal = ( == )
-
-  let hash t = Hashtbl.hash_param 64 256 t
-end)
-
 let canonical_node_graph_json_uncached program_hash def_id_of defs =
   let nodes = Hashtbl.create 128 in
   let term_canon_memo = Phys_cterm_tbl.create 1024 in
@@ -3907,6 +3964,56 @@ let checked_of_canonical caps defs =
     defs = checked_defs;
   }
 
+(* Per-definition incremental checking. Elaborating one definition depends
+   only on the definition itself plus what it actually consults in the
+   type-level environment - never on other definitions' bodies. The cache key
+   has two parts:
+
+   - a static key: digest of the resolved definition AST, the program's type
+     aliases (consulted via [unfold_type]), its declared capabilities
+     (consulted via [has_capability]), and the rare "__record*" global names
+     (consulted by the letRecord fresh-binder desugaring);
+   - a dynamic part: the trace of every [lookup_global] the elaborator made,
+     recorded via [global_lookup_trace]. A cached elaboration is reusable in
+     a new program iff each recorded lookup yields the same binding there -
+     so adding, removing or editing *unrelated* definitions never
+     invalidates, while changing the type of a referenced one always does.
+
+   Audit/patch/build flows re-check programs sharing almost every definition
+   with one this process already elaborated, and the typical edit changes a
+   single body. Only successful elaborations are cached - failing
+   definitions re-run and keep their exact error messages. Reusing one cterm
+   per content also feeds the physical-identity memos downstream (graphs,
+   serializations). *)
+type def_elab_entry = {
+  entry_trace : (string * global_type option) list;
+  entry_def : def;
+  entry_cterm : cterm;
+}
+
+let def_elab_cache : (string, def_elab_entry list ref) Hashtbl.t = Hashtbl.create 1024
+
+let def_elab_cache_cap = 8192
+
+let def_elab_entries_cap = 4
+
+(* Hit/miss counters for the per-def and whole-program check caches, dumped
+   at exit when PROTOSS_PERF_STATS=1. Observability only - no behavior. *)
+let def_elab_hits = ref 0
+
+let def_elab_misses = ref 0
+
+let check_program_hits = ref 0
+
+let check_program_misses = ref 0
+
+let () =
+  at_exit (fun () ->
+      if Sys.getenv_opt "PROTOSS_PERF_STATS" = Some "1" then
+        Printf.eprintf
+          "[perf] check_program memo: %d hits, %d misses; def elab cache: %d hits, %d misses\n%!"
+          !check_program_hits !check_program_misses !def_elab_hits !def_elab_misses)
+
 let check_program_uncached (program : program) =
   let program = resolve_program_types program in
   validate_capabilities program.capabilities;
@@ -3937,24 +4044,69 @@ let check_program_uncached (program : program) =
       fold_scope = None;
     }
   in
-  let defs =
+  let record_binder_names =
+    List.filter_map
+      (fun (n, _) ->
+        if String.length n >= 8 && String.equal (String.sub n 0 8) "__record" then Some n
+        else None)
+      globals
+  in
+  let static_env =
+    Marshal.to_string (program.type_aliases, program.capabilities, record_binder_names) []
+  in
+  let elaborate_def d =
+    try
+      let expected = match d.typ with TForall (_, body) -> body | t -> t in
+      let actual, body = check_elab ctx expected d.body in
+      if not (equal_typ expected actual) then
+        fail
+          ("definition " ^ d.name ^ ": expected " ^ string_of_typ expected ^ ", got "
+         ^ string_of_typ actual ^ ", expression " ^ string_of_expr d.body);
+      { d with body }
+    with Error msg ->
+      fail ("definition " ^ d.name ^ ": " ^ msg ^ ", expression " ^ string_of_expr d.body)
+  in
+  let elaborated_defs =
     List.map
       (fun d ->
-        try
-          let expected = match d.typ with TForall (_, body) -> body | t -> t in
-          let actual, body = check_elab ctx expected d.body in
-          if not (equal_typ expected actual) then
-            fail
-              ("definition " ^ d.name ^ ": expected " ^ string_of_typ expected ^ ", got "
-             ^ string_of_typ actual ^ ", expression " ^ string_of_expr d.body);
-          { d with body }
-        with Error msg ->
-          fail ("definition " ^ d.name ^ ": " ^ msg ^ ", expression " ^ string_of_expr d.body))
+        let static_key = Hashcons.digest (Marshal.to_string d [] ^ static_env) in
+        let entries =
+          match Hashtbl.find_opt def_elab_cache static_key with
+          | Some entries -> entries
+          | None ->
+              let entries = ref [] in
+              if Hashtbl.length def_elab_cache >= def_elab_cache_cap then
+                Hashtbl.reset def_elab_cache;
+              Hashtbl.replace def_elab_cache static_key entries;
+              entries
+        in
+        let trace_valid entry =
+          List.for_all (fun (n, r) -> assoc_opt n ctx.globals = r) entry.entry_trace
+        in
+        match List.find_opt trace_valid !entries with
+        | Some e ->
+            incr def_elab_hits;
+            (e.entry_def, e.entry_cterm)
+        | None ->
+            incr def_elab_misses;
+            let trace_tbl = Hashtbl.create 64 in
+            global_lookup_trace := Some trace_tbl;
+            let elaborated =
+              Fun.protect
+                ~finally:(fun () -> global_lookup_trace := None)
+                (fun () -> elaborate_def d)
+            in
+            let cterm = canonical_expr [] elaborated.body in
+            let trace = Hashtbl.fold (fun n r acc -> (n, r) :: acc) trace_tbl [] in
+            let entry = { entry_trace = trace; entry_def = elaborated; entry_cterm = cterm } in
+            entries := entry :: List.filteri (fun i _ -> i < def_elab_entries_cap - 1) !entries;
+            (elaborated, cterm))
       program.defs
   in
+  let defs = List.map fst elaborated_defs in
   let program = { program with defs } in
   let cterms = Hashtbl.create 32 in
-  List.iter (fun d -> Hashtbl.add cterms d.name (canonical_expr [] d.body)) program.defs;
+  List.iter (fun (d, cterm) -> Hashtbl.add cterms d.name cterm) elaborated_defs;
   let defs_by_name = Hashtbl.create 32 in
   List.iter (fun d -> Hashtbl.add defs_by_name d.name d) program.defs;
   let def_ids = Hashtbl.create 32 in
@@ -3966,7 +4118,7 @@ let check_program_uncached (program : program) =
       | None -> (
           match (Hashtbl.find_opt defs_by_name name, Hashtbl.find_opt cterms name) with
           | Some d, Some cterm ->
-              let body = cterm_to_canonical_v2 def_id_of cterm in
+              let body = cterm_to_canonical_v2_cached def_id_of cterm in
               let id = hash_string ("defid-v2:" ^ type_to_canonical d.typ ^ ":" ^ body) in
               Hashtbl.add def_ids name id;
               id
@@ -4034,8 +4186,11 @@ let check_program (program : program) =
   match
     List.find_opt (fun (k, _) -> String.equal k key) !check_program_by_content_memo
   with
-  | Some (_, checked) -> checked
+  | Some (_, checked) ->
+      incr check_program_hits;
+      checked
   | None ->
+      incr check_program_misses;
       let checked = check_program_uncached program in
       check_program_by_content_memo :=
         (key, checked) :: List.filteri (fun i _ -> i < 3) !check_program_by_content_memo;

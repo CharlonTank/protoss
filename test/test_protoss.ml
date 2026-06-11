@@ -300,6 +300,27 @@ let graph_def graph name =
   | Some def -> def
   | None -> fail ("missing graph def: " ^ name)
 
+(* The kernel caches per-definition elaborations across check_program calls
+   (keyed on the definition plus the recorded global-type lookups). The cache
+   must never reuse an elaboration once the type of a referenced global
+   changed, and must reuse it when only unrelated definitions appear. *)
+let () =
+  (* Prime the cache: b elaborates against a : Nat. *)
+  ignore (Parser.parse_string "(def a Nat 1)\n(def b Nat a)" |> Kernel.check_program);
+  (* Same definition text for b, but a's type changed: the cached elaboration
+     must be invalidated and checking must fail with the usual error. *)
+  expect_check_error_contains "(def a Bool true)\n(def b Nat a)" "definition b";
+  (* An unrelated extra definition must leave b's identity untouched (hit or
+     miss, the content-addressed result is the same). *)
+  let base = Parser.parse_string "(def a Nat 1)\n(def b Nat a)" |> Kernel.check_program in
+  let extended =
+    Parser.parse_string "(def a Nat 1)\n(def b Nat a)\n(def unrelated Nat 7)"
+    |> Kernel.check_program
+  in
+  assert_equal "per-def elaboration cache: unrelated def keeps b's def id"
+    (checked_def base "b").Kernel.def_id
+    (checked_def extended "b").Kernel.def_id
+
 let rec runtime_value_matches_type value typ =
   match (value, typ) with
   | Runtime.VUnit, Ast.TUnit -> true
