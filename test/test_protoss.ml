@@ -251,6 +251,31 @@ let () =
        "Process { CapabilityName* } elm_type");
   assert_equal "kernel hash prefix" "p2:" Kernel.hash_prefix
 
+(* protoss doctor --v1: the executable V1.0 acceptance proofs. *)
+let () =
+  (* Every wired proof passes on the kernel as shipped. *)
+  let results = List.map (fun (c : Doctor.check) -> (c, Doctor.run_one c)) Doctor.checks in
+  List.iter
+    (fun ((c : Doctor.check), st) ->
+      match st with
+      | Doctor.Fail msg -> fail ("doctor proof " ^ c.id ^ " failed: " ^ msg)
+      | Doctor.Pass | Doctor.Not_yet _ -> ())
+    results;
+  (* At least the pure proofs are wired (guards against an empty/hollow run). *)
+  let passed =
+    List.length (List.filter (function _, Doctor.Pass -> true | _ -> false) results)
+  in
+  assert_true "doctor wires a healthy floor of real proofs (>= 10)" (passed >= 10);
+  (* Panic injection: the doctor must exit non-zero iff an available proof
+     breaks, and zero when only Not_yet remain. *)
+  assert_equal "doctor passes when all proofs pass or defer" "0"
+    (string_of_int (Doctor.aggregate_exit [ Doctor.Pass; Doctor.Not_yet "later"; Doctor.Pass ]));
+  assert_equal "doctor fails hard when an available proof breaks" "1"
+    (string_of_int
+       (Doctor.aggregate_exit [ Doctor.Pass; Doctor.Fail "injected"; Doctor.Not_yet "later" ]));
+  assert_equal "doctor does not fail on Not_yet alone" "0"
+    (string_of_int (Doctor.aggregate_exit [ Doctor.Not_yet "a"; Doctor.Not_yet "b" ]))
+
 let expect_parse_error input =
   try
     let _ = Parser.parse_string input in

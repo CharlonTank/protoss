@@ -38,7 +38,7 @@ satisfaites.
 
 ## Vague 1 — indépendants
 
-### G1 — `protoss doctor --v1` [pending]
+### G1 — `protoss doctor --v1` [done]
 - **Périmètre** : nouveau `lib/doctor.ml` ; branchement CLI par l'orchestrateur.
 - **Dépendances** : aucune. **Agent** : non (structurant, intègre tout l'existant).
 - **Goal** : implémenter `protoss doctor --v1` : exécute mécaniquement les preuves
@@ -220,4 +220,9 @@ satisfaites.
 
 ## Journal
 
-- (vide — l'orchestrateur ajoute une ligne par goal terminé : date, goal, commit)
+- 2026-06-11 — G1 `protoss doctor --v1` : `lib/doctor.ml` (11 preuves pures réelles
+  exécutées + 11 not-yet honnêtes avec item de checklist), dispatch CLI
+  `protoss doctor --v1 [--json]`, test d'injection de panne (`aggregate_exit`)
+  dans la section core ; `@fulltest` vert. Décision consignée : le doctor est
+  auto-suffisant (sources embarquées, indépendant du CWD) + preuves best-effort
+  sur artefacts localisables (spec).

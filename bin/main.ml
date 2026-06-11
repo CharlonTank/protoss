@@ -63,6 +63,7 @@ let usage () =
      \       protoss grammar kernel|human\n\
      \       protoss spec check [protoss-spec.md]\n\
      \       protoss bench build <project>\n\
+     \       protoss doctor --v1 [--json]\n\
      \       protoss cache stats|list <dir>\n\
      \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats|gc [args]";
   exit 2
@@ -1551,6 +1552,11 @@ let command_bench = function
       Printf.printf "benchmark-ref=%s\n%s" benchmark_ref content
   | _ -> usage ()
 
+let command_doctor = function
+  | [ "--v1" ] -> exit (Protoss.Doctor.run ~json:false)
+  | [ "--v1"; "--json" ] | [ "--v1"; "json" ] -> exit (Protoss.Doctor.run ~json:true)
+  | _ -> usage ()
+
 let () =
   protect (fun () ->
       match Array.to_list Sys.argv |> List.tl with
@@ -1612,6 +1618,7 @@ let () =
       | "explain" :: args -> command_explain args
       | "grammar" :: args -> command_grammar args
       | "spec" :: args -> command_spec args
+      | "doctor" :: args -> command_doctor args
       | "bench" :: args -> command_bench args
       | "cache" :: args -> command_cache args
       | "store" :: args -> command_store args
