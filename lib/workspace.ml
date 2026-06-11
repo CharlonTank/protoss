@@ -254,26 +254,36 @@ let project_root path =
    init/update/view, the architecture `protoss app check` and `web build`/`serve`
    expect. It uses the prelude (Nat.toString, String.concat), so the generated
    manifest points `stdlib` at the resolved prelude path. *)
+(* The scaffold is written in Protoss/H (the Elm-like surface), so the first
+   thing `protoss init` shows is the ergonomic syntax: a transparent [type
+   alias], list literals [ ... ], and short variant constructors [(Increment
+   unit)]. It canonicalizes byte-identically to the explicit S-expression form
+   (proven: this source and the verbose [(variant (Variant ...) Increment unit)]
+   / [Cons/Nil] form both build to p2:b96036…), so nothing downstream changes. *)
 let counter_app_source =
-  "(def init (Process Nat) (done 0))\n\n\
-   (def update\n\
-  \  (-> (Variant (Increment Unit) (Reset Unit)) (-> Nat (Process Nat)))\n\
-  \  (lambda (msg (Variant (Increment Unit) (Reset Unit)))\n\
-  \    (lambda (model Nat)\n\
-  \      (case msg\n\
-  \        (Increment _ (done (succ model)))\n\
-  \        (Reset _ (done 0))))))\n\n\
-   (def view\n\
-  \  (-> Nat (View (Variant (Increment Unit) (Reset Unit))))\n\
-  \  (lambda (model Nat)\n\
-  \    (column\n\
-  \      (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
-  \        (text ((String.concat \"Count: \") (Nat.toString model)))\n\
-  \        (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
-  \          (button \"Increment\" (variant (Variant (Increment Unit) (Reset Unit)) Increment unit))\n\
-  \          (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
-  \            (button \"Reset\" (variant (Variant (Increment Unit) (Reset Unit)) Reset unit))\n\
-  \            (Nil (View (Variant (Increment Unit) (Reset Unit))))))))))\n"
+  String.concat "\n"
+    [ "type alias Msg =";
+      "    Variant (Increment Unit) (Reset Unit)";
+      "";
+      "init : Process Nat";
+      "init =";
+      "    done 0";
+      "";
+      "update : Msg -> Nat -> Process Nat";
+      "update msg model =";
+      "    case msg of";
+      "        Increment _ -> done (succ model)";
+      "        Reset _ -> done 0";
+      "";
+      "view : Nat -> View Msg";
+      "view model =";
+      "    column";
+      "        [ text (String.concat \"Count: \" (Nat.toString model))";
+      "        , button \"Increment\" (Increment unit)";
+      "        , button \"Reset\" (Reset unit)";
+      "        ]";
+      "";
+    ]
 
 let manifest_source ~entrypoint ~stdlib =
   Printf.sprintf
