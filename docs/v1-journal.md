@@ -129,3 +129,12 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   success=325, **0 violation** → l'invariant central tient sur des milliers de programmes aléatoires
   mutés, pas seulement les fixtures fixes. `@fulltest` vert (targets=7). Fuzzer couvre maintenant :
   4 parsers + checker + évaluateur + invariant de correction.
+- 2026-06-12 — **Backend bytecode réel FAIT** (commit 942f8b6, coche spec §15 case 719). `project build
+  --target bytecode` n'écrivait qu'un manifeste de métadonnées (stub), alors que la codegen bytecode
+  (`Bytecode.compile_checked`/`encode_module`) existait et était testée (doctor bytecode-encoding/parity).
+  Branché : `build_compiler_backend` écrit maintenant le vrai module encodé `<ref>.ptvm` déterministe.
+  Additif (octets content-derived → compiled-artifact ref inchangé). Preuve : 2 builds indépendants →
+  bytecode byte-identique (1.4 Mo) ; test : `.ptvm` == `encode_module` du build + décode round-trip stable.
+  README + spec à jour, `spec check` 308 (était 307), doctor spec-audit PASS, `@fulltest` vert. Vérifié au
+  passage : runtime web JS gère TOUS les widgets (ListView/WhenView/On/Node) → pas de trou de cohérence.
+  Autres backends (wasm/llvm/js/sql/gpu) restent des stubs manifeste (post-V1).
