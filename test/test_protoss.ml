@@ -491,6 +491,16 @@ let () =
                assert_true ("bytecode hash deterministic for " ^ f)
                  (String.equal (Bytecode.hash_module m)
                     (Bytecode.hash_module (Bytecode.compile_checked checked)));
+               (* G5: the VM executes every def at parity with the interpreter. *)
+               List.iter
+                 (fun (d : Kernel.checked_def) ->
+                   let name = d.Kernel.def.Ast.name in
+                   assert_true
+                     ("bytecode VM parity for " ^ f ^ ":" ^ name)
+                     (String.equal
+                        (Bytecode_vm.vm_canonical checked name)
+                        (Runtime.value_to_canonical (fst (Runtime.normalize_def checked name)))))
+                 checked.Kernel.defs;
                incr covered);
   assert_true
     (Printf.sprintf "bytecode sweep covers a healthy floor of fixtures (%d, need >= 20)" !covered)

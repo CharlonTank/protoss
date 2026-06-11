@@ -157,6 +157,21 @@ let bytecode_roundtrip src =
          (Bytecode.hash_module (Bytecode.compile_checked (check_source src))))
     "bytecode encode/decode is non-deterministic or not round-trip stable"
 
+let bytecode_parity src =
+  let checked = check_source src in
+  let diverged =
+    List.filter_map
+      (fun (d : Kernel.checked_def) ->
+        let name = d.def.name in
+        let vm = Bytecode_vm.vm_canonical checked name in
+        let interp = Runtime.value_to_canonical (fst (Runtime.normalize_def checked name)) in
+        if String.equal vm interp then None
+        else Some (name ^ "\n    vm=" ^ vm ^ "\n    interp=" ^ interp))
+      checked.defs
+  in
+  pass_if (diverged = [])
+    ("bytecode VM diverges from the interpreter on: " ^ String.concat ", " diverged)
+
 let human_roundtrip src =
   let program = Parser.parse_string src in
   let rendered = Surface_syntax.render_program program in
@@ -397,7 +412,7 @@ let checks : check list =
       id = "bytecode-parity";
       section = "15";
       description = "bytecode VM executes at parity with the reference interpreter";
-      run = (fun () -> Not_yet "checklist §15: wired by goal G5 (bytecode executor)");
+      run = (fun () -> bytecode_parity rich_program);
     };
     {
       id = "self-hosted-canonicalizer-parity";

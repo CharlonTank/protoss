@@ -63,6 +63,7 @@ let usage () =
      \       protoss grammar kernel|human\n\
      \       protoss spec check [protoss-spec.md]\n\
      \       protoss bench build <project>\n\
+     \       protoss bytecode <file> | protoss bytecode run <file> --entry <name>\n\
      \       protoss doctor --v1 [--json]\n\
      \       protoss cache stats|list <dir>\n\
      \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats|gc [args]";
@@ -1552,6 +1553,17 @@ let command_bench = function
       Printf.printf "benchmark-ref=%s\n%s" benchmark_ref content
   | _ -> usage ()
 
+(* Compile a program to VM bytecode (hash of the deterministic module), or run
+   an entry on the VM — which executes at parity with the interpreter. *)
+let command_bytecode = function
+  | [ file ] ->
+      let checked = parse_and_check file in
+      print_endline (Protoss.Bytecode.hash_module (Protoss.Bytecode.compile_checked checked))
+  | [ "run"; file; "--entry"; entry ] | [ "run"; "--entry"; entry; file ] ->
+      let checked = parse_and_check file in
+      print_endline (Protoss.Runtime.value_to_string (Protoss.Bytecode_vm.exec_checked checked entry))
+  | _ -> usage ()
+
 let command_doctor = function
   | [ "--v1" ] -> exit (Protoss.Doctor.run ~json:false)
   | [ "--v1"; "--json" ] | [ "--v1"; "json" ] -> exit (Protoss.Doctor.run ~json:true)
@@ -1618,6 +1630,7 @@ let () =
       | "explain" :: args -> command_explain args
       | "grammar" :: args -> command_grammar args
       | "spec" :: args -> command_spec args
+      | "bytecode" :: args -> command_bytecode args
       | "doctor" :: args -> command_doctor args
       | "bench" :: args -> command_bench args
       | "cache" :: args -> command_cache args

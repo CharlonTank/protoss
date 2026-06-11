@@ -98,7 +98,7 @@ satisfaites.
 
 ## Vague 2 — dépendants de la vague 1
 
-### G5 — VM bytecode (exécuteur + parité interpréteur) [pending]
+### G5 — VM bytecode (exécuteur + parité interpréteur) [done]
 - **Périmètre** : `lib/bytecode.ml` (ou module exécuteur séparé) ; branchement
   target par l'orchestrateur.
 - **Dépendances** : G4. **Agent** : oui, après G4 intégré.
@@ -271,3 +271,15 @@ satisfaites.
   (`applyPatch` sans harness → refusé via `commit_patch_json`, `check` non
   contournable), preuve doctor `mcp-contract` (§10.1), `docs/mcp.md`. Doctor =
   15 pass / 0 fail ; `@fulltest` vert.
+- 2026-06-11 — G5 VM bytecode (exécuteur + parité) : `lib/bytecode_vm.ml` (machine
+  à pile, valeurs = `Runtime.value` pour parité directe via `value_to_canonical`,
+  closures reconstruites par `decompile_block`, `cap_scope`/`recur_stack` threadés
+  comme l'interpréteur, builtins reproduits cas par cas). Fix dans `lib/bytecode.ml` :
+  `compile_checked` compile depuis `parse_serialized_def d.canonical` (corps à
+  def_ids, identité canonique) au lieu de `d.cterm` (noms), pour aligner les corps
+  de closures sur ceux qu'évalue `Runtime.eval_def`. Preuve doctor `bytecode-parity`
+  (`vm_canonical` == `value_to_canonical (normalize_def)`) + sweep de parité par def
+  sur toutes les fixtures isolées (plancher ≥ 20) ; commande CLI `protoss bytecode
+  <file>` / `bytecode run <file> --entry <name>`. Doctor = 16 pass / 0 fail ;
+  `@fulltest` vert. Raffinement noté : `project build --target bytecode` reste un
+  manifeste descriptif ; la VM réelle est exposée via `protoss bytecode`, à parité.

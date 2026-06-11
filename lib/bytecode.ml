@@ -360,9 +360,16 @@ let compile_program ~(exports : string list) (defs : Kernel.canonical_def list) 
   { bc_version = bytecode_version; bc_exports = exports; bc_defs = List.map compile_def defs }
 
 (* Convenience: build the module straight from a [Kernel.checked]. Uses the
-   program's declared exports when present, else every def name in order. *)
+   program's declared exports when present, else every def name in order.
+
+   Defs are taken from each def's canonical serialization (parse_serialized_def
+   d.canonical), not the raw d.cterm, so global references are def-ids — exactly
+   the bodies Runtime.eval_def evaluates. This keeps the VM at parity with the
+   interpreter down to the serialized form of closure bodies. *)
 let compile_checked (c : Kernel.checked) : module_ =
-  let defs = Kernel.canonical_defs_of_checked c in
+  let defs =
+    List.map (fun (d : Kernel.checked_def) -> Kernel.parse_serialized_def d.Kernel.canonical) c.Kernel.defs
+  in
   let exports =
     match c.Kernel.program.Ast.exports with
     | Some names -> names
