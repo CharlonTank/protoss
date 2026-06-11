@@ -813,7 +813,10 @@ let runtime_js =
         var view = machine.view(app.view, modelValue);
         mount.appendChild(renderView(view.view, dispatch));
       }
-      render();
+      // The dev server ships no pre-rendered model (prerender:false); evaluate
+      // init in the browser instead. Production bundles carry initialModel.
+      if (modelValue == null) { handleProcess(machine.def(app.init)); }
+      else { render(); }
       window.ProtossRuntime._active = {
         pending: pending,
         resume: resumeRequest,
@@ -1009,7 +1012,12 @@ type build_output = {
   compiled_artifact : Workspace.compiled_artifact;
 }
 
-let build ?out project =
+(* [prerender] embeds the evaluated initial model/view in the bundle. Production
+   builds keep it (deterministic first paint). The dev server (`live`) passes
+   [~prerender:false] to skip evaluating init/view — which wakes the interpreted
+   self-hosted prelude and dominates rebuild time — because the browser runtime
+   recomputes the initial model/view itself (see ProtossRuntime.start fallback). *)
+let build ?(prerender = true) ?out project =
   let manifest = manifest project in
   let build = Workspace.build manifest in
   let contract = check_contract build.checked in
@@ -1020,9 +1028,17 @@ let build ?out project =
     | None -> Filename.concat manifest.root ".protoss/web"
   in
   ensure_dir out_dir;
-  let model, view = initial_model_and_view contract in
+  let initial_model_json, initial_view_json =
+    if prerender then
+      let model, view = initial_model_and_view contract in
+      (value_to_json model, view_to_json (Some contract.checked) view)
+    else ("null", "null")
+  in
   let canonical_graph_json = Kernel.checked_to_graph_json build.checked in
-  let host_contract_json = Canonical_ir.graph_host_contract canonical_graph_json in
+  (* Derive the host contract from the checked program (byte-identical to
+     graph_host_contract) instead of re-parsing/re-validating the full graph
+     JSON — the same ~1.5s round-trip the workspace build already dropped. *)
+  let host_contract_json = Canonical_ir.host_contract_of_checked build.checked in
   let compiled_artifact =
     Workspace.write_compiled_artifact build.store ~universe_root:build.universe_root
       ~target:"web" ~optimization_policy:"web-default-v1"
@@ -1048,8 +1064,8 @@ let build ?out project =
         json_field "program" canonical_graph_json;
         json_field "hostContract" host_contract_json;
         json_field "worldRef" (json_string Ledger.initial_world);
-        json_field "initialModel" (value_to_json model);
-        json_field "initialView" (view_to_json (Some contract.checked) view);
+        json_field "initialModel" initial_model_json;
+        json_field "initialView" initial_view_json;
       ]
     ^ "\n"
   in
@@ -1110,7 +1126,9 @@ let inject_before_body html =
   | None -> html ^ livereload_script
 
 let serve ?(port = 8080) project =
-  let output = ref (build project) in
+  (* Dev server: skip the pre-render evaluation (the browser recomputes init),
+     so each save's rebuild avoids waking the interpreted prelude. *)
+  let output = ref (build ~prerender:false project) in
   (* Watch the project's .protoss sources by mtime. mtimes drive only the dev
      watch, never the deterministic store/bundle. *)
   let source_mtimes () =
@@ -1128,7 +1146,7 @@ let serve ?(port = 8080) project =
   in
   let rebuild () =
     try
-      output := build project;
+      output := build ~prerender:false project;
       Printf.printf "live: rebuilt %s\n%!" (!output).build.Workspace.build_id
     with e -> Printf.eprintf "live: rebuild failed, keeping last good build: %s\n%!" (Printexc.to_string e)
   in
