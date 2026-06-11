@@ -39,7 +39,7 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
 - [x] README à jour (variants courts + inférence lambdas input/list) — FAIT, d35ea8b
 - [ ] `fmt --human` émet les formes courtes (`[...]`, variants courts) au lieu de Cons/Nil/variant explicites
 - [ ] Inférence lambda anonyme en 1ʳᵉ position (`List.map (\x -> ...) xs`) — kernel, reste du fix HOF
-- [ ] Cas check pour les widgets restants (`on`, `image`, `when`) si une lambda/variant court y est attendu
+- [x] Cas check `when`/`on` (dernières vues sans propagation du type attendu) — FAIT, 55a64e9
 - [ ] Robustesse runtime/ledger/Process (audit ce tour : mûr — approfondir les cas limites resume/replay)
 - [x] Fuzzer : 5e target `checker` (parse + check_program), 0 crash / 2000 iter — FAIT, 9535f9b
 - [ ] `fmt --human` formes courtes : l'émetteur est hash-safe mais VERBEUX (émet `column (Cons …)` et `variant (Variant …) Set t` au lieu de `[ … ]` / `Set t`). Load-bearing → tour dédié (agent ?)
@@ -105,3 +105,12 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   déjà corrigé), `trace` gardé, concaténations après court-circuit. Seul lookup linéaire restant : `nth_env`
   (env De Bruijn en liste, O(i)) — optimisation liste→array invasive, gain incertain, écartée pour l'instant.
   Robustesse parser+checker+eval désormais toute sous fuzzing (6 targets).
+- 2026-06-12 — **Cas check `when`/`on` FAIT** (commit 55a64e9). C'étaient les dernières vues à inférer
+  leur sous-terme bottom-up (donc variant court/lambda anonyme échouait dedans) : `when c (button "x"
+  (Tick unit))` et `on "click" (Tick unit)` donnaient « unknown name: Tick ». 2 cas `check_elab` :
+  `TView msg_ty, EWhenView` (body contre `TView msg_ty`) et `TAttr msg_ty, EOn` (msg contre `msg_ty`),
+  miroir des cas infer → cterm identique. Preuves : courts == explicites (`a3daf9…`/`b3f7f5…`), sweep
+  examples/ 0-diff, test ajouté, `@fulltest` vert. **Couverture widgets complète** : column/row/button/
+  input/list/node/when/on propagent tous le type attendu. Écarté ce tour : inférence HOF `List.map
+  (\x -> ...)` (lambda non annotée en 1ʳᵉ position → nécessiterait méta-variables/report d'élaboration,
+  chantier majeur, pas un cas check) ; `fmt --human` formes courtes (hash-safe local difficile à garantir).
