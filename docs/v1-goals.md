@@ -142,7 +142,7 @@ satisfaites.
 
 ## Vague 3 — le prélude (monopole orchestrateur, séquentiel)
 
-### G8 — Patch validator self-hosted [session dédiée — cadré]
+### G8 — Patch validator self-hosted [done]
 - **Périmètre** : `stdlib/prelude.protoss`, `bin/main.ml`, `test/test_protoss.ml`,
   `lib/public_error.ml` — orchestrateur uniquement.
 - **Dépendances** : aucune (pattern établi). **Agent** : non.
@@ -362,3 +362,18 @@ satisfaites.
   seulement si la parité couvre les fixtures. Périmètre G9 : normalizer du fragment
   pur à parité byte-à-byte avec `protoss nf`. Le doctor garde les 2 not-yet §17
   correspondants honnêtes (canonicalizer déjà prouvé par le sweep @selftest).
+- 2026-06-11 — G8 Patch validator self-hosté : `Protoss.patchValidate` (prélude) —
+  parse le patch JSON (`Json.parseText`), convertit type/expr JSON→Sexp
+  (`jsonToSexp`, fidèle à `expr_sexp_of_json`) → `parseType`/`parseExpr`, applique
+  les ops AddDef/ReplaceDef/DeleteDef aux decls, vérifie la correspondance des
+  dépendances déclarées vs réelles (`declTermNames` ∩ defined), et re-parse le
+  programme patché. Le typecheck/caps/policies + MigrateType/RenameDef restent
+  délégués au kernel (autorité) ; ops hors périmètre → Err « unsupported ».
+  CLI `protoss self patch-check <store> <patch> [--compare]` : **parité de verdict
+  réelle** accept/reject vs `Patch.check` (prouvée manuellement sur golden
+  patch-demo, et par le sweep `@selftest __patchpar_*` : add_ok, deps-mismatch,
+  replace, delete, already-exists — 5 cas, composant == kernel). Périmètre :
+  fragment structure+dépendances ; **664/986 NON recochés** (le validateur complet
+  — typage whole-program, MigrateType — n'est pas self-hosté), honnêteté maintenue.
+  Doctor : self-hosted-patch-validator-parity pointe le sweep selftest. `@fulltest`
+  attendu vert.

@@ -8565,6 +8565,48 @@ let () =
     Printf.printf "self canonicalizer parity: %d byte-identical, %d explicit errors\n"
       !canon_parity_ok
       (List.length !canon_unsupported);
+  (* G8: self-hosted patch validator verdict parity. For a program + patch,
+     the Protoss component (Protoss.patchValidate) must accept iff the trusted
+     kernel (Patch.check) accepts, on the supported AddDef/ReplaceDef/DeleteDef
+     fragment (structure + dependencies; typecheck delegated to the kernel). *)
+  let patch_parity label prog patch_json =
+    let root = temp_dir ("patch-parity-" ^ label) in
+    ensure_dir (Filename.concat root "src");
+    write_file (Filename.concat root "protoss.toml")
+      "name = \"patchpar\"\n\
+       version = \"0.0.0\"\n\
+       entrypoints = [\"src/main.protoss\"]\n\
+       stdlib = \"none\"\n\
+       source_dirs = [\"src\"]\n\
+       store_dir = \".protoss/store\"\n\
+       cache_dir = \".protoss/cache\"\n\
+       capabilities = []\n";
+    write_file (Filename.concat root "src/main.protoss") prog;
+    let manifest = Workspace.parse_manifest root in
+    ignore (Workspace.build manifest);
+    let store = Workspace.store_root manifest in
+    let patch_path = Filename.concat root "patch.json" in
+    write_file patch_path patch_json;
+    let kernel_ok = try ignore (Patch.check store patch_path); true with _ -> false in
+    register ("__patchpar_" ^ label) "(Result String String)"
+      ("((Protoss.patchValidate " ^ Ast.quote prog ^ ") " ^ Ast.quote patch_json ^ ")")
+      (fun got ->
+        let component_ok = contains_substring got "patch valid" in
+        assert_true
+          (Printf.sprintf "patch validator parity %s: kernel=%b component=%b" label kernel_ok
+             component_ok)
+          (Bool.equal kernel_ok component_ok))
+  in
+  patch_parity "add_ok" "(def base Nat 2)\n"
+    "{\"op\":\"AddDef\",\"name\":\"total\",\"deps\":[\"base\"],\"type\":\"Nat\",\"expr\":[\"succ\",\"base\"]}";
+  patch_parity "add_deps_mismatch" "(def base Nat 2)\n"
+    "{\"op\":\"AddDef\",\"name\":\"total\",\"deps\":[],\"type\":\"Nat\",\"expr\":[\"succ\",\"base\"]}";
+  patch_parity "replace_ok" "(def base Nat 2)\n"
+    "{\"op\":\"ReplaceDef\",\"name\":\"base\",\"deps\":[],\"type\":\"Nat\",\"expr\":[\"succ\",\"1\"]}";
+  patch_parity "delete_ok" "(def base Nat 2)\n(def extra Nat 3)\n"
+    "{\"op\":\"DeleteDef\",\"name\":\"extra\",\"deps\":[]}";
+  patch_parity "add_already_exists" "(def base Nat 2)\n"
+    "{\"op\":\"AddDef\",\"name\":\"base\",\"deps\":[],\"type\":\"Nat\",\"expr\":[\"succ\",\"1\"]}";
   (* §14.4 priority demo (heavy: builds the full prelude). Gated with the
      self-host section so the core dev-loop stays fast; the demo migrates the
      todo app to add a per-item priority through a checked+applied patch. *)

@@ -12799,6 +12799,305 @@
       (Err err (Json.render (Protoss.jsonError (get err message))))
       (Ok typed ((Protoss.selfComponentOkJson "typechecker") "Protoss.tcText")))))
 
+(record ProtossPatchOp
+  (op String)
+  (name String)
+  (deps (List String))
+  (decl (Maybe ProtossDecl)))
+
+(def Protoss.patchSingleSexp (-> String (Result String Sexp))
+  (lambda (text String)
+    (case (Sexp.parseText text)
+      (Err err (variant Err err))
+      (Ok forms
+        (caseList forms
+          (Nil (variant Err "empty patch source"))
+          (Cons first rest
+            (caseList rest
+              (Nil (variant Ok first))
+              (Cons more moreRest (variant Err "patch source must be a single form")))))))))
+
+(defrec Protoss.jsonToSexp (-> Json (Result String Sexp))
+  (variant value)
+  (JString s (variant Ok (variant SAtom s)))
+  (JNat n (variant Ok (variant SAtom (Nat.toString n))))
+  (JBool b (variant Ok (variant SAtom (case b (true "true") (false "false")))))
+  (JNull ignored (variant Ok (variant SAtom "unit")))
+  (JArray items
+    (case
+      (foldList items (variant (Result String (List Sexp)) Ok (Nil Sexp))
+        (lambda (item Json)
+          (lambda (acc (Result String (List Sexp)))
+            (case acc
+              (Err err (variant Err err))
+              (Ok done
+                (case (recur item)
+                  (Err err (variant Err err))
+                  (Ok s (variant Ok (Cons Sexp s done)))))))))
+      (Err err (variant Err err))
+      (Ok revConverted
+        (let (converted (List Sexp) ((inst List.reverse Sexp) revConverted))
+          (caseList converted
+            (Nil (variant Err "empty patch JSON array"))
+            (Cons first rest
+              (case first
+                (SAtom headAtom (variant Ok (variant SList converted)))
+                (_ (variant Err "patch JSON array must start with a string head")))))))))
+  (JObject fields
+    (case ((Json.getField "source") (variant JObject fields))
+      (Some sourceJson
+        (case sourceJson
+          (JString s (Protoss.patchSingleSexp s))
+          (_ (variant Err "patch JSON source must be a string"))))
+      (None
+        (case ((Json.getField "string") (variant JObject fields))
+          (Some strJson
+            (case strJson
+              (JString s (variant Ok (variant SString s)))
+              (_ (variant Err "patch JSON string must be a string"))))
+          (None (variant Err "unsupported patch JSON object form")))))))
+
+(def Protoss.patchDeclTermName (-> ProtossDecl (Maybe String))
+  (lambda (decl ProtossDecl)
+    (case decl
+      (PDDef def (variant Some (get def name)))
+      (PDDefCap def (variant Some (get def name)))
+      (PDDefPoly def (variant Some (get def name)))
+      (PDDefPolyCap def (variant Some (get def name)))
+      (PDDefRec def (variant Some (get def name)))
+      (_ (variant None unit)))))
+
+(def Protoss.patchDefinedTermNames (-> (List ProtossDecl) (List String))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls (Nil String)
+      (lambda (decl ProtossDecl)
+        (lambda (acc (List String))
+          (case (Protoss.patchDeclTermName decl)
+            (Some name (Cons String name acc))
+            (None acc)))))))
+
+(def Protoss.patchHasTerm (-> (List ProtossDecl) (-> String Bool))
+  (lambda (decls (List ProtossDecl))
+    (lambda (wanted String)
+      ((Protoss.canonContains (Protoss.patchDefinedTermNames decls)) wanted))))
+
+(def Protoss.patchBuildDef (-> String (-> Json (-> Json (Result String ProtossDecl))))
+  (lambda (name String)
+    (lambda (typeJson Json)
+      (lambda (exprJson Json)
+        (case (Protoss.jsonToSexp typeJson)
+          (Err err (variant Err err))
+          (Ok typeSexp
+            (case (Protoss.parseType typeSexp)
+              (Err err (variant Err err))
+              (Ok typ
+                (case (Protoss.jsonToSexp exprJson)
+                  (Err err (variant Err err))
+                  (Ok exprSexp
+                    (case (Protoss.parseExpr exprSexp)
+                      (Err err (variant Err err))
+                      (Ok expr
+                        (variant Ok
+                          (variant PDDef
+                            (record (name name) (typ typ) (expr expr))))))))))))))))
+
+(def Protoss.parsePatchDeps (-> Json (List String))
+  (lambda (opJson Json)
+    (case ((Json.getField "deps") opJson)
+      (None (Nil String))
+      (Some depsVal
+        (case depsVal
+          (JArray items
+            (foldList items (Nil String)
+              (lambda (item Json)
+                (lambda (acc (List String))
+                  (case item
+                    (JString d (Cons String d acc))
+                    (_ acc))))))
+          (_ (Nil String)))))))
+
+(def Protoss.parsePatchOpNamed
+  (-> String (-> String (-> (List String) (-> Json (Result String ProtossPatchOp)))))
+  (lambda (opName String)
+    (lambda (name String)
+      (lambda (deps (List String))
+        (lambda (opJson Json)
+          (case ((String.eqString opName) "DeleteDef")
+            (true
+              (variant Ok
+                (record (op opName) (name name) (deps deps) (decl (variant None unit)))))
+            (false
+              (case
+                (case ((String.eqString opName) "AddDef")
+                  (true true)
+                  (false ((String.eqString opName) "ReplaceDef")))
+                (false (variant Err ((String.concat "unsupported patch op: ") opName)))
+                (true
+                  (case ((Json.getField "type") opJson)
+                    (None (variant Err "patch op missing field: type"))
+                    (Some typeJson
+                      (case ((Json.getField "expr") opJson)
+                        (None (variant Err "patch op missing field: expr"))
+                        (Some exprJson
+                          (case (((Protoss.patchBuildDef name) typeJson) exprJson)
+                            (Err err (variant Err err))
+                            (Ok decl
+                              (variant Ok
+                                (record (op opName) (name name) (deps deps)
+                                  (decl (variant Some decl)))))))))))))))))))
+
+(def Protoss.parsePatchOp (-> Json (Result String ProtossPatchOp))
+  (lambda (opJson Json)
+    (case ((Json.getField "op") opJson)
+      (None (variant Err "patch op missing field: op"))
+      (Some opVal
+        (case opVal
+          (JString opName
+            (case ((Json.getField "name") opJson)
+              (None (variant Err "patch op missing field: name"))
+              (Some nameVal
+                (case nameVal
+                  (JString name
+                    ((((Protoss.parsePatchOpNamed opName) name) (Protoss.parsePatchDeps opJson)) opJson))
+                  (_ (variant Err "patch op name must be a string"))))))
+          (_ (variant Err "patch op op must be a string")))))))
+
+(def Protoss.parsePatchOps (-> String (Result String (List ProtossPatchOp)))
+  (lambda (patchJson String)
+    (case (Json.parseText patchJson)
+      (Err err (variant Err err))
+      (Ok json
+        (let (opsList (List Json)
+          (case ((Json.getField "ops") json)
+            (Some opsVal
+              (case opsVal
+                (JArray items items)
+                (_ (Nil Json))))
+            (None (Cons Json json (Nil Json)))))
+          (foldList opsList (variant (Result String (List ProtossPatchOp)) Ok (Nil ProtossPatchOp))
+            (lambda (opJson Json)
+              (lambda (acc (Result String (List ProtossPatchOp)))
+                (case acc
+                  (Err err (variant Err err))
+                  (Ok done
+                    (case (Protoss.parsePatchOp opJson)
+                      (Err err (variant Err err))
+                      (Ok parsed (variant Ok (Cons ProtossPatchOp parsed done))))))))))))))
+
+(def Protoss.applyPatchOp
+  (-> (List ProtossDecl) (-> ProtossPatchOp (Result String (List ProtossDecl))))
+  (lambda (decls (List ProtossDecl))
+    (lambda (op ProtossPatchOp)
+      (let (exists Bool ((Protoss.patchHasTerm decls) (get op name)))
+        (let (without (List ProtossDecl)
+          (foldList decls (Nil ProtossDecl)
+            (lambda (decl ProtossDecl)
+              (lambda (acc (List ProtossDecl))
+                (case (Protoss.patchDeclTermName decl)
+                  (Some n
+                    (case ((String.eqString n) (get op name))
+                      (true acc)
+                      (false (Cons ProtossDecl decl acc))))
+                  (None (Cons ProtossDecl decl acc)))))))
+          (case ((String.eqString (get op op)) "DeleteDef")
+            (true
+              (case exists
+                (false (variant Err ((String.concat "DeleteDef target does not exist: ") (get op name))))
+                (true (variant Ok ((inst List.reverse ProtossDecl) without)))))
+            (false
+              (case (get op decl)
+                (None (variant Err "patch op has no definition"))
+                (Some newDecl
+                  (case ((String.eqString (get op op)) "AddDef")
+                    (true
+                      (case exists
+                        (true (variant Err ((String.concat "AddDef target already exists: ") (get op name))))
+                        (false
+                          (variant Ok
+                            ((inst List.reverse ProtossDecl)
+                              (Cons ProtossDecl newDecl ((inst List.reverse ProtossDecl) decls)))))))
+                    (false
+                      (case exists
+                        (false (variant Err ((String.concat "ReplaceDef target does not exist: ") (get op name))))
+                        (true
+                          (variant Ok
+                            ((inst List.reverse ProtossDecl)
+                              (Cons ProtossDecl newDecl without))))))))))))))))
+
+(def Protoss.patchTargetDeps (-> (List ProtossDecl) (-> String (List String)))
+  (lambda (decls (List ProtossDecl))
+    (lambda (name String)
+      (let (defined (List String) (Protoss.patchDefinedTermNames decls))
+        (foldList decls (Nil String)
+          (lambda (decl ProtossDecl)
+            (lambda (acc (List String))
+              (case (Protoss.patchDeclTermName decl)
+                (Some n
+                  (case ((String.eqString n) name)
+                    (true
+                      (foldList (Protoss.declTermNames decl) acc
+                        (lambda (ref String)
+                          (lambda (inner (List String))
+                            (case ((Protoss.canonContains defined) ref)
+                              (true ((Protoss.nameSetInsertRaw ref) inner))
+                              (false inner))))))
+                    (false acc)))
+                (None acc)))))))))
+
+(def Protoss.patchDepsMatch (-> (List String) (-> (List String) Bool))
+  (lambda (a (List String))
+    (lambda (b (List String))
+      (case ((Nat.eqNat ((inst List.length String) (Protoss.nameSetUnique a)))
+              ((inst List.length String) (Protoss.nameSetUnique b)))
+        (false false)
+        (true
+          (foldList a true
+            (lambda (x String)
+              (lambda (acc Bool)
+                (case acc
+                  (false false)
+                  (true ((Protoss.canonContains b) x)))))))))))
+
+(def Protoss.patchApplyStep
+  (-> ProtossPatchOp (-> (Result String (List ProtossDecl)) (Result String (List ProtossDecl))))
+  (lambda (op ProtossPatchOp)
+    (lambda (acc (Result String (List ProtossDecl)))
+      (case acc
+        (Err err (variant Err err))
+        (Ok current
+          (case ((Protoss.applyPatchOp current) op)
+            (Err err (variant Err err))
+            (Ok next
+              (let (depsBase (List ProtossDecl)
+                (case ((String.eqString (get op op)) "DeleteDef")
+                  (true current)
+                  (false next)))
+                (case ((Protoss.patchDepsMatch ((Protoss.patchTargetDeps depsBase) (get op name))) (get op deps))
+                  (false (variant Err ((String.concat "dependency mismatch for ") (get op name))))
+                  (true (variant Ok next)))))))))))
+
+(def Protoss.patchFinish (-> (Result String (List ProtossDecl)) (Result String String))
+  (lambda (applied (Result String (List ProtossDecl)))
+    (case applied
+      (Err err (variant Err err))
+      (Ok patchedDecls
+        (case (Protoss.parseText (Protoss.renderDecls patchedDecls))
+          (Err err (variant Err ((String.concat "patched program is malformed: ") err)))
+          (Ok reparsed (variant Ok "patch valid")))))))
+
+(def Protoss.patchValidate (-> String (-> String (Result String String)))
+  (lambda (programText String)
+    (lambda (patchJson String)
+      (case (Protoss.parseText programText)
+        (Err err (variant Err ((String.concat "invalid store program: ") err)))
+        (Ok decls
+          (case (Protoss.parsePatchOps patchJson)
+            (Err err (variant Err err))
+            (Ok ops
+              (Protoss.patchFinish
+                (foldList ops (variant (Result String (List ProtossDecl)) Ok decls)
+                  Protoss.patchApplyStep)))))))))
+
 (def Protoss.selfPatchValidatorJson (-> String String)
   (lambda (source String)
     (case (Protoss.staticReportText source)

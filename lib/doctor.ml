@@ -673,8 +673,12 @@ let checks : check list =
     {
       id = "self-hosted-patch-validator-parity";
       section = "17";
-      description = "Protoss patch validator matches Patch.check verdicts";
-      run = (fun () -> Not_yet "checklist §17: wired by goal G8");
+      description = "Protoss patch validator matches Patch.check verdicts (AddDef/ReplaceDef/DeleteDef)";
+      run =
+        (fun () ->
+          Not_yet
+            "checklist §17: proven by the @selftest __patchpar_* sweep (structure+deps \
+             fragment); not duplicated in the doctor (full prelude eval)");
     };
     {
       id = "structured-errors-on-hostile-input";

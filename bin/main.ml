@@ -1518,6 +1518,34 @@ let command_self_canon compare file =
       print_error "self canon error"
         ("unexpected result: " ^ Protoss.Runtime.value_to_string other)
 
+(* The self-hosted patch validator (Protoss.patchValidate) on the store's
+   program text + the patch JSON. --compare checks its accept/reject verdict
+   against the trusted kernel's Patch.check on the supported op fragment. *)
+let command_self_patch_check compare store_or_project patch_path =
+  let store = Protoss.Workspace.store_of_arg store_or_project in
+  let program_text = Protoss.Ast.string_of_program (Protoss.Store.load_program store) in
+  let patch_text = read_source patch_path in
+  let _, value =
+    self_eval ~typ:"(Result String String)"
+      ("((Protoss.patchValidate " ^ Protoss.Ast.quote program_text ^ ") "
+      ^ Protoss.Ast.quote patch_text ^ ")")
+  in
+  let component_ok = match value with Protoss.Runtime.VVariant (_, "Ok", _) -> true | _ -> false in
+  if not compare then
+    match value with
+    | Protoss.Runtime.VVariant (_, "Ok", Protoss.Runtime.VString s) -> print_endline ("valid: " ^ s)
+    | Protoss.Runtime.VVariant (_, "Err", Protoss.Runtime.VString m) ->
+        print_endline ("rejected: " ^ m)
+    | other -> print_endline (Protoss.Runtime.value_to_string other)
+  else
+    let kernel_ok = try ignore (Protoss.Patch.check store patch_path); true with _ -> false in
+    if Bool.equal kernel_ok component_ok then
+      print_endline ("Self patch-validator parity OK (" ^ (if kernel_ok then "accepted" else "rejected") ^ ")")
+    else (
+      prerr_endline
+        (Printf.sprintf "self patch-check parity mismatch: kernel=%b self=%b" kernel_ok component_ok);
+      exit 1)
+
 let command_self = function
   | [ "parse"; file ] -> print_endline (self_string "Protoss.selfParseJson" file)
   | [ "fmt"; "--check"; file ] -> command_self_fmt true file
@@ -1537,6 +1565,9 @@ let command_self = function
   | [ "canon"; "--compare"; file ] | [ "canon"; file; "--compare" ] ->
       command_self_canon true file
   | [ "canon"; file ] -> command_self_canon false file
+  | [ "patch-check"; "--compare"; store; patch ] | [ "patch-check"; store; patch; "--compare" ] ->
+      command_self_patch_check true store patch
+  | [ "patch-check"; store; patch ] -> command_self_patch_check false store patch
   | _ -> usage ()
 
 let command_bench = function
