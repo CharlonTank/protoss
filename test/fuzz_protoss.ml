@@ -1,12 +1,13 @@
 (* Deterministic robustness fuzzer for Protoss input surfaces.
 
-   Goal (G3): exercise the four untrusted input decoders and assert that for
-   ANY input — valid, mutated, or hostile — the decoder either succeeds or fails
-   through the project's structured error mechanism. A raw, unstructured crash
-   (Stack_overflow, a bare Failure from int_of_string, Not_found, Invalid_argument,
-   Match_failure, ...) is a robustness bug and is reported here.
+   Goal (G3): exercise the four untrusted input decoders plus the type checker
+   and assert that for ANY input — valid, mutated, or hostile — that surface
+   either succeeds or fails through the project's structured error mechanism. A
+   raw, unstructured crash (Stack_overflow, a bare Failure from int_of_string,
+   Not_found, Invalid_argument, Match_failure, ...) is a robustness bug and is
+   reported here.
 
-   The four targets and the exceptions treated as STRUCTURED (i.e. a clean,
+   The five targets and the exceptions treated as STRUCTURED (i.e. a clean,
    acceptable failure) for each:
 
    1. S-expression parser
@@ -37,6 +38,14 @@
        strings go through Kernel.single_sexp -> Sexp.parse so Sexp.Error/Kernel.Error
        can surface; validate_capabilities can raise Kernel.Error. Harness.Error is
        defensive — only reachable from apply/check, not from parse_ops_json itself.)
+
+   5. Type checker
+        Protoss.Parser.parse_string  then  Protoss.Kernel.check_program
+      structured: Parser.Error | Sexp.Error | Elm_syntax.Error | Kernel.Error
+      (a parsable program is elaborated; the checker is total and the generated
+       inputs are depth-bounded, so it terminates. Its only intended elaboration
+       failure is a located Kernel.Error, so any other exception is a totality or
+       robustness bug.)
 
    Determinism: all randomness comes from a single Random.State seeded with a
    fixed integer (overridable via argv). Two runs with the same seed test the
@@ -200,6 +209,14 @@ let structured_patch = function
       true
   | _ -> false
 
+(* The checker runs the parser first (Parser.Error/Sexp.Error/Elm_syntax.Error)
+   and then elaborates; its only intended elaboration failure is a located
+   Kernel.Error. Anything else (Stack_overflow, Not_found, Match_failure,
+   Invalid_argument...) on parsable input is a real totality/robustness bug. *)
+let structured_check = function
+  | Parser.Error _ | Sexp.Error _ | Elm_syntax.Error _ | Kernel.Error _ -> true
+  | _ -> false
+
 (* ------------------------------------------------------------------ *)
 (* Target runners (the exact functions under test)                    *)
 (* ------------------------------------------------------------------ *)
@@ -233,6 +250,15 @@ let run_patch (input : string) : unit =
   ignore (Json.parse input);
   ignore (Patch.parse_ops_json input)
 
+let run_check (input : string) : unit =
+  (* Drive the type checker past the parser: a parsable program is elaborated by
+     Kernel.check_program, so the kernel's inference/normalization/capability
+     pass must never raise a non-structured exception on parsable input. The
+     checker is total and the generated inputs are depth-bounded, so it
+     terminates. *)
+  let program = Parser.parse_string input in
+  ignore (Kernel.check_program program)
+
 (* ------------------------------------------------------------------ *)
 (* Seed corpus (embedded, so the fuzzer is self-contained)            *)
 (* ------------------------------------------------------------------ *)
@@ -253,6 +279,9 @@ let seed_sexp =
     "(def r (Record (x Nat) (y Nat)) (record (x 1) (y 2)))";
     "(def f (-> (TVar 0) (TVar 0)) (lambda (x (TVar 0)) x))";
     "(defrec sum (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))";
+    (* A whole view program: drives the column/input/list/button check_elab paths
+       and the input/list handler-lambda inference under the checker target. *)
+    "(def w (-> String (View (Variant (Set String) (Clear Unit)))) (lambda (s String) (column (Cons (View (Variant (Set String) (Clear Unit))) (input s (lambda (t String) (variant (Variant (Set String) (Clear Unit)) Set t))) (Cons (View (Variant (Set String) (Clear Unit))) (list (Cons String s (Nil String)) (lambda (i String) (text i))) (Nil (View (Variant (Set String) (Clear Unit)))))))))";
   ]
 
 (* Valid-ish Elm-like seeds. *)
@@ -980,6 +1009,13 @@ let () =
         run = run_patch;
         next = next_patch_input;
         seeds = patch_seeds;
+      };
+      {
+        name = "checker";
+        structured = structured_check;
+        run = run_check;
+        next = next_sexp_input;
+        seeds = sexp_seeds;
       };
     ]
   in
