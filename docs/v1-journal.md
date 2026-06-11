@@ -7,7 +7,22 @@ chaque chose finie ; changements kernel/risqués via agent isolé en worktree av
 déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégration.
 
 ## En cours
-- **Robustesse runtime/ledger/Process** — exploration des cas limites des effets typés et resume/replay.
+- **Exemple full-stack réel : app todo en Protoss/H** — agent isolé `ac3e66` (background). Réécriture de
+  `examples/web/todo_app/src/app.protoss` (S-exp → Elm-like) à HASH IDENTIQUE, en préservant noms/types
+  (pour garder `priority_demo.sh` + `add_priority.json` valides). Test d'expressivité §14.
+
+## Audit V1 (ce tour)
+- `protoss doctor --v1` : **25 pass, 0 fail, 3 not-yet** — et les 3 not-yet (canon/nf/patch self-host parity)
+  sont en fait prouvés par les sweeps `@selftest`, juste pas dupliqués dans le doctor (eval prélude lent).
+  Conclusion : système mûr, aucun trou Fail/Not_yet réel. §8.4 (branch/merge) pas dans le doctor mais
+  déjà testé (test_protoss.ml:7672-7804) + CLI (`protoss ledger fork|merge|diff|branches`). La valeur
+  restante est DX/ergonomie/exemples/profondeur, pas le comblement de trous béants.
+- **Expressivité Protoss/H (découvert ce tour)** : records pleinement supportés (type/littéral/accès/update,
+  `p2:558b…`). Lambdas anonymes `\x -> body` parsent MAIS sans annotation de type (jamais `\(x:T)`), donc
+  type de param TOUJOURS inféré. `List.map (\x -> succ x) xs` ÉCHOUE (lambda en 1ʳᵉ position → rien ne fixe
+  son type : "cannot infer List.map: expected function type"). `::` (cons) PAS supporté en Elm-like (→ `Cons`).
+  → Item kernel potentiel : inférence du type de param d'une lambda anonyme depuis la signature de la fonction
+  appliquée (suite logique du fix bidirectionnel listes/variants). L'agent todo dira si l'app bute dessus.
 
 ## File priorisée (révisée à chaque tour — impact × ce que ça débloque)
 - [x] Variants courts (`Increment unit` / bare `Reset`) — FAIT, commit 4071106
@@ -16,6 +31,7 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
 - [ ] Robustesse runtime/ledger/Process : cas limites des effets typés, resume/replay (en cours)
 - [ ] Constructeurs de variant comme candidats de suggestion (`Nome`→`None`) — découvert ce tour
 - [ ] `fmt --human` émet les formes courtes (`[...]`, variants courts) au lieu de Cons/Nil/variant explicites
+- [ ] Inférence du type de param des lambdas anonymes (HOF type `List.map (\x -> ...) xs`) — kernel, suite du fix bidirectionnel
 - [ ] Fuzzer : nouvelle passe sur parser/checker/runtime pour débusquer des crashs non structurés
 - [ ] Exemple d'app full-stack réel et propre en Protoss/H (todo réécrit avec `[...]`, keyed, alias)
 - [ ] Audit spec : features de protoss-spec.md / ship-checklist marquées faibles ou incomplètes
