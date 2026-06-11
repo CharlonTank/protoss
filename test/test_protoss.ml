@@ -615,6 +615,15 @@ let () =
   let elm_like_equiv = Loader.check_file elm_like_equiv_path in
   assert_equal "Elm-like surface hashes as S-expression surface"
     (Kernel.hash_program elm_like_equiv) (Kernel.hash_program elm_like);
+  (* The Protoss/H view tour exercises every view widget (column/row/button/
+     input/list/when/on/node) with the ergonomic forms (short variant
+     constructors, bare lambdas, list literals). Loading it proves the full view
+     surface type-checks end to end against the prelude. *)
+  let views_tour = Loader.check_file (find_up (Sys.getcwd ()) "examples/protoss_h_views.pt") in
+  assert_true "Protoss/H view tour checks: all widgets with short forms"
+    (List.exists
+       (fun (d : Kernel.checked_def) -> String.equal d.Kernel.def.Ast.name "view")
+       views_tour.Kernel.defs);
   let inferred_add_surface = check "add a b =\n  a + b\n" in
   assert_equal "Elm-like signature-free Nat add type" "(-> Nat (-> Nat Nat))"
     (Ast.string_of_typ (checked_def inferred_add_surface "add").Kernel.def.typ);

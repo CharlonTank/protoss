@@ -1,0 +1,20 @@
+import "../stdlib/prelude.protoss"
+
+-- A tour of the Protoss/H view surface: every view widget written with the
+-- ergonomic forms (short variant constructors, bare lambdas, list literals).
+-- Each widget pushes the expected message type into its sub-terms, so none of
+-- these need an explicit (variant Msg ...) annotation or a typed lambda.
+
+type alias Msg =
+    Variant (Add Unit) (Typed String) (Toggle Unit)
+
+view : Bool -> String -> List String -> View Msg
+view flag draft items =
+    column
+        [ text "Protoss/H view tour"
+        , input draft (\s -> Typed s)
+        , row [ button "Add" (Add unit), button "Toggle" Toggle ]
+        , when flag (text "shown only when the flag is set")
+        , list items (\item -> text item)
+        , node "section" [ on "click" (Add unit) ] [ text "a custom element" ]
+        ]
