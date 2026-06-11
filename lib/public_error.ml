@@ -122,6 +122,12 @@ let catalog =
       description = "The self-hosted formatter rejected the source.";
     };
     {
+      code = "SELF_CANON001";
+      name = "SelfHostedCanonicalizerFailure";
+      description =
+        "The self-hosted canonicalizer rejected the source or an unsupported form.";
+    };
+    {
       code = "SELF_TC000";
       name = "SelfHostedTypecheckFailure";
       description = "The self-hosted typechecker rejected the source outside a narrower code.";
@@ -286,6 +292,7 @@ let code_for_cli_kind kind msg =
       | "web error" -> "WEB001"
       | "runtime error" -> "RUNTIME001"
       | "self fmt error" -> "SELF_FMT001"
+      | "self canon error" -> "SELF_CANON001"
       | "self typecheck error" | "self type-of error" -> "SELF_TC000"
       | "input error" -> "INPUT001"
       | "system error" -> "SYSTEM001"

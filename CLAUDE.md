@@ -38,6 +38,13 @@ Protoss/H grammar surface; update `Surface_syntax.human_grammar_text` when addin
 identical canonical hash) and raise `Unrenderable` for forms without a human projection rather
 than emit text that re-parses differently. When extending the Elm-like parser, extend the
 emitter (and its round-trip tests) in the same change.
+`Protoss.canonProgramText` (in `stdlib/prelude.protoss`) is the self-hosted canonicalizer
+behind `protoss self canon [--compare]`: the kernel checks first and supplies every DefId,
+and the component's canonical text must stay byte-identical to
+`Kernel.serialize_checked_program` on the supported subset (parity sweep + floor in the
+self-host test section) and return an explicit `Err` for unsupported forms — never emit
+unverified canonical text. Any change to the canonical serialization format must update the
+self-hosted canonicalizer in the same change.
 `Store.put_object` interns through `PROTOSS_GLOBAL_STORE` or `$HOME/.protoss/global-store` and
 hardlinks project objects to that global payload when possible; preserve content-addressed writes.
 Patch audits carry `previous-root`/`root-ref` and write native `store/provenance` root-state plus

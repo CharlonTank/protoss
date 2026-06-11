@@ -8353,6 +8353,86 @@ let () =
         (contains_substring got "duplicate record field"));
   assert_true "ocaml rejects duplicate record field"
     (not (ocaml_clean "(record T (a Nat) (a Nat))"));
+  (* ===== Self-hosted canonicalizer: byte-for-byte parity with the kernel =====
+     For every example fixture that the kernel checks in isolation, the
+     Protoss-implemented canonicalizer (Protoss.canonProgramText) must either
+     reproduce Kernel.serialize_checked_program exactly - DefIds are supplied
+     by the kernel, which stays the only identity authority - or fail with an
+     explicit error. It must never emit unverified canonical text. *)
+  let canon_def_ids (checked : Kernel.checked) =
+    checked.Kernel.defs
+    |> List.map (fun (d : Kernel.checked_def) -> "(" ^ d.def.name ^ " " ^ d.def_id ^ ")")
+    |> String.concat " "
+  in
+  let canon_expr def_ids source =
+    "case ((Protoss.canonProgramText " ^ Ast.quote def_ids ^ ") " ^ Ast.quote source
+    ^ ") (Err e ((String.concat \"ERR:\") e)) (Ok t ((String.concat \"OK:\") t))"
+  in
+  let has_prefix prefix s =
+    String.length s >= String.length prefix
+    && String.equal (String.sub s 0 (String.length prefix)) prefix
+  in
+  let strip_prefix prefix s =
+    String.sub s (String.length prefix) (String.length s - String.length prefix)
+  in
+  let canon_parity_ok = ref 0 in
+  let canon_unsupported = ref [] in
+  let canon_fixture_index = ref 0 in
+  let examples_dir = repo "examples" in
+  Sys.readdir examples_dir |> Array.to_list |> List.sort String.compare
+  |> List.iter (fun fixture ->
+         if Filename.check_suffix fixture ".protoss" then begin
+           let source = read_all (Filename.concat examples_dir fixture) in
+           let source =
+             if Elm_syntax.looks_like source then Elm_syntax.to_sexp_source source
+             else source
+           in
+           match Parser.parse_string source |> Kernel.check_program with
+           | exception _ -> () (* does not check in isolation: out of scope *)
+           | fixture_checked ->
+               let expected = Kernel.serialize_checked_program fixture_checked in
+               let def_ids = canon_def_ids fixture_checked in
+               incr canon_fixture_index;
+               register
+                 (Printf.sprintf "__canon_parity_%d" !canon_fixture_index)
+                 "String" (canon_expr def_ids source)
+                 (fun got ->
+                   if has_prefix "OK:" got then begin
+                     assert_equal
+                       ("self canonicalizer parity for " ^ fixture)
+                       expected (strip_prefix "OK:" got);
+                     incr canon_parity_ok
+                   end
+                   else begin
+                     assert_true
+                       ("self canonicalizer explicit error for " ^ fixture)
+                       (has_prefix "ERR:" got);
+                     canon_unsupported := fixture :: !canon_unsupported
+                   end)
+         end);
+  (* Golden contract: the canonical bytes for examples/basic.protoss are frozen
+     in examples/basic.ptc, and the Protoss canonicalizer reproduces them. *)
+  let golden_source = read_all (repo "examples/basic.protoss") in
+  let golden_checked = Parser.parse_string golden_source |> Kernel.check_program in
+  let golden_expected = chomp (read_all (repo "examples/basic.ptc")) in
+  assert_equal "kernel canonical text matches examples/basic.ptc" golden_expected
+    (Kernel.serialize_checked_program golden_checked);
+  register "__canon_golden_basic" "String"
+    (canon_expr (canon_def_ids golden_checked) golden_source)
+    (fun got ->
+      assert_equal "self canonicalizer reproduces examples/basic.ptc"
+        ("OK:" ^ golden_expected) got);
+  (* The kernel-supplied DefIds are load-bearing: with an empty table the
+     component falls back to plain names, so the candidate must diverge from
+     the kernel text and the byte comparison must be able to fail. *)
+  register "__canon_defids_required" "String" (canon_expr "" golden_source)
+    (fun got ->
+      assert_true "self canonicalizer without def-ids still canonicalizes"
+        (has_prefix "OK:" got);
+      assert_true "self canonicalizer without def-ids diverges from the kernel"
+        (not (String.equal (strip_prefix "OK:" got) golden_expected));
+      assert_true "self canonicalizer without def-ids falls back to names"
+        (contains_substring got "(ref choose)"));
   (* ---- run everything in a single checked program ---- *)
   let checked = Parser.parse_string (Buffer.contents driver) |> Kernel.check_program in
   List.iter
@@ -8366,4 +8446,16 @@ let () =
       in
       verify got)
     (List.rev !entries);
+  (* Anti-hollow-test floor: the parity sweep must keep covering a healthy
+     majority of the isolated example fixtures byte-for-byte. *)
+  assert_true
+    (Printf.sprintf
+       "self canonicalizer parity floor: %d fixtures byte-identical (need >= 14), unsupported: %s"
+       !canon_parity_ok
+       (String.concat ", " (List.rev !canon_unsupported)))
+    (!canon_parity_ok >= 14);
+  if test_trace_enabled () then
+    Printf.printf "self canonicalizer parity: %d byte-identical, %d explicit errors\n"
+      !canon_parity_ok
+      (List.length !canon_unsupported);
   print_endline "self-host frontend tests ok"

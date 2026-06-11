@@ -21,6 +21,7 @@ evaluated through the normal Protoss evaluator:
 | Capability report | `Protoss.checkCapabilityText : String -> Result String ProtossCapabilityReport` |
 | Dependency ordering | `Protoss.staticReportText` → `termOrder` / `typeEnv.order` (`ProtossDepOrder`) |
 | Static report (aggregate) | `Protoss.staticReportText : String -> Result String ProtossStaticReport` |
+| Canonicalizer (kernel-verified candidate) | `Protoss.canonProgramText : String -> String -> Result String String` |
 | JSON report rendering | `Protoss.selfStaticJson`, `Protoss.selfParseJson`, … via `Json.render` |
 | Component status reports | `Protoss.selfHumanParserJson`, `Protoss.selfHumanPrettyPrinterJson`, `Protoss.selfCanonicalizerJson`, `Protoss.selfNormalizerJson`, `Protoss.selfTypecheckerJson`, `Protoss.selfPatchValidatorJson`, `Protoss.selfHarnessRunnerJson`, `Protoss.selfPackageResolverJson`, `Protoss.selfMcpServerJson`, `Protoss.selfOptimizerJson`, `Protoss.selfCompilerBackendJson` |
 | Bootstrap and TCB reports | `Protoss.selfBootstrapPlanJson`, `Protoss.selfTrustedBoundaryJson` |
@@ -84,7 +85,35 @@ protoss self resolve <file>        # ProtossResolveReport (JSON)
 protoss self deps <file>           # term + type dependency order / cycles (JSON)
 protoss self capabilities <file>   # ProtossCapabilityReport (JSON)
 protoss self static <file> [--json] # aggregate static report (JSON with --json)
+protoss self canon <file> [--compare] # Protoss-authored canonical text; --compare = byte parity vs kernel
 ```
+
+## The canonicalizer is a kernel-verified candidate
+
+`Protoss.canonProgramText defIdsText source` re-implements the canonicalization
+pipeline in Protoss: declaration parsing (via `Protoss.parseText`), type-alias
+expansion (recursive variants stay `Named`, fields sorted), top-down
+elaboration (lambda/bind annotations, variant type hints from the expected
+type, wildcard and unit branches, `defrec` desugaring to `foldNat`/`foldList`/
+`foldVariant`, polymorphic `inst` substitution), De Bruijn indices, and the
+exact `protoss-canon-v2` byte format of `Kernel.serialize_checked_program`.
+
+The trust contract follows the bootstrap plan's "kernel-verified candidates"
+stage:
+
+- the **kernel checks the program first** and supplies every DefId — identity
+  never comes from the Protoss component;
+- the component emits a full canonical-text **candidate**, and
+  `protoss self canon <file> --compare` fails loudly on any byte difference;
+- any form outside the supported subset returns an **explicit error** (for
+  example `match`/`letRecord` sugar, unannotated lambdas, implicit polymorphic
+  instantiation, `module`/`import` declarations) — the component never emits
+  unverified canonical text.
+
+The parity sweep in `test/test_protoss.ml` (`__canon_parity_*`) runs the
+component against every `examples/*.protoss` fixture that the kernel checks in
+isolation and asserts byte equality, with a golden check against
+`examples/basic.ptc` and a floor on the number of byte-identical fixtures.
 
 ## Why canonical DefIds still come from the kernel
 
@@ -109,7 +138,11 @@ default self-hosted execution, then a reduced trusted boundary. The companion
 `Protoss.selfTrustedBoundaryJson` names the intended reduced TCB: hashes,
 binary format, kernel type verifier, patch validator, and effect runtime.
 
-The next trust transition is not a new unchecked rewrite. It is to expand
-parity fixtures, have the Protoss component entries emit richer candidates
-where needed, and require the OCaml kernel to verify those candidates before
-any hash, patch, package, or backend artifact becomes trusted.
+The canonicalizer is the first component to reach the "kernel-verified
+candidates" stage: `Protoss.canonProgramText` emits the full canonical text
+and `protoss self canon --compare` requires byte equality with the kernel.
+The next trust transition repeats that pattern for the remaining components:
+expand parity fixtures, have the Protoss component entries emit richer
+candidates where needed, and require the OCaml kernel to verify those
+candidates before any hash, patch, package, or backend artifact becomes
+trusted.

@@ -32,7 +32,7 @@ let usage () =
      \       protoss harness run <project-or-store> <harness.pth>\n\
      \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
      \       protoss self typecheck <file> [--json] | type-of <file> --entry <name> | compare-typecheck <file>\n\
-     \       protoss self fmt [--check] <file>\n\
+     \       protoss self fmt [--check] <file> | protoss self canon <file> [--compare]\n\
      \       protoss project init|check|build|lock|package|interface|export-layout [project] [--stats|--locked|--check [interface.json]|--json|--out <dir>]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref] | protoss patch review <patch.json>\n\
@@ -1475,6 +1475,46 @@ let command_self_compare_typecheck file =
         exit 1)
   else print_endline "Self typecheck parity OK"
 
+(* The trusted kernel checks the program first and supplies every DefId:
+   identity always comes from the kernel, while the Protoss component only
+   produces a canonical-text candidate that --compare verifies byte-for-byte
+   against [Kernel.serialize_checked_program]. *)
+let command_self_canon compare file =
+  let source = read_source file in
+  let source =
+    if Protoss.Elm_syntax.looks_like source then Protoss.Elm_syntax.to_sexp_source source
+    else source
+  in
+  let program = Protoss.Parser.parse_string source in
+  let checked = Protoss.Kernel.check_program program in
+  let expected = Protoss.Kernel.serialize_checked_program checked in
+  let def_ids =
+    checked.defs
+    |> List.map (fun (d : Protoss.Kernel.checked_def) ->
+           "(" ^ d.def.name ^ " " ^ d.def_id ^ ")")
+    |> String.concat " "
+  in
+  let _, value =
+    self_eval ~typ:"(Result String String)"
+      ("((Protoss.canonProgramText " ^ Protoss.Ast.quote def_ids ^ ") "
+      ^ Protoss.Ast.quote source ^ ")")
+  in
+  match value with
+  | Protoss.Runtime.VVariant (_, "Ok", Protoss.Runtime.VString text) ->
+      if not compare then print_endline text
+      else if String.equal text expected then
+        print_endline "Self canonicalizer parity OK"
+      else (
+        prerr_endline "self canon parity mismatch:";
+        prerr_endline ("kernel: " ^ expected);
+        prerr_endline ("self:   " ^ text);
+        exit 1)
+  | Protoss.Runtime.VVariant (_, "Err", Protoss.Runtime.VString msg) ->
+      print_error "self canon error" msg
+  | other ->
+      print_error "self canon error"
+        ("unexpected result: " ^ Protoss.Runtime.value_to_string other)
+
 let command_self = function
   | [ "parse"; file ] -> print_endline (self_string "Protoss.selfParseJson" file)
   | [ "fmt"; "--check"; file ] -> command_self_fmt true file
@@ -1491,6 +1531,9 @@ let command_self = function
   | [ "typecheck"; file ] -> command_self_typecheck false file
   | [ "type-of"; file; "--entry"; entry ] -> command_self_type_of file entry
   | [ "compare-typecheck"; file ] -> command_self_compare_typecheck file
+  | [ "canon"; "--compare"; file ] | [ "canon"; file; "--compare" ] ->
+      command_self_canon true file
+  | [ "canon"; file ] -> command_self_canon false file
   | _ -> usage ()
 
 let command_bench = function

@@ -271,6 +271,104 @@
   (termOrder ProtossDepOrder)
   (typeEnv ProtossTypeEnvReport)
   (capabilities ProtossCapabilityReport))
+(record CanonIdEntry
+  (name String)
+  (defId String))
+(record CanonAlias
+  (name String)
+  (params (List String))
+  (body ProtossType))
+(record CanonSig
+  (name String)
+  (arity Nat)
+  (typ ProtossType))
+(record CanonCtx
+  (aliases (List CanonAlias))
+  (recNames (List String))
+  (tvars (List String))
+  (sigs (List CanonSig))
+  (defIds (List CanonIdEntry)))
+(record CanonLocal
+  (name String)
+  (typ ProtossType))
+(record CanonFold
+  (target ProtossType)
+  (result ProtossType))
+(record CanonScope
+  (locals (List CanonLocal))
+  (fold (Maybe CanonFold)))
+(record CanonOut
+  (typ ProtossType)
+  (text String))
+(record CanonDefSrc
+  (name String)
+  (typeParams (List String))
+  (typ ProtossType)
+  (body ProtossExpr))
+(record CanonDefText
+  (name String)
+  (text String))
+(record CanonCollect
+  (caps (List String))
+  (aliases (List CanonAlias))
+  (defs (List CanonDefSrc)))
+(record CanonCharScan
+  (index Nat)
+  (found Nat))
+(record CanonCmpScan
+  (index Nat)
+  (order Nat))
+(record CanonQuoteScan
+  (index Nat)
+  (text String))
+(record CanonStringInsert
+  (placed Bool)
+  (out (List String)))
+(record CanonDefInsert
+  (placed Bool)
+  (out (List CanonDefText)))
+(record CanonFieldText
+  (name String)
+  (text String))
+(record CanonFieldInsert
+  (placed Bool)
+  (out (List CanonFieldText)))
+(record CanonTypeBinding
+  (name String)
+  (typ ProtossType))
+(record CanonIndexedLocal
+  (index Nat)
+  (typ ProtossType))
+(record CanonLocalScan
+  (scanned Nat)
+  (found (Maybe CanonIndexedLocal)))
+(record CanonBranchesSplit
+  (explicit (List ProtossCaseBranch))
+  (wildcard (Maybe ProtossExpr)))
+(record CanonZipState
+  (remaining (List ProtossType))
+  (out (List CanonTypeBinding))
+  (ok Bool))
+(record CanonIndexedBindings
+  (first Nat)
+  (second (List CanonTypeBinding)))
+(type CanonTypeSubst (-> (List CanonTypeBinding) (Result String ProtossType)))
+(type CanonTypeStep (-> CanonCtx (Result String ProtossType)))
+(type CanonExprK
+  (-> CanonCtx (-> CanonScope (-> (Maybe ProtossType) (Result String CanonOut)))))
+(record CanonBranchK
+  (constructor String)
+  (binder (Maybe String))
+  (bodyK CanonExprK))
+(record CanonBranchSplitK
+  (explicit (List CanonBranchK))
+  (wildcard (Maybe CanonExprK)))
+(record CanonFieldK
+  (name String)
+  (bodyK CanonExprK))
+(record CanonRenderedType
+  (raw ProtossType)
+  (text (Result String String)))
 (type TypeExpr ProtossType)
 (type Expr ProtossExpr)
 (type Decl ProtossDecl)
@@ -9802,6 +9900,2790 @@
       (Cons (Pair String Json) ((Protoss.jf "unsupported") (Protoss.jsonStrings (get report unsupported)))
       (Nil (Pair String Json))))))))
 
+(def Protoss.canonAsciiTable String
+  " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~")
+
+(def Protoss.canonCharRank (-> String Nat)
+  (lambda (ch String)
+    (get
+      (foldNat 95
+        (record (index 0) (found 0))
+        (lambda (acc CanonCharScan)
+          (case ((Nat.eqNat (get acc found)) 0)
+            (false (record (index (succ (get acc index))) (found (get acc found))))
+            (true
+              (case ((String.charAt Protoss.canonAsciiTable) (get acc index))
+                (None (record (index (succ (get acc index))) (found 0)))
+                (Some entry
+                  (case ((String.eqString entry) ch)
+                    (true
+                      (record
+                        (index (succ (get acc index)))
+                        (found (succ (get acc index)))))
+                    (false (record (index (succ (get acc index))) (found 0))))))))))
+      found)))
+
+(def Protoss.canonCmpOrder (-> String (-> String Nat))
+  (lambda (a String)
+    (lambda (b String)
+      (let (la (String.length a))
+        (let (lb (String.length b))
+          (let (maxLen (case ((Nat.lte la) lb) (true lb) (false la)))
+            (get
+              (foldNat maxLen
+                (record (index (prim.Nat.pred maxLen)) (order 1))
+                (lambda (acc CanonCmpScan)
+                  (let (i (get acc index))
+                    (let (next
+                      (case ((String.charAt a) i)
+                        (None
+                          (case ((String.charAt b) i)
+                            (None (get acc order))
+                            (Some cb 0)))
+                        (Some ca
+                          (case ((String.charAt b) i)
+                            (None 2)
+                            (Some cb
+                              (case ((String.eqString ca) cb)
+                                (true (get acc order))
+                                (false
+                                  (let (ra (Protoss.canonCharRank ca))
+                                    (let (rb (Protoss.canonCharRank cb))
+                                      (case ((Nat.eqNat ra) 0)
+                                        (true 3)
+                                        (false
+                                          (case ((Nat.eqNat rb) 0)
+                                            (true 3)
+                                            (false
+                                              (case ((Nat.lt ra) rb)
+                                                (true 0)
+                                                (false 2)))))))))))))))
+                      (record (index (prim.Nat.pred i)) (order next))))))
+              order)))))))
+
+(def Protoss.canonInsertString
+  (-> Bool (-> String (-> (List String) (Result String (List String)))))
+  (lambda (dropEqual Bool)
+    (lambda (x String)
+      (lambda (xs (List String))
+        (let (scan
+          (foldList xs
+            (variant (Result String CanonStringInsert) Ok
+              (record (placed false) (out (Nil String))))
+            (lambda (h String)
+              (lambda (acc (Result String CanonStringInsert))
+                (case acc
+                  (Err err (variant Err err))
+                  (Ok state
+                    (case (get state placed)
+                      (true
+                        (variant Ok
+                          (record (placed true) (out (Cons String h (get state out))))))
+                      (false
+                        (let (order ((Protoss.canonCmpOrder h) x))
+                          (case ((Nat.eqNat order) 3)
+                            (true
+                              (variant Err
+                                "canonical ordering is undefined for non-ASCII names"))
+                            (false
+                              (case ((Nat.eqNat order) 1)
+                                (true
+                                  (case dropEqual
+                                    (true
+                                      (variant Ok
+                                        (record (placed true)
+                                          (out (Cons String h (get state out))))))
+                                    (false
+                                      (variant Ok
+                                        (record (placed false)
+                                          (out (Cons String h (get state out))))))))
+                                (false
+                                  (case ((Nat.eqNat order) 0)
+                                    (true
+                                      (variant Ok
+                                        (record (placed true)
+                                          (out
+                                            (Cons String h
+                                              (Cons String x (get state out)))))))
+                                    (false
+                                      (variant Ok
+                                        (record (placed false)
+                                          (out (Cons String h (get state out))))))))))))))))))))
+          (case scan
+            (Err err (variant Err err))
+            (Ok state
+              (case (get state placed)
+                (true (variant Ok (get state out)))
+                (false (variant Ok (Cons String x (get state out))))))))))))
+
+(def Protoss.canonInsertField
+  (-> CanonFieldText (-> (List CanonFieldText) (Result String (List CanonFieldText))))
+  (lambda (x CanonFieldText)
+    (lambda (xs (List CanonFieldText))
+      (let (scan
+        (foldList xs
+          (variant (Result String CanonFieldInsert) Ok
+            (record (placed false) (out (Nil CanonFieldText))))
+          (lambda (h CanonFieldText)
+            (lambda (acc (Result String CanonFieldInsert))
+              (case acc
+                (Err err (variant Err err))
+                (Ok state
+                  (case (get state placed)
+                    (true
+                      (variant Ok
+                        (record (placed true) (out (Cons CanonFieldText h (get state out))))))
+                    (false
+                      (let (order ((Protoss.canonCmpOrder (get h name)) (get x name)))
+                        (case ((Nat.eqNat order) 3)
+                          (true
+                            (variant Err
+                              "canonical ordering is undefined for non-ASCII names"))
+                          (false
+                            (case ((Nat.eqNat order) 0)
+                              (true
+                                (variant Ok
+                                  (record (placed true)
+                                    (out
+                                      (Cons CanonFieldText h
+                                        (Cons CanonFieldText x (get state out)))))))
+                              (false
+                                (variant Ok
+                                  (record (placed false)
+                                    (out (Cons CanonFieldText h (get state out))))))))))))))))))
+        (case scan
+          (Err err (variant Err err))
+          (Ok state
+            (case (get state placed)
+              (true (variant Ok (get state out)))
+              (false (variant Ok (Cons CanonFieldText x (get state out)))))))))))
+
+(def Protoss.canonQuoteChar (-> String String)
+  (lambda (ch String)
+    (case ((String.eqString ch) "\"")
+      (true "\\\"")
+      (false
+        (case ((String.eqString ch) "\\")
+          (true "\\\\")
+          (false
+            (case ((String.eqString ch) "\n")
+              (true "\\n")
+              (false
+                (case ((String.eqString ch) "\r")
+                  (true "\\r")
+                  (false
+                    (case ((String.eqString ch) "\t")
+                      (true "\\t")
+                      (false ch))))))))))))
+
+(def Protoss.canonQuote (-> String String)
+  (lambda (s String)
+    (let (len (String.length s))
+      ((String.concat "\"")
+        ((String.concat
+          (get
+            (foldNat len
+              (record (index (prim.Nat.pred len)) (text ""))
+              (lambda (acc CanonQuoteScan)
+                (let (i (get acc index))
+                  (case ((String.charAt s) i)
+                    (None (record (index (prim.Nat.pred i)) (text (get acc text))))
+                    (Some ch
+                      (record
+                        (index (prim.Nat.pred i))
+                        (text ((String.concat (Protoss.canonQuoteChar ch)) (get acc text)))))))))
+            text))
+          "\"")))))
+
+(def Protoss.canonNatOfDigits (-> String (Maybe Nat))
+  (lambda (s String)
+    (case (Protoss.isNatLiteralName s)
+      (false (variant None unit))
+      (true
+        (variant Some
+          (get
+            (foldNat (String.length s)
+              (record (first 0) (second 0))
+              (lambda (acc (Pair Nat Nat))
+                (let (digit
+                  (case ((String.charAt s) (get acc first))
+                    (None 0)
+                    (Some ch
+                      (case (String.digitValue ch)
+                        (None 0)
+                        (Some value value)))))
+                  (record
+                    (first (succ (get acc first)))
+                    (second ((Nat.add ((prim.Nat.mul (get acc second)) 10)) digit))))))
+            second))))))
+
+(def Protoss.canonContains (-> (List String) (-> String Bool))
+  (lambda (xs (List String))
+    (lambda (x String)
+      (foldList xs false
+        (lambda (h String)
+          (lambda (acc Bool)
+            (case ((String.eqString h) x)
+              (true true)
+              (false acc))))))))
+
+(def Protoss.canonAliasLookup (-> (List CanonAlias) (-> String (Maybe CanonAlias)))
+  (lambda (aliases (List CanonAlias))
+    (lambda (wanted String)
+      (foldList aliases (variant (Maybe CanonAlias) None unit)
+        (lambda (alias CanonAlias)
+          (lambda (acc (Maybe CanonAlias))
+            (case ((String.eqString (get alias name)) wanted)
+              (true (variant Some alias))
+              (false acc))))))))
+
+(def Protoss.canonSigLookup (-> (List CanonSig) (-> String (Maybe CanonSig)))
+  (lambda (sigs (List CanonSig))
+    (lambda (wanted String)
+      (foldList sigs (variant (Maybe CanonSig) None unit)
+        (lambda (sig CanonSig)
+          (lambda (acc (Maybe CanonSig))
+            (case ((String.eqString (get sig name)) wanted)
+              (true (variant Some sig))
+              (false acc))))))))
+
+(def Protoss.canonDefIdOf (-> CanonCtx (-> String String))
+  (lambda (ctx CanonCtx)
+    (lambda (wanted String)
+      (foldList (get ctx defIds) wanted
+        (lambda (entry CanonIdEntry)
+          (lambda (acc String)
+            (case ((String.eqString (get entry name)) wanted)
+              (true (get entry defId))
+              (false acc))))))))
+
+(def Protoss.canonBindingLookup
+  (-> (List CanonTypeBinding) (-> String (Maybe ProtossType)))
+  (lambda (bindings (List CanonTypeBinding))
+    (lambda (wanted String)
+      (foldList bindings (variant (Maybe ProtossType) None unit)
+        (lambda (binding CanonTypeBinding)
+          (lambda (acc (Maybe ProtossType))
+            (case ((String.eqString (get binding name)) wanted)
+              (true (variant Some (get binding typ)))
+              (false acc))))))))
+
+(def Protoss.canonLocalLookup
+  (-> (List CanonLocal) (-> String (Maybe CanonIndexedLocal)))
+  (lambda (locals (List CanonLocal))
+    (lambda (wanted String)
+      (let (scan
+        (foldList locals
+          (record (scanned 0) (found (variant (Maybe CanonIndexedLocal) None unit)))
+          (lambda (local CanonLocal)
+            (lambda (acc CanonLocalScan)
+              (record
+                (scanned (succ (get acc scanned)))
+                (found
+                  (case ((String.eqString (get local name)) wanted)
+                    (true
+                      (variant Some
+                        (record (index (get acc scanned)) (typ (get local typ)))))
+                    (false (get acc found)))))))))
+        (case (get scan found)
+          (None (variant (Maybe CanonIndexedLocal) None unit))
+          (Some entry
+            (variant Some
+              (record
+                (index
+                  ((prim.Nat.sub (prim.Nat.pred (get scan scanned))) (get entry index)))
+                (typ (get entry typ))))))))))
+
+(def Protoss.canonScalarTypeName (-> String Bool)
+  (lambda (name String)
+    (case ((String.eqString name) "Unit")
+      (true true)
+      (false
+        (case ((String.eqString name) "Bool")
+          (true true)
+          (false
+            (case ((String.eqString name) "Nat")
+              (true true)
+              (false ((String.eqString name) "String")))))))))
+
+(def Protoss.canonBuiltinTypeHeads (List String)
+  (Cons String "List"
+    (Cons String "Stream"
+      (Cons String "View"
+        (Cons String "Attr"
+          (Cons String "Process"
+            (Cons String "Cmd"
+              (Cons String "Automaton"
+                (Cons String "Record"
+                  (Cons String "Variant"
+                    (Cons String "SecretRef"
+                      (Cons String "Capabilities"
+                        (Cons String "capabilities" (Nil String))))))))))))))
+
+(defrec Protoss.canonTypeNames (-> ProtossType (List String))
+  (variant t)
+  (PTName name (Cons String name (Nil String)))
+  (PTFun pair
+    ((inst List.append String)
+      (recur (get pair first))
+      (recur (get pair second))))
+  (PTApply app
+    (Cons String (get app name)
+      (foldList (get app args) (Nil String)
+        (lambda (arg ProtossType)
+          (lambda (acc (List String))
+            (((inst List.append String) (recur arg)) acc)))))))
+
+(def Protoss.canonTypeMentions (-> ProtossType (-> String Bool))
+  (lambda (t ProtossType)
+    (lambda (wanted String)
+      ((Protoss.canonContains (Protoss.canonTypeNames t)) wanted))))
+
+(def Protoss.canonSubstList
+  (-> (List CanonTypeSubst)
+    (-> (List CanonTypeBinding) (Result String (List ProtossType))))
+  (lambda (substs (List CanonTypeSubst))
+    (lambda (bindings (List CanonTypeBinding))
+      (foldList substs
+        (variant (Result String (List ProtossType)) Ok (Nil ProtossType))
+        (lambda (subst CanonTypeSubst)
+          (lambda (acc (Result String (List ProtossType)))
+            (case acc
+              (Err err (variant Err err))
+              (Ok done
+                (case (subst bindings)
+                  (Err err (variant Err err))
+                  (Ok argT (variant Ok (Cons ProtossType argT done))))))))))))
+
+(defrec Protoss.canonSubstTypeNames
+  (-> ProtossType CanonTypeSubst)
+  (variant t)
+  (PTName name
+    (lambda (bindings (List CanonTypeBinding))
+      (case ((Protoss.canonBindingLookup bindings) name)
+        (Some bound (variant Ok bound))
+        (None (variant Ok (variant PTName name))))))
+  (PTFun pair
+    (let (substFirst (recur (get pair first)))
+      (let (substSecond (recur (get pair second)))
+        (lambda (bindings (List CanonTypeBinding))
+          (case (substFirst bindings)
+            (Err err (variant Err err))
+            (Ok a
+              (case (substSecond bindings)
+                (Err err (variant Err err))
+                (Ok b (variant Ok (variant PTFun (record (first a) (second b))))))))))))
+  (PTApply app
+    (let (argSubsts
+      (foldList (get app args) (Nil CanonTypeSubst)
+        (lambda (arg ProtossType)
+          (lambda (acc (List CanonTypeSubst))
+            (Cons CanonTypeSubst (recur arg) acc)))))
+      (lambda (bindings (List CanonTypeBinding))
+        (case ((Protoss.canonBindingLookup bindings) (get app name))
+          (Some bound
+            (caseList (get app args)
+              (Nil (variant Ok bound))
+              (Cons firstArg restArgs
+                (variant Err
+                  ((String.concat "type parameter is not a type constructor: ")
+                    (get app name))))))
+          (None
+            (case ((Protoss.canonSubstList argSubsts) bindings)
+              (Err err (variant Err err))
+              (Ok newArgs
+                (variant Ok
+                  (variant PTApply (record (name (get app name)) (args newArgs))))))))))))
+
+(def Protoss.canonZipBindings
+  (-> (List String) (-> (List ProtossType) (Result String (List CanonTypeBinding))))
+  (lambda (params (List String))
+    (lambda (args (List ProtossType))
+      (let (state
+        (foldList params
+          (record
+            (remaining ((inst List.reverse ProtossType) args))
+            (out (Nil CanonTypeBinding))
+            (ok true))
+          (lambda (param String)
+            (lambda (acc CanonZipState)
+              (caseList (get acc remaining)
+                (Nil
+                  (record
+                    (remaining (Nil ProtossType))
+                    (out (get acc out))
+                    (ok false)))
+                (Cons arg rest
+                  (record
+                    (remaining rest)
+                    (out
+                      (Cons CanonTypeBinding
+                        (record (name param) (typ arg))
+                        (get acc out)))
+                    (ok (get acc ok)))))))))
+        (case (get state ok)
+          (false (variant Err "type alias arity mismatch"))
+          (true
+            (caseList (get state remaining)
+              (Nil (variant Ok (get state out)))
+              (Cons extra rest (variant Err "type alias arity mismatch")))))))))
+
+(def Protoss.canonStepList
+  (-> (List CanonTypeStep) (-> CanonCtx (Result String (List ProtossType))))
+  (lambda (steps (List CanonTypeStep))
+    (lambda (ctx CanonCtx)
+      (foldList steps
+        (variant (Result String (List ProtossType)) Ok (Nil ProtossType))
+        (lambda (step CanonTypeStep)
+          (lambda (acc (Result String (List ProtossType)))
+            (case acc
+              (Err err (variant Err err))
+              (Ok done
+                (case (step ctx)
+                  (Err err (variant Err err))
+                  (Ok argT (variant Ok (Cons ProtossType argT done))))))))))))
+
+(def Protoss.canonNamedPrefix String "__canon-named:")
+
+(def Protoss.canonNamedHead (-> String String)
+  (lambda (name String)
+    ((String.concat Protoss.canonNamedPrefix) name)))
+
+(def Protoss.canonNamedHeadName (-> String (Maybe String))
+  (lambda (head String)
+    (case ((String.startsWith head) Protoss.canonNamedPrefix)
+      (false (variant None unit))
+      (true
+        (variant Some
+          ((String.drop head) (String.length Protoss.canonNamedPrefix)))))))
+
+(defrec Protoss.canonSubstAliasOnce
+  (-> ProtossType CanonTypeStep)
+  (variant t)
+  (PTName name
+    (lambda (ctx CanonCtx)
+      (case (Protoss.canonScalarTypeName name)
+        (true (variant Ok (variant PTName name)))
+        (false
+          (case ((Protoss.canonContains (get ctx recNames)) name)
+            (true
+              (variant Ok
+                (variant PTApply
+                  (record (name (Protoss.canonNamedHead name)) (args (Nil ProtossType))))))
+            (false
+              (case ((Protoss.canonAliasLookup (get ctx aliases)) name)
+                (None (variant Ok (variant PTName name)))
+                (Some alias
+                  (caseList (get alias params)
+                    (Nil (variant Ok (get alias body)))
+                    (Cons param rest
+                      (variant Err
+                        ((String.concat "type alias expects type arguments: ") name))))))))))))
+  (PTFun pair
+    (let (stepFirst (recur (get pair first)))
+      (let (stepSecond (recur (get pair second)))
+        (lambda (ctx CanonCtx)
+          (case (stepFirst ctx)
+            (Err err (variant Err err))
+            (Ok a
+              (case (stepSecond ctx)
+                (Err err (variant Err err))
+                (Ok b (variant Ok (variant PTFun (record (first a) (second b))))))))))))
+  (PTApply app
+    (let (argSteps
+      (foldList (get app args) (Nil CanonTypeStep)
+        (lambda (arg ProtossType)
+          (lambda (acc (List CanonTypeStep))
+            (Cons CanonTypeStep (recur arg) acc)))))
+      (lambda (ctx CanonCtx)
+        (case ((Protoss.canonStepList argSteps) ctx)
+          (Err err (variant Err err))
+          (Ok newArgs
+            (let (head (get app name))
+              (case ((Protoss.canonContains Protoss.canonBuiltinTypeHeads) head)
+                (true
+                  (variant Ok (variant PTApply (record (name head) (args newArgs)))))
+                (false
+                  (case ((Protoss.canonContains (get ctx recNames)) head)
+                    (true
+                      (variant Ok
+                        (variant PTApply
+                          (record (name (Protoss.canonNamedHead head)) (args newArgs)))))
+                    (false
+                      (case ((Protoss.canonAliasLookup (get ctx aliases)) head)
+                        (None
+                          (variant Ok
+                            (variant PTApply (record (name head) (args newArgs)))))
+                        (Some alias
+                          (case ((Protoss.canonZipBindings (get alias params)) newArgs)
+                            (Err err
+                              (variant Err
+                                ((String.concat "type alias arity mismatch: ") head)))
+                            (Ok bindings
+                              ((Protoss.canonSubstTypeNames (get alias body)) bindings))))))))))))))))
+
+(def Protoss.canonExpandRaw (-> CanonCtx (-> ProtossType (Result String ProtossType)))
+  (lambda (ctx CanonCtx)
+    (lambda (t ProtossType)
+      (foldNat (succ ((inst List.length CanonAlias) (get ctx aliases)))
+        (variant (Result String ProtossType) Ok t)
+        (lambda (acc (Result String ProtossType))
+          (case acc
+            (Err err (variant Err err))
+            (Ok current ((Protoss.canonSubstAliasOnce current) ctx))))))))
+
+(def Protoss.canonTvarPrefix String "__canon-tvar:")
+
+(def Protoss.canonTvarType (-> Nat ProtossType)
+  (lambda (i Nat)
+    (variant PTName ((String.concat Protoss.canonTvarPrefix) (Nat.toString i)))))
+
+(def Protoss.canonTvarBindings (-> (List String) (List CanonTypeBinding))
+  (lambda (params (List String))
+    (let (len ((inst List.length String) params))
+      (get
+        (foldList params
+          (record (first 0) (second (Nil CanonTypeBinding)))
+          (lambda (param String)
+            (lambda (acc CanonIndexedBindings)
+              (record
+                (first (succ (get acc first)))
+                (second
+                  (Cons CanonTypeBinding
+                    (record
+                      (name param)
+                      (typ
+                        (Protoss.canonTvarType
+                          ((prim.Nat.sub (prim.Nat.pred len)) (get acc first)))))
+                    (get acc second)))))))
+        second))))
+
+(def Protoss.canonExpandType (-> CanonCtx (-> ProtossType (Result String ProtossType)))
+  (lambda (ctx CanonCtx)
+    (lambda (t ProtossType)
+      (case ((Protoss.canonSubstTypeNames t) (Protoss.canonTvarBindings (get ctx tvars)))
+        (Err err (variant Err err))
+        (Ok seeded ((Protoss.canonExpandRaw ctx) seeded))))))
+
+(def Protoss.canonUnfoldNamed (-> CanonCtx (-> ProtossType (Result String ProtossType)))
+  (lambda (ctx CanonCtx)
+    (lambda (t ProtossType)
+      (case t
+        (PTName name (variant Ok t))
+        (PTFun pair (variant Ok t))
+        (PTApply app
+          (case (Protoss.canonNamedHeadName (get app name))
+            (None (variant Ok t))
+            (Some aliasName
+              (case ((Protoss.canonAliasLookup (get ctx aliases)) aliasName)
+                (None
+                  (variant Err
+                    ((String.concat "unknown recursive type alias: ") aliasName)))
+                (Some alias
+                  (case ((Protoss.canonZipBindings (get alias params)) (get app args))
+                    (Err err (variant Err err))
+                    (Ok bindings
+                      (case ((Protoss.canonSubstTypeNames (get alias body)) bindings)
+                        (Err err (variant Err err))
+                        (Ok seeded ((Protoss.canonExpandRaw ctx) seeded))))))))))))))
+
+(def Protoss.canonConPayloads
+  (-> (List ProtossType) (Result String (List CanonTypeBinding)))
+  (lambda (cases (List ProtossType))
+    (foldList cases
+      (variant (Result String (List CanonTypeBinding)) Ok (Nil CanonTypeBinding))
+      (lambda (entry ProtossType)
+        (lambda (acc (Result String (List CanonTypeBinding)))
+          (case acc
+            (Err err (variant Err err))
+            (Ok done
+              (case entry
+                (PTApply app
+                  (caseList (get app args)
+                    (Nil (variant Err "malformed structural type field"))
+                    (Cons payload rest
+                      (caseList rest
+                        (Nil
+                          (variant Ok
+                            (Cons CanonTypeBinding
+                              (record (name (get app name)) (typ payload))
+                              done)))
+                        (Cons extra extraRest
+                          (variant Err "malformed structural type field"))))))
+                (_ (variant Err "malformed structural type field"))))))))))
+
+(def Protoss.canonWrapTypeHead (-> String Bool)
+  (lambda (head String)
+    (case ((String.eqString head) "List")
+      (true true)
+      (false
+        (case ((String.eqString head) "Stream")
+          (true true)
+          (false
+            (case ((String.eqString head) "View")
+              (true true)
+              (false
+                (case ((String.eqString head) "Attr")
+                  (true true)
+                  (false ((String.eqString head) "Automaton")))))))))))
+
+(def Protoss.canonCapabilityScopeText
+  (-> (List ProtossType) (Result String String))
+  (lambda (caps (List ProtossType))
+    (case
+      (foldList caps
+        (variant (Result String (List String)) Ok (Nil String))
+        (lambda (cap ProtossType)
+          (lambda (acc (Result String (List String)))
+            (case acc
+              (Err err (variant Err err))
+              (Ok done
+                (case cap
+                  (PTName capName
+                    (case (((Protoss.canonInsertString true) capName) done)
+                      (Err err (variant Err err))
+                      (Ok inserted (variant Ok inserted))))
+                  (_ (variant Err "malformed capability scope"))))))))
+      (Err err (variant Err err))
+      (Ok sorted
+        (caseList sorted
+          (Nil (variant Ok "(Capabilities)"))
+          (Cons firstCap rest
+            (variant Ok
+              ((String.concat "(Capabilities ")
+                ((String.concat
+                  ((String.join " ")
+                    (((inst List.map String String) sorted) Protoss.canonQuote)))
+                  ")")))))))))
+
+(def Protoss.canonRenderedTexts
+  (-> (List CanonRenderedType) (Result String (List String)))
+  (lambda (rendered (List CanonRenderedType))
+    (foldList rendered
+      (variant (Result String (List String)) Ok (Nil String))
+      (lambda (entry CanonRenderedType)
+        (lambda (acc (Result String (List String)))
+          (case acc
+            (Err err (variant Err err))
+            (Ok done
+              (case (get entry text)
+                (Err err (variant Err err))
+                (Ok text (variant Ok (Cons String text done)))))))))))
+
+(def Protoss.canonWrapText (-> String (-> (List String) String))
+  (lambda (head String)
+    (lambda (texts (List String))
+      ((String.concat "(")
+        ((String.concat head)
+          ((String.concat " ")
+            ((String.concat ((String.join " ") texts)) ")")))))))
+
+(def Protoss.canonApplyText
+  (-> String (-> (List CanonRenderedType) (Result String String)))
+  (lambda (head String)
+    (lambda (rendered (List CanonRenderedType))
+      (case false
+        (true (variant Err "unreachable"))
+        (false
+          (case (Protoss.canonNamedHeadName head)
+            (Some aliasName
+              (case (Protoss.canonRenderedTexts rendered)
+                (Err err (variant Err err))
+                (Ok texts
+                  (caseList texts
+                    (Nil
+                      (variant Ok
+                        ((String.concat "(Named ") ((String.concat aliasName) ")"))))
+                    (Cons firstText restTexts
+                      (variant Ok
+                        ((String.concat "(Named ")
+                          ((String.concat aliasName)
+                            ((String.concat " ")
+                              ((String.concat ((String.join " ") texts)) ")"))))))))))
+            (None
+              (case (Protoss.canonWrapTypeHead head)
+                (true
+                  (case (Protoss.canonRenderedTexts rendered)
+                    (Err err (variant Err err))
+                    (Ok texts (variant Ok ((Protoss.canonWrapText head) texts)))))
+                (false
+                  (case
+                    (case ((String.eqString head) "Process")
+                      (true true)
+                      (false ((String.eqString head) "Cmd")))
+                    (true
+                      (caseList rendered
+                        (Nil (variant Err "malformed Process type"))
+                        (Cons firstEntry rest
+                          (caseList rest
+                            (Nil
+                              (case (get firstEntry text)
+                                (Err err (variant Err err))
+                                (Ok valueText
+                                  (variant Ok
+                                    ((Protoss.canonWrapText head)
+                                      (Cons String valueText (Nil String)))))))
+                            (Cons valueEntry extraRest
+                              (caseList extraRest
+                                (Nil
+                                  (case (get firstEntry raw)
+                                    (PTApply scopeApp
+                                      (case
+                                        (case ((String.eqString (get scopeApp name)) "capabilities")
+                                          (true true)
+                                          (false
+                                            ((String.eqString (get scopeApp name)) "Capabilities")))
+                                        (false (variant Err "malformed Process type"))
+                                        (true
+                                          (case (Protoss.canonCapabilityScopeText (get scopeApp args))
+                                            (Err err (variant Err err))
+                                            (Ok scopeText
+                                              (case (get valueEntry text)
+                                                (Err err (variant Err err))
+                                                (Ok valueText
+                                                  (variant Ok
+                                                    ((Protoss.canonWrapText head)
+                                                      (Cons String scopeText
+                                                        (Cons String valueText (Nil String))))))))))))
+                                    (_ (variant Err "malformed Process type"))))
+                                (Cons more moreRest
+                                  (variant Err "malformed Process type"))))))))
+                    (false
+                      (case ((String.eqString head) "SecretRef")
+                        (true
+                          (caseList rendered
+                            (Nil (variant Err "malformed SecretRef type"))
+                            (Cons scopeEntry rest
+                              (caseList rest
+                                (Nil (variant Err "malformed SecretRef type"))
+                                (Cons valueEntry extraRest
+                                  (caseList extraRest
+                                    (Nil
+                                      (case (get scopeEntry raw)
+                                        (PTName scope
+                                          (case (get valueEntry text)
+                                            (Err err (variant Err err))
+                                            (Ok valueText
+                                              (variant Ok
+                                                ((Protoss.canonWrapText "SecretRef")
+                                                  (Cons String scope
+                                                    (Cons String valueText (Nil String))))))))
+                                        (_ (variant Err "malformed SecretRef type"))))
+                                    (Cons more moreRest
+                                      (variant Err "malformed SecretRef type"))))))))
+                        (false
+                          (case
+                            (case ((String.eqString head) "Record")
+                              (true true)
+                              (false ((String.eqString head) "Variant")))
+                            (true
+                              (case
+                                (foldList rendered
+                                  (variant (Result String (List CanonFieldText)) Ok
+                                    (Nil CanonFieldText))
+                                  (lambda (entry CanonRenderedType)
+                                    (lambda (acc (Result String (List CanonFieldText)))
+                                      (case acc
+                                        (Err err (variant Err err))
+                                        (Ok done
+                                          (case (get entry raw)
+                                            (PTApply fieldApp
+                                              (case (get entry text)
+                                                (Err err (variant Err err))
+                                                (Ok fieldText
+                                                  (case
+                                                    ((Protoss.canonInsertField
+                                                      (record
+                                                        (name (get fieldApp name))
+                                                        (text fieldText)))
+                                                      done)
+                                                    (Err err (variant Err err))
+                                                    (Ok inserted (variant Ok inserted))))))
+                                            (_ (variant Err "malformed structural type field"))))))))
+                                (Err err (variant Err err))
+                                (Ok fields
+                                  (variant Ok
+                                    ((Protoss.canonWrapText head)
+                                      (((inst List.map CanonFieldText String) fields)
+                                        (lambda (entry CanonFieldText) (get entry text))))))))
+                            (false
+                              (caseList rendered
+                                (Nil
+                                  (variant Err
+                                    ((String.concat "unknown type application: ") head)))
+                                (Cons payloadEntry rest
+                                  (caseList rest
+                                    (Nil
+                                      (case (get payloadEntry text)
+                                        (Err err (variant Err err))
+                                        (Ok payloadText
+                                          (variant Ok
+                                            ((Protoss.canonWrapText head)
+                                              (Cons String payloadText (Nil String)))))))
+                                    (Cons extra extraRest
+                                      (variant Err
+                                        ((String.concat "unknown type application: ") head)))))))))))))))))))))
+
+(defrec Protoss.canonTypeText (-> ProtossType (Result String String))
+  (variant t)
+  (PTName name
+    (case (Protoss.canonScalarTypeName name)
+      (true (variant Ok name))
+      (false
+        (case ((String.startsWith name) Protoss.canonTvarPrefix)
+          (true
+            (variant Ok
+              ((String.concat "(TVar ")
+                ((String.concat
+                  ((String.drop name) (String.length Protoss.canonTvarPrefix)))
+                  ")"))))
+          (false (variant Err ((String.concat "unknown type name: ") name)))))))
+  (PTFun pair
+    (case (recur (get pair first))
+      (Err err (variant Err err))
+      (Ok a
+        (case (recur (get pair second))
+          (Err err (variant Err err))
+          (Ok b
+            (variant Ok
+              ((String.concat "(Fun ")
+                ((String.concat a)
+                  ((String.concat " ") ((String.concat b) ")"))))))))))
+  (PTApply app
+    ((Protoss.canonApplyText (get app name))
+      (foldList (get app args) (Nil CanonRenderedType)
+        (lambda (arg ProtossType)
+          (lambda (acc (List CanonRenderedType))
+            (Cons CanonRenderedType
+              (record (raw arg) (text (recur arg)))
+              acc)))))))
+(def Protoss.canonTNat ProtossType (variant PTName "Nat"))
+(def Protoss.canonTBool ProtossType (variant PTName "Bool"))
+(def Protoss.canonTString ProtossType (variant PTName "String"))
+(def Protoss.canonTUnit ProtossType (variant PTName "Unit"))
+
+(def Protoss.canonFun (-> ProtossType (-> ProtossType ProtossType))
+  (lambda (a ProtossType)
+    (lambda (b ProtossType)
+      (variant PTFun (record (first a) (second b))))))
+
+(def Protoss.canonApply1 (-> String (-> ProtossType ProtossType))
+  (lambda (head String)
+    (lambda (t ProtossType)
+      (variant PTApply
+        (record (name head) (args (Cons ProtossType t (Nil ProtossType))))))))
+
+(def Protoss.canonProcessOf (-> ProtossType ProtossType) (Protoss.canonApply1 "Process"))
+(def Protoss.canonListOf (-> ProtossType ProtossType) (Protoss.canonApply1 "List"))
+
+(def Protoss.canonNat2Type ProtossType
+  ((Protoss.canonFun Protoss.canonTNat)
+    ((Protoss.canonFun Protoss.canonTNat) Protoss.canonTNat)))
+
+(def Protoss.canonNatCmpType ProtossType
+  ((Protoss.canonFun Protoss.canonTNat)
+    ((Protoss.canonFun Protoss.canonTNat) Protoss.canonTBool)))
+
+(def Protoss.canonCharAtResultType ProtossType
+  (variant PTApply
+    (record
+      (name "Variant")
+      (args
+        (Cons ProtossType
+          (variant PTApply
+            (record (name "None")
+              (args (Cons ProtossType Protoss.canonTUnit (Nil ProtossType)))))
+          (Cons ProtossType
+            (variant PTApply
+              (record (name "Some")
+                (args (Cons ProtossType Protoss.canonTString (Nil ProtossType)))))
+            (Nil ProtossType)))))))
+
+(def Protoss.canonBuiltinSig (-> String (Maybe ProtossType))
+  (lambda (name String)
+    (case ((String.eqString name) "succ")
+      (true (variant Some ((Protoss.canonFun Protoss.canonTNat) Protoss.canonTNat)))
+      (false
+        (case ((String.eqString name) "prim.Nat.add")
+          (true (variant Some Protoss.canonNat2Type))
+          (false
+            (case ((String.eqString name) "prim.Nat.mul")
+              (true (variant Some Protoss.canonNat2Type))
+              (false
+                (case ((String.eqString name) "prim.Nat.pred")
+                  (true
+                    (variant Some
+                      ((Protoss.canonFun Protoss.canonTNat) Protoss.canonTNat)))
+                  (false
+                    (case ((String.eqString name) "prim.Nat.sub")
+                      (true (variant Some Protoss.canonNat2Type))
+                      (false
+                        (case ((String.eqString name) "prim.Nat.eq")
+                          (true (variant Some Protoss.canonNatCmpType))
+                          (false
+                            (case ((String.eqString name) "prim.Nat.lte")
+                              (true (variant Some Protoss.canonNatCmpType))
+                              (false
+                                (case ((String.eqString name) "prim.Nat.lt")
+                                  (true (variant Some Protoss.canonNatCmpType))
+                                  (false
+                                    (case ((String.eqString name) "prim.Nat.gte")
+                                      (true (variant Some Protoss.canonNatCmpType))
+                                      (false
+                                        (case ((String.eqString name) "prim.Nat.gt")
+                                          (true (variant Some Protoss.canonNatCmpType))
+                                          (false
+                                            (case ((String.eqString name) "prim.Nat.toString")
+                                              (true
+                                                (variant Some
+                                                  ((Protoss.canonFun Protoss.canonTNat)
+                                                    Protoss.canonTString)))
+                                              (false
+                                                (case ((String.eqString name) "prim.String.concat")
+                                                  (true
+                                                    (variant Some
+                                                      ((Protoss.canonFun Protoss.canonTString)
+                                                        ((Protoss.canonFun Protoss.canonTString)
+                                                          Protoss.canonTString))))
+                                                  (false
+                                                    (case ((String.eqString name) "prim.String.eq")
+                                                      (true
+                                                        (variant Some
+                                                          ((Protoss.canonFun Protoss.canonTString)
+                                                            ((Protoss.canonFun Protoss.canonTString)
+                                                              Protoss.canonTBool))))
+                                                      (false
+                                                        (case ((String.eqString name) "prim.String.length")
+                                                          (true
+                                                            (variant Some
+                                                              ((Protoss.canonFun Protoss.canonTString)
+                                                                Protoss.canonTNat)))
+                                                          (false
+                                                            (case ((String.eqString name) "prim.String.slice")
+                                                              (true
+                                                                (variant Some
+                                                                  ((Protoss.canonFun Protoss.canonTString)
+                                                                    ((Protoss.canonFun Protoss.canonTNat)
+                                                                      ((Protoss.canonFun Protoss.canonTNat)
+                                                                        Protoss.canonTString)))))
+                                                              (false
+                                                                (case ((String.eqString name) "prim.String.charAt")
+                                                                  (true
+                                                                    (variant Some
+                                                                      ((Protoss.canonFun Protoss.canonTString)
+                                                                        ((Protoss.canonFun Protoss.canonTNat)
+                                                                          Protoss.canonCharAtResultType))))
+                                                                  (false (variant None unit)))))))))))))))))))))))))))))))))))
+
+(def Protoss.canonRequestText (-> ProtossRequest String)
+  (lambda (req ProtossRequest)
+    (case req
+      (PRAskHuman prompt
+        ((String.concat "(AskHuman ")
+          ((String.concat (Protoss.canonQuote prompt)) ")")))
+      (PRHttpGet url
+        ((String.concat "(HttpGet ")
+          ((String.concat (Protoss.canonQuote url)) ")")))
+      (PRClockRead ignored "ReadClock")
+      (PRSaveLocal kv
+        ((String.concat "(SaveLocal ")
+          ((String.concat (Protoss.canonQuote (get kv key)))
+            ((String.concat " ")
+              ((String.concat (Protoss.canonQuote (get kv value))) ")")))))
+      (PRLoadLocal key
+        ((String.concat "(LoadLocal ")
+          ((String.concat (Protoss.canonQuote key)) ")")))
+      (PRServerRequest rp
+        ((String.concat "(ServerRequest ")
+          ((String.concat (Protoss.canonQuote (get rp route)))
+            ((String.concat " ")
+              ((String.concat (Protoss.canonQuote (get rp payload))) ")"))))))))
+
+(def Protoss.canonRequestType (-> ProtossRequest ProtossType)
+  (lambda (req ProtossRequest)
+    (case req
+      (PRSaveLocal kv (Protoss.canonProcessOf Protoss.canonTUnit))
+      (_ (Protoss.canonProcessOf Protoss.canonTString)))))
+
+(def Protoss.canonNoExpected (Maybe ProtossType) (variant None unit))
+
+(def Protoss.canonPush (-> CanonScope (-> String (-> ProtossType CanonScope)))
+  (lambda (scope CanonScope)
+    (lambda (binder String)
+      (lambda (typ ProtossType)
+        (record
+          (locals (Cons CanonLocal (record (name binder) (typ typ)) (get scope locals)))
+          (fold (get scope fold)))))))
+
+(def Protoss.canonLambdaScope (-> CanonScope (-> String (-> ProtossType CanonScope)))
+  (lambda (scope CanonScope)
+    (lambda (binder String)
+      (lambda (typ ProtossType)
+        (record
+          (locals (Cons CanonLocal (record (name binder) (typ typ)) (get scope locals)))
+          (fold (variant (Maybe CanonFold) None unit)))))))
+
+(def Protoss.canonNoFoldScope (-> CanonScope CanonScope)
+  (lambda (scope CanonScope)
+    (record (locals (get scope locals)) (fold (variant (Maybe CanonFold) None unit)))))
+
+(def Protoss.canonProcessValue (-> ProtossType (Maybe ProtossType))
+  (lambda (t ProtossType)
+    (case t
+      (PTApply app
+        (case ((String.eqString (get app name)) "Process")
+          (false (variant (Maybe ProtossType) None unit))
+          (true
+            (caseList (get app args)
+              (Nil (variant (Maybe ProtossType) None unit))
+              (Cons firstArg rest
+                (caseList rest
+                  (Nil (variant Some firstArg))
+                  (Cons secondArg extra
+                    (caseList extra
+                      (Nil (variant Some secondArg))
+                      (Cons more moreRest (variant (Maybe ProtossType) None unit))))))))))
+      (_ (variant (Maybe ProtossType) None unit)))))
+
+(def Protoss.canonAppText (-> String (-> String String))
+  (lambda (fnText String)
+    (lambda (argText String)
+      ((String.concat "(app ")
+        ((String.concat fnText)
+          ((String.concat " ") ((String.concat argText) ")")))))))
+
+(def Protoss.canonApplyChain
+  (-> (List CanonExprK)
+    (-> CanonCtx (-> CanonScope (-> (Result String CanonOut) (Result String CanonOut)))))
+  (lambda (argKs (List CanonExprK))
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (fnRes (Result String CanonOut))
+          (foldList ((inst List.reverse CanonExprK) argKs) fnRes
+            (lambda (argK CanonExprK)
+              (lambda (acc (Result String CanonOut))
+                (case acc
+                  (Err err (variant Err err))
+                  (Ok cur
+                    (case (get cur typ)
+                      (PTFun pair
+                        (case (((argK ctx) scope) (variant Some (get pair first)))
+                          (Err err (variant Err err))
+                          (Ok argOut
+                            (variant Ok
+                              (record
+                                (typ (get pair second))
+                                (text
+                                  ((Protoss.canonAppText (get cur text))
+                                    (get argOut text))))))))
+                      (_ (variant Err "application of non-function")))))))))))))
+
+(def Protoss.canonSplitBranchKs (-> (List CanonBranchK) CanonBranchSplitK)
+  (lambda (branches (List CanonBranchK))
+    (foldList branches
+      (record
+        (explicit (Nil CanonBranchK))
+        (wildcard (variant (Maybe CanonExprK) None unit)))
+      (lambda (branch CanonBranchK)
+        (lambda (acc CanonBranchSplitK)
+          (case ((String.eqString (get branch constructor)) "_")
+            (true
+              (case (get branch binder)
+                (None
+                  (record
+                    (explicit (get acc explicit))
+                    (wildcard (variant Some (get branch bodyK)))))
+                (Some binder
+                  (record
+                    (explicit (Cons CanonBranchK branch (get acc explicit)))
+                    (wildcard (get acc wildcard))))))
+            (false
+              (record
+                (explicit (Cons CanonBranchK branch (get acc explicit)))
+                (wildcard (get acc wildcard))))))))))
+
+(def Protoss.canonFindBranchK (-> (List CanonBranchK) (-> String (Maybe CanonBranchK)))
+  (lambda (branches (List CanonBranchK))
+    (lambda (wanted String)
+      (foldList branches (variant (Maybe CanonBranchK) None unit)
+        (lambda (branch CanonBranchK)
+          (lambda (acc (Maybe CanonBranchK))
+            (case ((String.eqString (get branch constructor)) wanted)
+              (true (variant Some branch))
+              (false acc))))))))
+
+(def Protoss.canonVariantBranchText
+  (-> String (-> String String))
+  (lambda (con String)
+    (lambda (bodyText String)
+      ((String.concat "(")
+        ((String.concat con)
+          ((String.concat " ") ((String.concat bodyText) ")")))))))
+
+(def Protoss.canonVariantBranchesText
+  (-> (List CanonTypeBinding)
+    (-> CanonBranchSplitK
+      (-> CanonCtx
+        (-> CanonScope
+          (-> (Maybe CanonFold) (-> ProtossType (Result String String)))))))
+  (lambda (cases (List CanonTypeBinding))
+    (lambda (split CanonBranchSplitK)
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (branchFold (Maybe CanonFold))
+            (lambda (expectedBody ProtossType)
+              (case
+                (foldList (get split explicit) (variant (Result String Unit) Ok unit)
+                  (lambda (branch CanonBranchK)
+                    (lambda (acc (Result String Unit))
+                      (case acc
+                        (Err err (variant Err err))
+                        (Ok ignored
+                          (case ((Protoss.canonBindingLookup cases) (get branch constructor))
+                            (Some payload (variant Ok unit))
+                            (None
+                              (variant Err
+                                ((String.concat "unknown branch: ")
+                                  (get branch constructor))))))))))
+                (Err err (variant Err err))
+                (Ok ignored
+                  (case
+                    (foldList cases
+                      (variant (Result String (List CanonFieldText)) Ok (Nil CanonFieldText))
+                      (lambda (entry CanonTypeBinding)
+                        (lambda (acc (Result String (List CanonFieldText)))
+                          (case acc
+                            (Err err (variant Err err))
+                            (Ok done
+                              (let (branchInfo (Result String CanonBranchK)
+                                (case ((Protoss.canonFindBranchK (get split explicit)) (get entry name))
+                                  (Some branch
+                                    (variant Ok
+                                      (record
+                                        (constructor (get entry name))
+                                        (binder (get branch binder))
+                                        (bodyK (get branch bodyK)))))
+                                  (None
+                                    (case (get split wildcard)
+                                      (Some wildK
+                                        (variant Ok
+                                          (record
+                                            (constructor (get entry name))
+                                            (binder (variant Some ""))
+                                            (bodyK wildK))))
+                                      (None
+                                        (variant Err
+                                          ((String.concat "missing branch: ")
+                                            (get entry name))))))))
+                                (case branchInfo
+                                  (Err err (variant Err err))
+                                  (Ok info
+                                    (let (innerScope
+                                      (case (get info binder)
+                                        (Some binder
+                                          (record
+                                            (locals
+                                              (Cons CanonLocal
+                                                (record (name binder) (typ (get entry typ)))
+                                                (get scope locals)))
+                                            (fold branchFold)))
+                                        (None
+                                          (record
+                                            (locals
+                                              (Cons CanonLocal
+                                                (record (name "") (typ (get entry typ)))
+                                                (get scope locals)))
+                                            (fold (get scope fold))))))
+                                      (case ((((get info bodyK) ctx) innerScope)
+                                              (variant Some expectedBody))
+                                        (Err err (variant Err err))
+                                        (Ok bodyOut
+                                          (case
+                                            ((Protoss.canonInsertField
+                                              (record
+                                                (name (get entry name))
+                                                (text
+                                                  ((Protoss.canonVariantBranchText (get entry name))
+                                                    (get bodyOut text)))))
+                                              done)
+                                            (Err err (variant Err err))
+                                            (Ok inserted (variant Ok inserted))))))))))))))
+                    (Err err (variant Err err))
+                    (Ok sorted
+                      (variant Ok
+                        ((String.join " ")
+                          (((inst List.map CanonFieldText String) sorted)
+                            (lambda (entry CanonFieldText) (get entry text))))))))))))))))
+
+(def Protoss.canonVariantFirstType
+  (-> (List CanonTypeBinding)
+    (-> CanonBranchSplitK
+      (-> CanonCtx (-> CanonScope (-> (Maybe CanonFold) (Result String ProtossType))))))
+  (lambda (cases (List CanonTypeBinding))
+    (lambda (split CanonBranchSplitK)
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (branchFold (Maybe CanonFold))
+            (let (firstInfo (Result String CanonBranchK)
+              (caseList ((inst List.reverse CanonBranchK) (get split explicit))
+                (Nil
+                  (case (get split wildcard)
+                    (Some wildK
+                      (caseList cases
+                        (Nil (variant Err "empty Variant case"))
+                        (Cons firstCase rest
+                          (variant Ok
+                            (record
+                              (constructor (get firstCase name))
+                              (binder (variant Some ""))
+                              (bodyK wildK))))))
+                    (None (variant Err "empty Variant case"))))
+                (Cons firstBranch rest (variant Ok firstBranch))))
+              (case firstInfo
+                (Err err (variant Err err))
+                (Ok info
+                  (case ((Protoss.canonBindingLookup cases) (get info constructor))
+                    (None
+                      (variant Err
+                        ((String.concat "unknown branch: ") (get info constructor))))
+                    (Some payload
+                      (let (innerScope
+                        (case (get info binder)
+                          (Some binder
+                            (record
+                              (locals
+                                (Cons CanonLocal
+                                  (record (name binder) (typ payload))
+                                  (get scope locals)))
+                              (fold branchFold)))
+                          (None
+                            (record
+                              (locals
+                                (Cons CanonLocal
+                                  (record (name "") (typ payload))
+                                  (get scope locals)))
+                              (fold (get scope fold))))))
+                        (case ((((get info bodyK) ctx) innerScope) Protoss.canonNoExpected)
+                          (Err err (variant Err err))
+                          (Ok bodyOut (variant Ok (get bodyOut typ))))))))))))))))
+
+(def Protoss.canonFindFieldK (-> (List CanonFieldK) (-> String (Maybe CanonFieldK)))
+  (lambda (fields (List CanonFieldK))
+    (lambda (wanted String)
+      (foldList fields (variant (Maybe CanonFieldK) None unit)
+        (lambda (field CanonFieldK)
+          (lambda (acc (Maybe CanonFieldK))
+            (case ((String.eqString (get field name)) wanted)
+              (true (variant Some field))
+              (false acc))))))))
+
+(def Protoss.canonFieldEntryText (-> String (-> String String))
+  (lambda (fieldName String)
+    (lambda (bodyText String)
+      ((String.concat "(")
+        ((String.concat fieldName)
+          ((String.concat " ") ((String.concat bodyText) ")")))))))
+
+(def Protoss.canonRecordCheckText
+  (-> (List CanonTypeBinding)
+    (-> (List CanonFieldK) (-> CanonCtx (-> CanonScope (Result String String)))))
+  (lambda (expectedFields (List CanonTypeBinding))
+    (lambda (fieldKs (List CanonFieldK))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (case
+            (foldList fieldKs (variant (Result String Unit) Ok unit)
+              (lambda (field CanonFieldK)
+                (lambda (acc (Result String Unit))
+                  (case acc
+                    (Err err (variant Err err))
+                    (Ok ignored
+                      (case ((Protoss.canonBindingLookup expectedFields) (get field name))
+                        (Some payload (variant Ok unit))
+                        (None
+                          (variant Err
+                            ((String.concat "unknown record field: ") (get field name))))))))))
+            (Err err (variant Err err))
+            (Ok ignored
+              (case
+                (foldList expectedFields
+                  (variant (Result String (List CanonFieldText)) Ok (Nil CanonFieldText))
+                  (lambda (entry CanonTypeBinding)
+                    (lambda (acc (Result String (List CanonFieldText)))
+                      (case acc
+                        (Err err (variant Err err))
+                        (Ok done
+                          (case ((Protoss.canonFindFieldK fieldKs) (get entry name))
+                            (None
+                              (variant Err
+                                ((String.concat "record missing field: ") (get entry name))))
+                            (Some field
+                              (case ((((get field bodyK) ctx) scope)
+                                      (variant Some (get entry typ)))
+                                (Err err (variant Err err))
+                                (Ok fieldOut
+                                  (case
+                                    ((Protoss.canonInsertField
+                                      (record
+                                        (name (get entry name))
+                                        (text
+                                          ((Protoss.canonFieldEntryText (get entry name))
+                                            (get fieldOut text)))))
+                                      done)
+                                    (Err err (variant Err err))
+                                    (Ok inserted (variant Ok inserted))))))))))))
+                (Err err (variant Err err))
+                (Ok sorted
+                  (variant Ok
+                    ((String.concat "(record ")
+                      ((String.concat
+                        ((String.join " ")
+                          (((inst List.map CanonFieldText String) sorted)
+                            (lambda (entry CanonFieldText) (get entry text)))))
+                        ")"))))))))))))
+
+(def Protoss.canonInsertBinding
+  (-> CanonTypeBinding (-> (List CanonTypeBinding) (Result String (List CanonTypeBinding))))
+  (lambda (x CanonTypeBinding)
+    (lambda (xs (List CanonTypeBinding))
+      (let (scan
+        (foldList xs
+          (variant (Result String CanonZipState) Ok
+            (record (remaining (Nil ProtossType)) (out (Nil CanonTypeBinding)) (ok false)))
+          (lambda (h CanonTypeBinding)
+            (lambda (acc (Result String CanonZipState))
+              (case acc
+                (Err err (variant Err err))
+                (Ok state
+                  (case (get state ok)
+                    (true
+                      (variant Ok
+                        (record
+                          (remaining (Nil ProtossType))
+                          (out (Cons CanonTypeBinding h (get state out)))
+                          (ok true))))
+                    (false
+                      (let (order ((Protoss.canonCmpOrder (get h name)) (get x name)))
+                        (case ((Nat.eqNat order) 3)
+                          (true
+                            (variant Err
+                              "canonical ordering is undefined for non-ASCII names"))
+                          (false
+                            (case ((Nat.eqNat order) 0)
+                              (true
+                                (variant Ok
+                                  (record
+                                    (remaining (Nil ProtossType))
+                                    (out
+                                      (Cons CanonTypeBinding h
+                                        (Cons CanonTypeBinding x (get state out))))
+                                    (ok true))))
+                              (false
+                                (variant Ok
+                                  (record
+                                    (remaining (Nil ProtossType))
+                                    (out (Cons CanonTypeBinding h (get state out)))
+                                    (ok false))))))))))))))))
+        (case scan
+          (Err err (variant Err err))
+          (Ok state
+            (case (get state ok)
+              (true (variant Ok (get state out)))
+              (false (variant Ok (Cons CanonTypeBinding x (get state out)))))))))))
+
+(def Protoss.canonRecordInferOut
+  (-> (List CanonFieldK) (-> CanonCtx (-> CanonScope (Result String CanonOut))))
+  (lambda (fieldKs (List CanonFieldK))
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (case
+          (foldList fieldKs
+            (variant
+              (Result String (Pair (List CanonFieldText) (List CanonTypeBinding))) Ok
+              (record (first (Nil CanonFieldText)) (second (Nil CanonTypeBinding))))
+            (lambda (field CanonFieldK)
+              (lambda (acc (Result String (Pair (List CanonFieldText) (List CanonTypeBinding))))
+                (case acc
+                  (Err err (variant Err err))
+                  (Ok done
+                    (case ((((get field bodyK) ctx) scope) Protoss.canonNoExpected)
+                      (Err err (variant Err err))
+                      (Ok fieldOut
+                        (case
+                          ((Protoss.canonInsertField
+                            (record
+                              (name (get field name))
+                              (text
+                                ((Protoss.canonFieldEntryText (get field name))
+                                  (get fieldOut text)))))
+                            (get done first))
+                          (Err err (variant Err err))
+                          (Ok sortedTexts
+                            (case
+                              ((Protoss.canonInsertBinding
+                                (record (name (get field name)) (typ (get fieldOut typ))))
+                                (get done second))
+                              (Err err (variant Err err))
+                              (Ok sortedTypes
+                                (variant Ok
+                                  (record (first sortedTexts) (second sortedTypes))))))))))))))
+          (Err err (variant Err err))
+          (Ok done
+            (variant Ok
+              (record
+                (typ
+                  (variant PTApply
+                    (record
+                      (name "Record")
+                      (args
+                        (((inst List.map CanonTypeBinding ProtossType) (get done second))
+                          (lambda (entry CanonTypeBinding)
+                            (variant PTApply
+                              (record
+                                (name (get entry name))
+                                (args (Cons ProtossType (get entry typ) (Nil ProtossType)))))))))))
+                (text
+                  ((String.concat "(record ")
+                    ((String.concat
+                      ((String.join " ")
+                        (((inst List.map CanonFieldText String) (get done first))
+                          (lambda (entry CanonFieldText) (get entry text)))))
+                      ")")))))))))))
+
+(def Protoss.canonTvarArgsBindings (-> (List ProtossType) (List CanonTypeBinding))
+  (lambda (args (List ProtossType))
+    (let (len ((inst List.length ProtossType) args))
+      (get
+        (foldList args
+          (record (first 0) (second (Nil CanonTypeBinding)))
+          (lambda (arg ProtossType)
+            (lambda (acc CanonIndexedBindings)
+              (record
+                (first (succ (get acc first)))
+                (second
+                  (Cons CanonTypeBinding
+                    (record
+                      (name
+                        ((String.concat Protoss.canonTvarPrefix)
+                          (Nat.toString
+                            ((prim.Nat.sub (prim.Nat.pred len)) (get acc first)))))
+                      (typ arg))
+                    (get acc second)))))))
+        second))))
+
+(defrec Protoss.canonExprGo (-> ProtossExpr CanonExprK)
+  (variant expr)
+  (PEUnit ignored
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (variant Ok (record (typ Protoss.canonTUnit) (text "unit")))))))
+  (PEBool value
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (variant Ok
+            (record
+              (typ Protoss.canonTBool)
+              (text (case value (true "true") (false "false")))))))))
+  (PEString value
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (variant Ok
+            (record (typ Protoss.canonTString) (text (Protoss.canonQuote value))))))))
+  (PERequest req
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (variant Ok
+            (record
+              (typ (Protoss.canonRequestType req))
+              (text (Protoss.canonRequestText req))))))))
+  (PEVar name
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (case (Protoss.canonNatOfDigits name)
+            (Some value
+              (variant Ok
+                (record (typ Protoss.canonTNat) (text (Nat.toString value)))))
+            (None
+              (case ((Protoss.canonLocalLookup (get scope locals)) name)
+                (Some local
+                  (variant Ok
+                    (record
+                      (typ (get local typ))
+                      (text ((String.concat "#") (Nat.toString (get local index)))))))
+                (None
+                  (case (Protoss.canonBuiltinSig name)
+                    (Some sig
+                      (variant Ok
+                        (record
+                          (typ sig)
+                          (text
+                            ((String.concat "(builtin ") ((String.concat name) ")"))))))
+                    (None
+                      (case ((Protoss.canonSigLookup (get ctx sigs)) name)
+                        (None (variant Err ((String.concat "unknown name: ") name)))
+                        (Some sig
+                          (case ((Nat.eqNat (get sig arity)) 0)
+                            (false
+                              (variant Err
+                                ((String.concat "polymorphic reference requires inst: ")
+                                  name)))
+                            (true
+                              (variant Ok
+                                (record
+                                  (typ (get sig typ))
+                                  (text
+                                    ((String.concat "(ref ")
+                                      ((String.concat ((Protoss.canonDefIdOf ctx) name))
+                                        ")")))))))))))))))))))
+  (PEApply call
+    (let (fnK (recur (get call fn)))
+      (let (argKs
+        (foldList (get call args) (Nil CanonExprK)
+          (lambda (arg ProtossExpr)
+            (lambda (acc (List CanonExprK))
+              (Cons CanonExprK (recur arg) acc)))))
+        (lambda (ctx CanonCtx)
+          (lambda (scope CanonScope)
+            (lambda (expected (Maybe ProtossType))
+              ((((Protoss.canonApplyChain argKs) ctx) scope)
+                (((fnK ctx) scope) Protoss.canonNoExpected))))))))
+  (PEInst instE
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (case ((Protoss.canonSigLookup (get ctx sigs)) (get instE name))
+            (None
+              (variant Err
+                ((String.concat "unknown polymorphic definition: ") (get instE name))))
+            (Some sig
+              (case ((Nat.eqNat (get sig arity)) 0)
+                (true
+                  (variant Err
+                    ((String.concat "definition is not polymorphic: ") (get instE name))))
+                (false
+                  (case
+                    (foldList (get instE typeArgs)
+                      (variant (Result String (List ProtossType)) Ok (Nil ProtossType))
+                      (lambda (arg ProtossType)
+                        (lambda (acc (Result String (List ProtossType)))
+                          (case acc
+                            (Err err (variant Err err))
+                            (Ok done
+                              (case ((Protoss.canonExpandType ctx) arg)
+                                (Err err (variant Err err))
+                                (Ok argT (variant Ok (Cons ProtossType argT done)))))))))
+                    (Err err (variant Err err))
+                    (Ok expandedArgs
+                      (case
+                        ((Nat.eqNat ((inst List.length ProtossType) expandedArgs))
+                          (get sig arity))
+                        (false
+                          (variant Err
+                            ((String.concat "wrong number of type arguments for inst: ")
+                              (get instE name))))
+                        (true
+                          (case
+                            ((Protoss.canonSubstTypeNames (get sig typ))
+                              (Protoss.canonTvarArgsBindings expandedArgs))
+                            (Err err (variant Err err))
+                            (Ok instType
+                              (case
+                                (foldList expandedArgs
+                                  (variant (Result String (List String)) Ok (Nil String))
+                                  (lambda (arg ProtossType)
+                                    (lambda (acc (Result String (List String)))
+                                      (case acc
+                                        (Err err (variant Err err))
+                                        (Ok done
+                                          (case (Protoss.canonTypeText arg)
+                                            (Err err (variant Err err))
+                                            (Ok text
+                                              (variant Ok (Cons String text done)))))))))
+                                (Err err (variant Err err))
+                                (Ok argTexts
+                                  (variant Ok
+                                    (record
+                                      (typ instType)
+                                      (text
+                                        ((String.concat "(inst ")
+                                          ((String.concat
+                                            ((Protoss.canonDefIdOf ctx) (get instE name)))
+                                            ((String.concat " ")
+                                              ((String.concat
+                                                ((String.join " ") argTexts))
+                                                ")")))))))))))))))))))))))
+  (PELambda lambdaE
+    (let (bodyK (recur (get lambdaE body)))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (case ((Protoss.canonExpandType ctx) (get (get lambdaE param) typ))
+              (Err err (variant Err err))
+              (Ok paramType
+                (let (bodyExpected (Maybe ProtossType)
+                  (case expected
+                    (Some e
+                      (case e
+                        (PTFun pair (variant Some (get pair second)))
+                        (_ Protoss.canonNoExpected)))
+                    (None Protoss.canonNoExpected)))
+                  (case
+                    (((bodyK ctx)
+                      (((Protoss.canonLambdaScope scope)
+                        (get (get lambdaE param) name))
+                        paramType))
+                      bodyExpected)
+                    (Err err (variant Err err))
+                    (Ok bodyOut
+                      (case (Protoss.canonTypeText paramType)
+                        (Err err (variant Err err))
+                        (Ok paramText
+                          (variant Ok
+                            (record
+                              (typ ((Protoss.canonFun paramType) (get bodyOut typ)))
+                              (text
+                                ((String.concat "(lam ")
+                                  ((String.concat paramText)
+                                    ((String.concat " ")
+                                      ((String.concat (get bodyOut text)) ")")))))))))))))))))))
+  (PELet letE
+    (let (valueK (recur (get letE value)))
+      (let (bodyK (recur (get letE body)))
+        (lambda (ctx CanonCtx)
+          (lambda (scope CanonScope)
+            (lambda (expected (Maybe ProtossType))
+              (let (valueInfo (Result String CanonOut)
+                (case (get letE typ)
+                  (Some ann
+                    (case ((Protoss.canonExpandType ctx) ann)
+                      (Err err (variant Err err))
+                      (Ok annType
+                        (case (((valueK ctx) scope) (variant Some annType))
+                          (Err err (variant Err err))
+                          (Ok valueOut
+                            (variant Ok
+                              (record (typ annType) (text (get valueOut text)))))))))
+                  (None (((valueK ctx) scope) Protoss.canonNoExpected))))
+                (case valueInfo
+                  (Err err (variant Err err))
+                  (Ok valueOut
+                    (case
+                      (((bodyK ctx)
+                        (((Protoss.canonPush scope) (get letE name)) (get valueOut typ)))
+                        expected)
+                      (Err err (variant Err err))
+                      (Ok bodyOut
+                        (variant Ok
+                          (record
+                            (typ
+                              (case expected
+                                (Some e e)
+                                (None (get bodyOut typ))))
+                            (text
+                              ((String.concat "(let ")
+                                ((String.concat (get valueOut text))
+                                  ((String.concat " ")
+                                    ((String.concat (get bodyOut text)) ")"))))))))))))))))))
+  (PERecord fields
+    (let (fieldKs
+      (foldList fields (Nil CanonFieldK)
+        (lambda (field ProtossRecordFieldExpr)
+          (lambda (acc (List CanonFieldK))
+            (Cons CanonFieldK
+              (record (name (get field name)) (bodyK (recur (get field expr))))
+              acc)))))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (let (checkedFields (Maybe (List CanonTypeBinding))
+              (case expected
+                (None (variant (Maybe (List CanonTypeBinding)) None unit))
+                (Some e
+                  (case ((Protoss.canonUnfoldNamed ctx) e)
+                    (Err err (variant (Maybe (List CanonTypeBinding)) None unit))
+                    (Ok unfolded
+                      (case unfolded
+                        (PTApply app
+                          (case ((String.eqString (get app name)) "Record")
+                            (false (variant (Maybe (List CanonTypeBinding)) None unit))
+                            (true
+                              (case (Protoss.canonConPayloads (get app args))
+                                (Err err
+                                  (variant (Maybe (List CanonTypeBinding)) None unit))
+                                (Ok expectedFields (variant Some expectedFields))))))
+                        (_ (variant (Maybe (List CanonTypeBinding)) None unit))))))))
+              (case checkedFields
+                (Some expectedFields
+                  (case
+                    ((((Protoss.canonRecordCheckText expectedFields) fieldKs) ctx) scope)
+                    (Err err (variant Err err))
+                    (Ok text
+                      (variant Ok
+                        (record
+                          (typ
+                            (case expected
+                              (Some e e)
+                              (None Protoss.canonTUnit)))
+                          (text text))))))
+                (None (((Protoss.canonRecordInferOut fieldKs) ctx) scope)))))))))
+  (PEField fieldE
+    (let (targetK (recur (get fieldE target)))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (case (((targetK ctx) scope) Protoss.canonNoExpected)
+              (Err err (variant Err err))
+              (Ok targetOut
+                (case ((Protoss.canonUnfoldNamed ctx) (get targetOut typ))
+                  (Err err (variant Err err))
+                  (Ok unfolded
+                    (case unfolded
+                      (PTApply app
+                        (case ((String.eqString (get app name)) "Record")
+                          (false (variant Err "field access on non-record"))
+                          (true
+                            (case (Protoss.canonConPayloads (get app args))
+                              (Err err (variant Err err))
+                              (Ok recordFields
+                                (case
+                                  ((Protoss.canonBindingLookup recordFields)
+                                    (get fieldE field))
+                                  (None
+                                    (variant Err
+                                      ((String.concat "unknown record field: ")
+                                        (get fieldE field))))
+                                  (Some fieldType
+                                    (variant Ok
+                                      (record
+                                        (typ fieldType)
+                                        (text
+                                          ((String.concat "(field ")
+                                            ((String.concat (get targetOut text))
+                                              ((String.concat " ")
+                                                ((String.concat (get fieldE field))
+                                                  ")"))))))))))))))
+                      (_ (variant Err "field access on non-record"))))))))))))
+  (PEVariant variantE
+    (let (payloadK (recur (get variantE payload)))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (let (tyInfo (Result String ProtossType)
+              (case (get variantE typeHint)
+                (Some hint ((Protoss.canonExpandType ctx) hint))
+                (None
+                  (case expected
+                    (Some e (variant Ok e))
+                    (None
+                      (variant Err
+                        ((String.concat
+                          "variant constructor requires an expected Variant type: ")
+                          (get variantE constructor))))))))
+              (case tyInfo
+                (Err err (variant Err err))
+                (Ok ty
+                  (case ((Protoss.canonUnfoldNamed ctx) ty)
+                    (Err err (variant Err err))
+                    (Ok unfolded
+                      (case unfolded
+                        (PTApply app
+                          (case ((String.eqString (get app name)) "Variant")
+                            (false (variant Err "variant expression must carry a Variant type"))
+                            (true
+                              (case (Protoss.canonConPayloads (get app args))
+                                (Err err (variant Err err))
+                                (Ok cases
+                                  (case
+                                    ((Protoss.canonBindingLookup cases)
+                                      (get variantE constructor))
+                                    (None
+                                      (variant Err
+                                        ((String.concat "unknown variant constructor: ")
+                                          (get variantE constructor))))
+                                    (Some payloadType
+                                      (case
+                                        (((payloadK ctx) scope) (variant Some payloadType))
+                                        (Err err (variant Err err))
+                                        (Ok payloadOut
+                                          (case (Protoss.canonTypeText ty)
+                                            (Err err (variant Err err))
+                                            (Ok tyText
+                                              (variant Ok
+                                                (record
+                                                  (typ ty)
+                                                  (text
+                                                    ((String.concat "(variant ")
+                                                      ((String.concat tyText)
+                                                        ((String.concat " ")
+                                                          ((String.concat
+                                                            (get variantE constructor))
+                                                            ((String.concat " ")
+                                                              ((String.concat
+                                                                (get payloadOut text))
+                                                                ")"))))))))))))))))))))
+                        (_ (variant Err "variant expression must carry a Variant type")))))))))))))
+  (PECase caseE
+    (let (scrutK (recur (get caseE scrutinee)))
+      (let (branchKs
+        (foldList (get caseE branches) (Nil CanonBranchK)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List CanonBranchK))
+              (Cons CanonBranchK
+                (record
+                  (constructor (get branch constructor))
+                  (binder (get branch binder))
+                  (bodyK (recur (get branch body))))
+                acc)))))
+        (lambda (ctx CanonCtx)
+          (lambda (scope CanonScope)
+            (lambda (expected (Maybe ProtossType))
+              (case (((scrutK ctx) scope) Protoss.canonNoExpected)
+                (Err err (variant Err err))
+                (Ok scrutOut
+                  (case ((Protoss.canonUnfoldNamed ctx) (get scrutOut typ))
+                    (Err err (variant Err err))
+                    (Ok unfolded
+                      (let (split (Protoss.canonSplitBranchKs branchKs))
+                        (case unfolded
+                          (PTName scalar
+                            (case ((String.eqString scalar) "Bool")
+                              (false (variant Err "case on unsupported scrutinee type"))
+                              (true
+                                (let (trueInfo (Result String CanonExprK)
+                                  (case ((Protoss.canonFindBranchK (get split explicit)) "true")
+                                    (Some branch
+                                      (case (get branch binder)
+                                        (Some binder (variant Err "Bool branch with binder"))
+                                        (None (variant Ok (get branch bodyK)))))
+                                    (None
+                                      (case (get split wildcard)
+                                        (Some wildK (variant Ok wildK))
+                                        (None (variant Err "Bool case missing true branch"))))))
+                                  (let (falseInfo (Result String CanonExprK)
+                                    (case ((Protoss.canonFindBranchK (get split explicit)) "false")
+                                      (Some branch
+                                        (case (get branch binder)
+                                          (Some binder (variant Err "Bool branch with binder"))
+                                          (None (variant Ok (get branch bodyK)))))
+                                      (None
+                                        (case (get split wildcard)
+                                          (Some wildK (variant Ok wildK))
+                                          (None
+                                            (variant Err "Bool case missing false branch"))))))
+                                    (case trueInfo
+                                      (Err err (variant Err err))
+                                      (Ok trueK
+                                        (case falseInfo
+                                          (Err err (variant Err err))
+                                          (Ok falseK
+                                            (let (trueRes (Result String CanonOut)
+                                              (((trueK ctx) scope) expected))
+                                              (case trueRes
+                                                (Err err (variant Err err))
+                                                (Ok trueOut
+                                                  (let (branchExpected ProtossType
+                                                    (case expected
+                                                      (Some e e)
+                                                      (None (get trueOut typ))))
+                                                    (case
+                                                      (((falseK ctx) scope)
+                                                        (variant Some branchExpected))
+                                                      (Err err (variant Err err))
+                                                      (Ok falseOut
+                                                        (variant Ok
+                                                          (record
+                                                            (typ branchExpected)
+                                                            (text
+                                                              ((String.concat "(case ")
+                                                                ((String.concat
+                                                                  (get scrutOut text))
+                                                                  ((String.concat " (false ")
+                                                                    ((String.concat
+                                                                      (get falseOut text))
+                                                                      ((String.concat ") (true ")
+                                                                        ((String.concat
+                                                                          (get trueOut text))
+                                                                          "))"))))))))))))))))))))))))
+                          (PTApply app
+                            (case ((String.eqString (get app name)) "Variant")
+                              (false (variant Err "case on unsupported scrutinee type"))
+                              (true
+                                (case (Protoss.canonConPayloads (get app args))
+                                  (Err err (variant Err err))
+                                  (Ok cases
+                                    (let (bodyExpected (Result String ProtossType)
+                                      (case expected
+                                        (Some e (variant Ok e))
+                                        (None
+                                          (((((Protoss.canonVariantFirstType cases) split)
+                                            ctx) scope) (get scope fold)))))
+                                      (case bodyExpected
+                                        (Err err (variant Err err))
+                                        (Ok expectedBody
+                                          (case
+                                            ((((((Protoss.canonVariantBranchesText cases)
+                                              split) ctx) scope) (get scope fold))
+                                              expectedBody)
+                                            (Err err (variant Err err))
+                                            (Ok branchesText
+                                              (variant Ok
+                                                (record
+                                                  (typ expectedBody)
+                                                  (text
+                                                    ((String.concat "(case ")
+                                                      ((String.concat (get scrutOut text))
+                                                        ((String.concat " ")
+                                                          ((String.concat branchesText)
+                                                            ")")))))))))))))))))
+                          (_ (variant Err "case on unsupported scrutinee type"))))))))))))))
+  (PECaseList caseListE
+    (let (targetK (recur (get caseListE target)))
+      (let (nilK (recur (get caseListE nilBody)))
+        (let (consK (recur (get caseListE consBody)))
+          (lambda (ctx CanonCtx)
+            (lambda (scope CanonScope)
+              (lambda (expected (Maybe ProtossType))
+                (case (((targetK ctx) scope) Protoss.canonNoExpected)
+                  (Err err (variant Err err))
+                  (Ok targetOut
+                    (case ((Protoss.canonUnfoldNamed ctx) (get targetOut typ))
+                      (Err err (variant Err err))
+                      (Ok unfolded
+                        (case unfolded
+                          (PTApply app
+                            (case ((String.eqString (get app name)) "List")
+                              (false (variant Err "caseList target must be List"))
+                              (true
+                                (caseList (get app args)
+                                  (Nil (variant Err "caseList target must be List"))
+                                  (Cons itemType extraArgs
+                                    (case (((nilK ctx) scope) expected)
+                                      (Err err (variant Err err))
+                                      (Ok nilOut
+                                        (let (resultType ProtossType
+                                          (case expected
+                                            (Some e e)
+                                            (None (get nilOut typ))))
+                                          (case
+                                            (((consK ctx)
+                                              (((Protoss.canonPush
+                                                (((Protoss.canonPush scope)
+                                                  (get caseListE tail))
+                                                  (Protoss.canonListOf itemType)))
+                                                (get caseListE head))
+                                                itemType))
+                                              (variant Some resultType))
+                                            (Err err (variant Err err))
+                                            (Ok consOut
+                                              (variant Ok
+                                                (record
+                                                  (typ resultType)
+                                                  (text
+                                                    ((String.concat "(caseList ")
+                                                      ((String.concat (get targetOut text))
+                                                        ((String.concat " (Nil ")
+                                                          ((String.concat (get nilOut text))
+                                                            ((String.concat ") (Cons ")
+                                                              ((String.concat
+                                                                (get consOut text))
+                                                                "))")))))))))))))))))))
+                          (_ (variant Err "caseList target must be List"))))))))))))))
+  (PENil nilE
+    (lambda (ctx CanonCtx)
+      (lambda (scope CanonScope)
+        (lambda (expected (Maybe ProtossType))
+          (let (itemInfo (Result String ProtossType)
+            (case (get nilE typ)
+              (Some itemType ((Protoss.canonExpandType ctx) itemType))
+              (None
+                (case expected
+                  (None (variant Err "Nil requires an expected List type"))
+                  (Some e
+                    (case e
+                      (PTApply app
+                        (case ((String.eqString (get app name)) "List")
+                          (false (variant Err "Nil requires an expected List type"))
+                          (true
+                            (caseList (get app args)
+                              (Nil (variant Err "Nil requires an expected List type"))
+                              (Cons itemType extraArgs (variant Ok itemType))))))
+                      (_ (variant Err "Nil requires an expected List type"))))))))
+            (case itemInfo
+              (Err err (variant Err err))
+              (Ok itemType
+                (case (Protoss.canonTypeText itemType)
+                  (Err err (variant Err err))
+                  (Ok itemText
+                    (variant Ok
+                      (record
+                        (typ (Protoss.canonListOf itemType))
+                        (text
+                          ((String.concat "(Nil ")
+                            ((String.concat itemText) ")"))))))))))))))
+  (PECons consE
+    (let (headK (recur (get consE head)))
+      (let (tailK (recur (get consE tail)))
+        (lambda (ctx CanonCtx)
+          (lambda (scope CanonScope)
+            (lambda (expected (Maybe ProtossType))
+              (let (itemInfo (Result String ProtossType)
+                (case (get consE typ)
+                  (Some itemType ((Protoss.canonExpandType ctx) itemType))
+                  (None
+                    (case expected
+                      (Some e
+                        (case e
+                          (PTApply app
+                            (case ((String.eqString (get app name)) "List")
+                              (false (variant Err "Cons requires a List type"))
+                              (true
+                                (caseList (get app args)
+                                  (Nil (variant Err "Cons requires a List type"))
+                                  (Cons itemType extraArgs (variant Ok itemType))))))
+                          (_ (variant Err "Cons requires a List type"))))
+                      (None
+                        (case (((tailK ctx) scope) Protoss.canonNoExpected)
+                          (Err err (variant Err err))
+                          (Ok tailOut
+                            (case ((Protoss.canonUnfoldNamed ctx) (get tailOut typ))
+                              (Err err (variant Err err))
+                              (Ok unfolded
+                                (case unfolded
+                                  (PTApply app
+                                    (case ((String.eqString (get app name)) "List")
+                                      (false (variant Err "Cons tail must be List"))
+                                      (true
+                                        (caseList (get app args)
+                                          (Nil (variant Err "Cons tail must be List"))
+                                          (Cons itemType extraArgs
+                                            (variant Ok itemType))))))
+                                  (_ (variant Err "Cons tail must be List"))))))))))))
+                (case itemInfo
+                  (Err err (variant Err err))
+                  (Ok itemType
+                    (case (((headK ctx) scope) (variant Some itemType))
+                      (Err err (variant Err err))
+                      (Ok headOut
+                        (case
+                          (((tailK ctx) scope)
+                            (variant Some (Protoss.canonListOf itemType)))
+                          (Err err (variant Err err))
+                          (Ok tailOut
+                            (case (Protoss.canonTypeText itemType)
+                              (Err err (variant Err err))
+                              (Ok itemText
+                                (variant Ok
+                                  (record
+                                    (typ (Protoss.canonListOf itemType))
+                                    (text
+                                      ((String.concat "(Cons ")
+                                        ((String.concat itemText)
+                                          ((String.concat " ")
+                                            ((String.concat (get headOut text))
+                                              ((String.concat " ")
+                                                ((String.concat (get tailOut text))
+                                                  ")"))))))))))))))))))))))))
+  (PEFoldNat foldE
+    (let (targetK (recur (get foldE target)))
+      (let (zeroK (recur (get foldE zero)))
+        (let (stepK (recur (get foldE step)))
+          (lambda (ctx CanonCtx)
+            (lambda (scope CanonScope)
+              (lambda (expected (Maybe ProtossType))
+                (case (((targetK ctx) scope) (variant Some Protoss.canonTNat))
+                  (Err err (variant Err err))
+                  (Ok targetOut
+                    (case (((zeroK ctx) scope) expected)
+                      (Err err (variant Err err))
+                      (Ok zeroOut
+                        (let (resultType ProtossType
+                          (case expected
+                            (Some e e)
+                            (None (get zeroOut typ))))
+                          (case
+                            (((stepK ctx) scope)
+                              (variant Some ((Protoss.canonFun resultType) resultType)))
+                            (Err err (variant Err err))
+                            (Ok stepOut
+                              (variant Ok
+                                (record
+                                  (typ resultType)
+                                  (text
+                                    ((String.concat "(foldNat ")
+                                      ((String.concat (get targetOut text))
+                                        ((String.concat " ")
+                                          ((String.concat (get zeroOut text))
+                                            ((String.concat " ")
+                                              ((String.concat (get stepOut text))
+                                                ")")))))))))))))))))))))))
+  (PEFoldList foldE
+    (let (targetK (recur (get foldE target)))
+      (let (zeroK (recur (get foldE zero)))
+        (let (stepK (recur (get foldE step)))
+          (lambda (ctx CanonCtx)
+            (lambda (scope CanonScope)
+              (lambda (expected (Maybe ProtossType))
+                (case (((targetK ctx) scope) Protoss.canonNoExpected)
+                  (Err err (variant Err err))
+                  (Ok targetOut
+                    (case ((Protoss.canonUnfoldNamed ctx) (get targetOut typ))
+                      (Err err (variant Err err))
+                      (Ok unfolded
+                        (case unfolded
+                          (PTApply app
+                            (case ((String.eqString (get app name)) "List")
+                              (false (variant Err "foldList target must be List"))
+                              (true
+                                (caseList (get app args)
+                                  (Nil (variant Err "foldList target must be List"))
+                                  (Cons itemType extraArgs
+                                    (case (((zeroK ctx) scope) expected)
+                                      (Err err (variant Err err))
+                                      (Ok zeroOut
+                                        (let (resultType ProtossType
+                                          (case expected
+                                            (Some e e)
+                                            (None (get zeroOut typ))))
+                                          (case
+                                            (((stepK ctx) scope)
+                                              (variant Some
+                                                ((Protoss.canonFun itemType)
+                                                  ((Protoss.canonFun resultType)
+                                                    resultType))))
+                                            (Err err (variant Err err))
+                                            (Ok stepOut
+                                              (variant Ok
+                                                (record
+                                                  (typ resultType)
+                                                  (text
+                                                    ((String.concat "(foldList ")
+                                                      ((String.concat (get targetOut text))
+                                                        ((String.concat " ")
+                                                          ((String.concat (get zeroOut text))
+                                                            ((String.concat " ")
+                                                              ((String.concat
+                                                                (get stepOut text))
+                                                                ")")))))))))))))))))))
+                          (_ (variant Err "foldList target must be List"))))))))))))))
+  (PEFoldVariant foldE
+    (let (scrutK (recur (get foldE scrutinee)))
+      (let (branchKs
+        (foldList (get foldE branches) (Nil CanonBranchK)
+          (lambda (branch ProtossCaseBranch)
+            (lambda (acc (List CanonBranchK))
+              (Cons CanonBranchK
+                (record
+                  (constructor (get branch constructor))
+                  (binder (get branch binder))
+                  (bodyK (recur (get branch body))))
+                acc)))))
+        (lambda (ctx CanonCtx)
+          (lambda (scope CanonScope)
+            (lambda (expected (Maybe ProtossType))
+              (case ((Protoss.canonExpandType ctx) (get foldE target))
+                (Err err (variant Err err))
+                (Ok targetType
+                  (case ((Protoss.canonExpandType ctx) (get foldE result))
+                    (Err err (variant Err err))
+                    (Ok resultType
+                      (case (((scrutK ctx) scope) (variant Some targetType))
+                        (Err err (variant Err err))
+                        (Ok scrutOut
+                          (case ((Protoss.canonUnfoldNamed ctx) targetType)
+                            (Err err (variant Err err))
+                            (Ok unfolded
+                              (case unfolded
+                                (PTApply app
+                                  (case ((String.eqString (get app name)) "Variant")
+                                    (false
+                                      (variant Err "foldVariant target must be Variant"))
+                                    (true
+                                      (case (Protoss.canonConPayloads (get app args))
+                                        (Err err (variant Err err))
+                                        (Ok cases
+                                          (case
+                                            ((((((Protoss.canonVariantBranchesText cases)
+                                              (Protoss.canonSplitBranchKs branchKs))
+                                              ctx) scope)
+                                              (variant Some
+                                                (record
+                                                  (target targetType)
+                                                  (result resultType))))
+                                              resultType)
+                                            (Err err (variant Err err))
+                                            (Ok branchesText
+                                              (case (Protoss.canonTypeText targetType)
+                                                (Err err (variant Err err))
+                                                (Ok targetText
+                                                  (case (Protoss.canonTypeText resultType)
+                                                    (Err err (variant Err err))
+                                                    (Ok resultText
+                                                      (variant Ok
+                                                        (record
+                                                          (typ resultType)
+                                                          (text
+                                                            ((String.concat "(foldVariant ")
+                                                              ((String.concat targetText)
+                                                                ((String.concat " ")
+                                                                  ((String.concat resultText)
+                                                                    ((String.concat " ")
+                                                                      ((String.concat
+                                                                        (get scrutOut text))
+                                                                        ((String.concat " ")
+                                                                          ((String.concat
+                                                                            branchesText)
+                                                                            ")"))))))))))))))))))))))
+                                (_ (variant Err "foldVariant target must be Variant")))))))))))))))))
+  (PERecur target
+    (let (argK (recur target))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (case (get scope fold)
+              (None (variant Err "recur outside structural recursion"))
+              (Some foldScope
+                (case
+                  (((argK ctx) (Protoss.canonNoFoldScope scope))
+                    (variant Some (get foldScope target)))
+                  (Err err (variant Err err))
+                  (Ok argOut
+                    (variant Ok
+                      (record
+                        (typ (get foldScope result))
+                        (text
+                          ((String.concat "(recur ")
+                            ((String.concat (get argOut text)) ")"))))))))))))))
+  (PEBind bindE
+    (let (processK (recur (get bindE process)))
+      (let (bodyK (recur (get bindE body)))
+        (lambda (ctx CanonCtx)
+          (lambda (scope CanonScope)
+            (lambda (expected (Maybe ProtossType))
+              (case ((Protoss.canonExpandType ctx) (get bindE typ))
+                (Err err (variant Err err))
+                (Ok annType
+                  (case (((processK ctx) scope) Protoss.canonNoExpected)
+                    (Err err (variant Err err))
+                    (Ok processOut
+                      (let (bodyExpected (Maybe ProtossType)
+                        (case expected
+                          (Some e
+                            (case (Protoss.canonProcessValue e)
+                              (Some value
+                                (variant Some (Protoss.canonProcessOf value)))
+                              (None Protoss.canonNoExpected)))
+                          (None Protoss.canonNoExpected)))
+                        (case
+                          (((bodyK ctx)
+                            (((Protoss.canonPush scope) (get bindE param)) annType))
+                            bodyExpected)
+                          (Err err (variant Err err))
+                          (Ok bodyOut
+                            (case (Protoss.canonTypeText annType)
+                              (Err err (variant Err err))
+                              (Ok annText
+                                (variant Ok
+                                  (record
+                                    (typ
+                                      (case expected
+                                        (Some e e)
+                                        (None (get bodyOut typ))))
+                                    (text
+                                      ((String.concat "(bind ")
+                                        ((String.concat (get processOut text))
+                                          ((String.concat " ")
+                                            ((String.concat annText)
+                                              ((String.concat " ")
+                                                ((String.concat (get bodyOut text))
+                                                  ")"))))))))))))))))))))))))
+  (PEDone value
+    (let (valueK (recur value))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (let (valueExpected (Maybe ProtossType)
+              (case expected
+                (Some e
+                  (case (Protoss.canonProcessValue e)
+                    (Some v (variant Some v))
+                    (None Protoss.canonNoExpected)))
+                (None Protoss.canonNoExpected)))
+              (case (((valueK ctx) scope) valueExpected)
+                (Err err (variant Err err))
+                (Ok valueOut
+                  (variant Ok
+                    (record
+                      (typ
+                        (case expected
+                          (Some e e)
+                          (None (Protoss.canonProcessOf (get valueOut typ)))))
+                      (text
+                        ((String.concat "(done ")
+                          ((String.concat (get valueOut text)) ")"))))))))))))))
+
+(def Protoss.canonDefIdsParse (-> String (Result String (List CanonIdEntry)))
+  (lambda (text String)
+    (case (Sexp.parseText text)
+      (Err err (variant Err err))
+      (Ok forms
+        (foldList forms
+          (variant (Result String (List CanonIdEntry)) Ok (Nil CanonIdEntry))
+          (lambda (form Sexp)
+            (lambda (acc (Result String (List CanonIdEntry)))
+              (case acc
+                (Err err (variant Err err))
+                (Ok done
+                  (case form
+                    (SList items
+                      (caseList items
+                        (Nil (variant Err "malformed def-id entry"))
+                        (Cons nameNode rest
+                          (caseList rest
+                            (Nil (variant Err "malformed def-id entry"))
+                            (Cons idNode extra
+                              (caseList extra
+                                (Nil
+                                  (case nameNode
+                                    (SAtom defName
+                                      (case idNode
+                                        (SAtom defId
+                                          (variant Ok
+                                            (Cons CanonIdEntry
+                                              (record (name defName) (defId defId))
+                                              done)))
+                                        (SString defId
+                                          (variant Ok
+                                            (Cons CanonIdEntry
+                                              (record (name defName) (defId defId))
+                                              done)))
+                                        (_ (variant Err "malformed def-id entry"))))
+                                    (_ (variant Err "malformed def-id entry"))))
+                                (Cons more moreRest
+                                  (variant Err "malformed def-id entry"))))))))
+                    (_ (variant Err "malformed def-id entry"))))))))))))
+
+(def Protoss.canonDefRecDesugar (-> ProtossDefRec (Result String CanonDefSrc))
+  (lambda (defRec ProtossDefRec)
+    (case (get defRec typ)
+      (PTFun pair
+        (case (get defRec body)
+          (PDRNat natRec
+            (case (get pair first)
+              (PTName natName
+                (case ((String.eqString natName) "Nat")
+                  (false (variant Err "defrec nat recursion requires a Nat domain"))
+                  (true
+                    (variant Ok
+                      (record
+                        (name (get defRec name))
+                        (typeParams (get defRec typeParams))
+                        (typ (get defRec typ))
+                        (body
+                          (variant PELambda
+                            (record
+                              (param
+                                (record
+                                  (name (get natRec param))
+                                  (typ (variant PTName "Nat"))))
+                              (body
+                                (variant PEFoldNat
+                                  (record
+                                    (target (variant PEVar (get natRec param)))
+                                    (zero (get natRec zero))
+                                    (step
+                                      (variant PELambda
+                                        (record
+                                          (param
+                                            (record
+                                              (name (get natRec acc))
+                                              (typ (get pair second))))
+                                          (body (get natRec step))))))))))))))))
+              (_ (variant Err "defrec nat recursion requires a Nat domain"))))
+          (PDRList listRec
+            (case (get pair first)
+              (PTApply listApp
+                (case ((String.eqString (get listApp name)) "List")
+                  (false (variant Err "defrec list recursion requires a List domain"))
+                  (true
+                    (caseList (get listApp args)
+                      (Nil (variant Err "defrec list recursion requires a List domain"))
+                      (Cons itemType extraArgs
+                        (variant Ok
+                          (record
+                            (name (get defRec name))
+                            (typeParams (get defRec typeParams))
+                            (typ (get defRec typ))
+                            (body
+                              (variant PELambda
+                                (record
+                                  (param
+                                    (record
+                                      (name (get listRec param))
+                                      (typ (get pair first))))
+                                  (body
+                                    (variant PEFoldList
+                                      (record
+                                        (target (variant PEVar (get listRec param)))
+                                        (zero (get listRec nil))
+                                        (step
+                                          (variant PELambda
+                                            (record
+                                              (param
+                                                (record
+                                                  (name (get listRec item))
+                                                  (typ itemType)))
+                                              (body
+                                                (variant PELambda
+                                                  (record
+                                                    (param
+                                                      (record
+                                                        (name (get listRec acc))
+                                                        (typ (get pair second))))
+                                                    (body (get listRec step)))))))))))))))))))))
+              (_ (variant Err "defrec list recursion requires a List domain"))))
+          (PDRVariant variantRec
+            (variant Ok
+              (record
+                (name (get defRec name))
+                (typeParams (get defRec typeParams))
+                (typ (get defRec typ))
+                (body
+                  (variant PELambda
+                    (record
+                      (param
+                        (record
+                          (name (get variantRec param))
+                          (typ (get pair first))))
+                      (body
+                        (variant PEFoldVariant
+                          (record
+                            (target (get pair first))
+                            (result (get pair second))
+                            (scrutinee (variant PEVar (get variantRec param)))
+                            (branches (get variantRec branches)))))))))))))
+      (_ (variant Err "defrec requires a function type")))))
+
+(def Protoss.canonStructuralAliasBody
+  (-> String (-> (List CanonTypeBinding) ProtossType))
+  (lambda (head String)
+    (lambda (entries (List CanonTypeBinding))
+      (variant PTApply
+        (record
+          (name head)
+          (args
+            (((inst List.map CanonTypeBinding ProtossType) entries)
+              (lambda (entry CanonTypeBinding)
+                (variant PTApply
+                  (record
+                    (name (get entry name))
+                    (args (Cons ProtossType (get entry typ) (Nil ProtossType)))))))))))))
+
+(def Protoss.canonCollectDecls (-> (List ProtossDecl) (Result String CanonCollect))
+  (lambda (decls (List ProtossDecl))
+    (foldList decls
+      (variant (Result String CanonCollect) Ok
+        (record
+          (caps (Nil String))
+          (aliases (Nil CanonAlias))
+          (defs (Nil CanonDefSrc))))
+      (lambda (decl ProtossDecl)
+        (lambda (acc (Result String CanonCollect))
+          (case acc
+            (Err err (variant Err err))
+            (Ok done
+              (case decl
+                (PDCapabilities capNames
+                  (variant Ok
+                    (record
+                      (caps (((inst List.append String) capNames) (get done caps)))
+                      (aliases (get done aliases))
+                      (defs (get done defs)))))
+                (PDDef def
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases (get done aliases))
+                      (defs
+                        (Cons CanonDefSrc
+                          (record
+                            (name (get def name))
+                            (typeParams (Nil String))
+                            (typ (get def typ))
+                            (body (get def expr)))
+                          (get done defs))))))
+                (PDDefCap def
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases (get done aliases))
+                      (defs
+                        (Cons CanonDefSrc
+                          (record
+                            (name (get def name))
+                            (typeParams (Nil String))
+                            (typ (get def typ))
+                            (body (get def expr)))
+                          (get done defs))))))
+                (PDDefPoly def
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases (get done aliases))
+                      (defs
+                        (Cons CanonDefSrc
+                          (record
+                            (name (get def name))
+                            (typeParams (get def typeParams))
+                            (typ (get def typ))
+                            (body (get def expr)))
+                          (get done defs))))))
+                (PDDefPolyCap def
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases (get done aliases))
+                      (defs
+                        (Cons CanonDefSrc
+                          (record
+                            (name (get def name))
+                            (typeParams (get def typeParams))
+                            (typ (get def typ))
+                            (body (get def expr)))
+                          (get done defs))))))
+                (PDDefRec defRec
+                  (case (Protoss.canonDefRecDesugar defRec)
+                    (Err err (variant Err err))
+                    (Ok def
+                      (variant Ok
+                        (record
+                          (caps (get done caps))
+                          (aliases (get done aliases))
+                          (defs (Cons CanonDefSrc def (get done defs))))))))
+                (PDType alias
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases
+                        (Cons CanonAlias
+                          (record
+                            (name (get alias name))
+                            (params (get alias typeParams))
+                            (body (get alias body)))
+                          (get done aliases)))
+                      (defs (get done defs)))))
+                (PDRecord decl
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases
+                        (Cons CanonAlias
+                          (record
+                            (name (get decl name))
+                            (params (get decl typeParams))
+                            (body
+                              ((Protoss.canonStructuralAliasBody "Record")
+                                (((inst List.map ProtossField CanonTypeBinding)
+                                  (get decl fields))
+                                  (lambda (field ProtossField)
+                                    (record
+                                      (name (get field name))
+                                      (typ (get field typ))))))))
+                          (get done aliases)))
+                      (defs (get done defs)))))
+                (PDVariant decl
+                  (variant Ok
+                    (record
+                      (caps (get done caps))
+                      (aliases
+                        (Cons CanonAlias
+                          (record
+                            (name (get decl name))
+                            (params (get decl typeParams))
+                            (body
+                              ((Protoss.canonStructuralAliasBody "Variant")
+                                (((inst List.map ProtossVariantCase CanonTypeBinding)
+                                  (get decl cases))
+                                  (lambda (variantCase ProtossVariantCase)
+                                    (record
+                                      (name (get variantCase name))
+                                      (typ (get variantCase payload))))))))
+                          (get done aliases)))
+                      (defs (get done defs)))))
+                (PDExport names (variant Ok done))
+                (PDModule moduleName
+                  (variant Err
+                    "module declarations are not supported by the self-hosted canonicalizer"))
+                (PDImport path
+                  (variant Err
+                    "imports are not supported by the self-hosted canonicalizer"))))))))))
+
+(def Protoss.canonRecNames (-> (List CanonAlias) (List String))
+  (lambda (aliases (List CanonAlias))
+    (foldList aliases (Nil String)
+      (lambda (alias CanonAlias)
+        (lambda (acc (List String))
+          (case ((Protoss.canonContains (get alias params)) (get alias name))
+            (true acc)
+            (false
+              (case ((Protoss.canonTypeMentions (get alias body)) (get alias name))
+                (true (Cons String (get alias name) acc))
+                (false acc)))))))))
+
+(def Protoss.canonSigsOf
+  (-> (List CanonAlias)
+    (-> (List String) (-> (List CanonDefSrc) (Result String (List CanonSig)))))
+  (lambda (aliases (List CanonAlias))
+    (lambda (recNames (List String))
+      (lambda (defs (List CanonDefSrc))
+        (foldList defs
+          (variant (Result String (List CanonSig)) Ok (Nil CanonSig))
+          (lambda (def CanonDefSrc)
+            (lambda (acc (Result String (List CanonSig)))
+              (case acc
+                (Err err (variant Err err))
+                (Ok done
+                  (let (sigCtx CanonCtx
+                    (record
+                      (aliases aliases)
+                      (recNames recNames)
+                      (tvars (get def typeParams))
+                      (sigs (Nil CanonSig))
+                      (defIds (Nil CanonIdEntry))))
+                    (case ((Protoss.canonExpandType sigCtx) (get def typ))
+                      (Err err (variant Err err))
+                      (Ok expanded
+                        (variant Ok
+                          (Cons CanonSig
+                            (record
+                              (name (get def name))
+                              (arity ((inst List.length String) (get def typeParams)))
+                              (typ expanded))
+                            done))))))))))))))
+
+(def Protoss.canonDefEntry (-> CanonCtx (-> CanonDefSrc (Result String CanonFieldText)))
+  (lambda (ctx CanonCtx)
+    (lambda (def CanonDefSrc)
+      (case ((Protoss.canonSigLookup (get ctx sigs)) (get def name))
+        (None
+          (variant Err
+            ((String.concat "missing signature for definition: ") (get def name))))
+        (Some sig
+          (let (defCtx CanonCtx
+            (record
+              (aliases (get ctx aliases))
+              (recNames (get ctx recNames))
+              (tvars (get def typeParams))
+              (sigs (get ctx sigs))
+              (defIds (get ctx defIds))))
+            (case (Protoss.canonTypeText (get sig typ))
+              (Err err (variant Err err))
+              (Ok bodyTypeText
+                (let (typeText String
+                  (case ((Nat.eqNat (get sig arity)) 0)
+                    (true bodyTypeText)
+                    (false
+                      ((String.concat "(Forall ")
+                        ((String.concat (Nat.toString (get sig arity)))
+                          ((String.concat " ")
+                            ((String.concat bodyTypeText) ")")))))))
+                  (case
+                    ((((Protoss.canonExprGo (get def body)) defCtx)
+                      (record
+                        (locals (Nil CanonLocal))
+                        (fold (variant (Maybe CanonFold) None unit))))
+                      (variant Some (get sig typ)))
+                    (Err err
+                      (variant Err
+                        ((String.concat (get def name))
+                          ((String.concat ": ") err))))
+                    (Ok bodyOut
+                      (variant Ok
+                        (record
+                          (name (get def name))
+                          (text
+                            ((String.concat "(def ")
+                              ((String.concat (get def name))
+                                ((String.concat " ")
+                                  ((String.concat ((Protoss.canonDefIdOf ctx) (get def name)))
+                                    ((String.concat " ")
+                                      ((String.concat typeText)
+                                        ((String.concat " ")
+                                          ((String.concat (get bodyOut text))
+                                            ")"))))))))))))))))))))))
+
+(def Protoss.canonProgramText (-> String (-> String (Result String String)))
+  (lambda (defIdsText String)
+    (lambda (source String)
+      (case (Protoss.canonDefIdsParse defIdsText)
+        (Err err (variant Err err))
+        (Ok defIds
+          (case (Protoss.parseText source)
+            (Err err (variant Err err))
+            (Ok decls
+              (case (Protoss.canonCollectDecls decls)
+                (Err err (variant Err err))
+                (Ok collected
+                  (let (recNames (Protoss.canonRecNames (get collected aliases)))
+                    (case
+                      (((Protoss.canonSigsOf (get collected aliases)) recNames)
+                        (get collected defs))
+                      (Err err (variant Err err))
+                      (Ok sigs
+                        (let (ctx CanonCtx
+                          (record
+                            (aliases (get collected aliases))
+                            (recNames recNames)
+                            (tvars (Nil String))
+                            (sigs sigs)
+                            (defIds defIds)))
+                          (case
+                            (foldList (get collected defs)
+                              (variant (Result String (List CanonFieldText)) Ok
+                                (Nil CanonFieldText))
+                              (lambda (def CanonDefSrc)
+                                (lambda (acc (Result String (List CanonFieldText)))
+                                  (case acc
+                                    (Err err (variant Err err))
+                                    (Ok done
+                                      (case ((Protoss.canonDefEntry ctx) def)
+                                        (Err err (variant Err err))
+                                        (Ok entry
+                                          (case ((Protoss.canonInsertField entry) done)
+                                            (Err err (variant Err err))
+                                            (Ok inserted (variant Ok inserted))))))))))
+                            (Err err (variant Err err))
+                            (Ok sortedDefs
+                              (case
+                                (foldList (get collected caps)
+                                  (variant (Result String (List String)) Ok (Nil String))
+                                  (lambda (cap String)
+                                    (lambda (acc (Result String (List String)))
+                                      (case acc
+                                        (Err err (variant Err err))
+                                        (Ok done
+                                          (case (((Protoss.canonInsertString true) cap) done)
+                                            (Err err (variant Err err))
+                                            (Ok inserted (variant Ok inserted))))))))
+                                (Err err (variant Err err))
+                                (Ok sortedCaps
+                                  (variant Ok
+                                    ((String.concat
+                                      "(protoss-canon-v2 (program (caps ")
+                                      ((String.concat ((String.join " ") sortedCaps))
+                                        ((String.concat ") (defs ")
+                                          ((String.concat
+                                            ((String.join " ")
+                                              (((inst List.map CanonFieldText String)
+                                                sortedDefs)
+                                                (lambda (entry CanonFieldText)
+                                                  (get entry text)))))
+                                            ")))"))))))))))))))))))))))
+
 (def Protoss.tcTextJson (-> String String)
   (lambda (source String)
     (case (Protoss.tcText source)
@@ -9878,16 +12760,20 @@
 
 (def Protoss.selfCanonicalizerJson (-> String String)
   (lambda (source String)
-    (case (Protoss.formatText source)
+    (case ((Protoss.canonProgramText "") source)
       (Err err (Json.render (Protoss.jsonError err)))
-      (Ok formatted
+      (Ok canonical
         (Json.render
           (Protoss.jsonObjectOf
             (Cons (Pair String Json) ((Protoss.jf "status") (Json.string "ok"))
             (Cons (Pair String Json) ((Protoss.jf "component") (Json.string "canonicalizer"))
-            (Cons (Pair String Json) ((Protoss.jf "entry") (Json.string "Protoss.formatText"))
-            (Cons (Pair String Json) ((Protoss.jf "canonicalText") (Json.string formatted))
-            (Nil (Pair String Json))))))))))))
+            (Cons (Pair String Json) ((Protoss.jf "entry") (Json.string "Protoss.canonProgramText"))
+            (Cons (Pair String Json) ((Protoss.jf "canonicalCandidate") (Json.string canonical))
+            (Cons (Pair String Json)
+              ((Protoss.jf "parity")
+                (Json.string
+                  "run protoss self canon <file> --compare to verify byte-for-byte against the kernel"))
+              (Nil (Pair String Json)))))))))))))
 
 (def Protoss.selfHumanParserJson (-> String String)
   (lambda (source String)

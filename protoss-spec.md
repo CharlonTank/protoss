@@ -649,9 +649,18 @@ et typecheck dans `test/test_protoss.ml`.
   `Protoss.selfHumanPrettyPrinterJson`, assertion
   "__self_human_pretty_printer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
-- [ ] Ecrire le canonicalizer en Protoss.
-  Preuves: `Protoss.selfCanonicalizerJson` via `Protoss.formatText`,
-  assertion "__self_canonicalizer" dans `test/test_protoss.ml`,
+- [x] Ecrire le canonicalizer en Protoss.
+  Preuves: `Protoss.canonProgramText` dans `stdlib/prelude.protoss`
+  (elaboration descendante, indices De Bruijn, tri canonique, texte
+  `protoss-canon-v2`), parite octet-a-octet avec
+  `Kernel.serialize_checked_program` sur les fixtures `examples/` qui
+  checkent isolement (assertions "__canon_parity_", golden
+  "__canon_golden_basic" contre `examples/basic.ptc`, garde
+  "__canon_defids_required", plancher "self canonicalizer parity floor"
+  dans `test/test_protoss.ml`), commande `protoss self canon <file>
+  --compare` dans `bin/main.ml` (DefIds fournis par le kernel, echec fort
+  sur divergence), rapport `Protoss.selfCanonicalizerJson`, assertion
+  "__self_canonicalizer" dans `test/test_protoss.ml`,
   `docs/self-hosting.md`.
 - [ ] Ecrire le normalizer en Protoss.
   Preuves: `Protoss.selfNormalizerJson`,
@@ -979,10 +988,13 @@ anterieures heritent des preuves de `test/test_protoss.ml`, `README.md`,
 
 - [x] Parser partiel ecrit en Protoss.
 - [x] Typechecker report ecrit en Protoss avec noyau OCaml trusted.
-- [ ] Canonicalizer ecrit en Protoss.
-  Preuves: `Protoss.selfCanonicalizerJson`,
-  assertion "__self_canonicalizer" dans `test/test_protoss.ml`,
-  `docs/self-hosting.md`.
+- [x] Canonicalizer ecrit en Protoss.
+  Preuves: `Protoss.canonProgramText` dans `stdlib/prelude.protoss`,
+  parite octet-a-octet avec `Kernel.serialize_checked_program`
+  (assertions "__canon_parity_", "__canon_golden_basic",
+  "__canon_defids_required" et plancher "self canonicalizer parity floor"
+  dans `test/test_protoss.ml`), commande `protoss self canon <file>
+  --compare` dans `bin/main.ml`, `docs/self-hosting.md`.
 - [ ] Patch validator ecrit en Protoss.
   Preuves: `Protoss.selfPatchValidatorJson`,
   assertion "__self_patch_validator" dans `test/test_protoss.ml`,
