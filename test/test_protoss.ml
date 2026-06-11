@@ -1609,6 +1609,21 @@ let () =
     (json_string_field "format" mcp_harness_structured);
   assert_equal "mcp runHarness structured status" "pass"
     (json_string_field "status" mcp_harness_structured);
+  (* Injection guard: protoss.applyPatch routes through the validated commit
+     path (Agent_protocol.commit_patch_json), which requires a harness. A
+     well-formed patch submitted without one is refused — check cannot be
+     bypassed through MCP. *)
+  let mcp_patch_path = Filename.concat mcp_harness_root "add_three.json" in
+  write_file mcp_patch_path
+    "{\"op\":\"AddDef\",\"name\":\"three\",\"deps\":[\"two\"],\"type\":\"Nat\",\"expr\":[\"succ\",\"two\"]}";
+  let mcp_apply_noharness =
+    mcp_response
+      ("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"protoss.applyPatch\",\"arguments\":{\"store\":"
+      ^ Ast.quote (Workspace.store_root mcp_harness_manifest)
+      ^ ",\"patchPath\":" ^ Ast.quote mcp_patch_path ^ "}}}")
+  in
+  assert_true "mcp applyPatch without a harness is refused (no check bypass)"
+    (json_bool_field "isError" (json_field "result" mcp_apply_noharness));
   let duplicate_ref_checked = check "(def a Nat 1)\n(def b Nat 1)\n(def c Nat b)" in
   let duplicate_ref_graph_json = Canonical_ir.serialize_graph duplicate_ref_checked in
   let duplicate_ref_roundtrip =

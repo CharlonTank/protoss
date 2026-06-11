@@ -51,6 +51,11 @@ let expect_reject ~what src =
 
 let same_hash a b = String.equal (hash_of a) (hash_of b)
 
+let contains needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec at i = i + nl <= hl && (String.equal (String.sub haystack i nl) needle || at (i + 1)) in
+  nl = 0 || at 0
+
 (* ----- embedded programs ------------------------------------------------- *)
 
 let rich_program =
@@ -121,6 +126,25 @@ let structured_rejection src =
   | _ -> Fail ("hostile input was accepted: " ^ src)
   | exception (Kernel.Error _ | Parser.Error _) -> Pass
   | exception e -> Fail ("hostile input crashed unstructured: " ^ Printexc.to_string e)
+
+(* The MCP server speaks the JSON-RPC contract and never crashes on a bad
+   call. Mutation always flows through validated patches (applyPatch ->
+   Agent_protocol.commit_patch_json), so check cannot be bypassed. *)
+let mcp_contract () =
+  let resp req = match Mcp_server.handle_message req with Some s -> s | None -> "" in
+  let init = resp {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}|} in
+  let tools = resp {|{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}|} in
+  let bad =
+    resp
+      {|{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"protoss.nope","arguments":{}}}|}
+  in
+  let core_tools = [ "protoss.checkPatch"; "protoss.applyPatch"; "protoss.query"; "protoss.runHarness" ] in
+  if not (contains "protocolVersion" init) then Fail "MCP initialize lacks protocolVersion"
+  else if not (List.for_all (fun t -> contains t tools) core_tools) then
+    Fail "MCP tools/list is missing a core tool"
+  else if not (contains "isError" bad || contains "error" bad) then
+    Fail "MCP rejected call did not return a structured error"
+  else Pass
 
 let bytecode_roundtrip src =
   let checked = check_source src in
@@ -315,6 +339,12 @@ let checks : check list =
       run = spec_audit;
     };
     (* Proofs wired by later queue goals; honest placeholders, never silent. *)
+    {
+      id = "mcp-contract";
+      section = "10.1";
+      description = "MCP server speaks JSON-RPC, exposes core tools, rejects bad calls structurally";
+      run = mcp_contract;
+    };
     {
       id = "store-universe-root";
       section = "5.3";

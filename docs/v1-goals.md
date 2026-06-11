@@ -110,7 +110,7 @@ satisfaites.
 - **Done** : sweep de parité vert avec plancher, target branché, item checklist
   §15 prouvable par doctor ; fulltest vert.
 
-### G6 — Serveur MCP [pending]
+### G6 — Serveur MCP [done]
 - **Périmètre agent** : nouveau `lib/mcp_server.ml` (+ doc contrat
   `docs/mcp.md`) ; branchement CLI (`protoss mcp serve`) par l'orchestrateur.
 - **Dépendances** : aucune (s'appuie sur `agent_protocol`/`patch`/`workspace`
@@ -266,3 +266,8 @@ satisfaites.
   octets de contrôle) + corpus `clean_case_ofx.elm`. Fuzzer strict toujours à
   0 crash. Corrections d'entrée invalide / round-trip uniquement — aucun hash de
   programme valide affecté.
+- 2026-06-11 — G6 Serveur MCP : `lib/mcp_server.ml` existait déjà (JSON-RPC 2.0
+  stdio, 11 tools), avec tests de contrat. Complété : test d'injection
+  (`applyPatch` sans harness → refusé via `commit_patch_json`, `check` non
+  contournable), preuve doctor `mcp-contract` (§10.1), `docs/mcp.md`. Doctor =
+  15 pass / 0 fail ; `@fulltest` vert.
