@@ -1,0 +1,8 @@
+name = "golden-pure-library"
+version = "1.0.0"
+entrypoints = ["src/lib.protoss"]
+stdlib = "none"
+source_dirs = ["src"]
+store_dir = ".protoss/store"
+cache_dir = ".protoss/cache"
+capabilities = []

@@ -1,0 +1,8 @@
+name = "golden-patch-demo"
+version = "1.0.0"
+entrypoints = ["src/main.protoss"]
+stdlib = "none"
+source_dirs = ["src"]
+store_dir = ".protoss/store"
+cache_dir = ".protoss/cache"
+capabilities = []

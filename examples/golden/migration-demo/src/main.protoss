@@ -1,0 +1,14 @@
+; migration-demo: version 1 of a tiny schema, before migration.
+; The item record carries only a title. The patch in
+; patches/add_done_field.json evolves the schema to (Record (done Bool)
+; (title String)): it adds a pure migrate_v1_v2 function (MigrateType op),
+; then replaces `initial` and `describe` against the new shape. `headline`
+; is untouched and must keep typechecking after the patch (whole-program
+; revalidation).
+(def initial (Record (title String))
+  (record (title "first item")))
+
+(def describe (-> (Record (title String)) String)
+  (lambda (item (Record (title String))) (get item title)))
+
+(def headline String (describe initial))

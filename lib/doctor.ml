@@ -132,6 +132,78 @@ let spec_audit () =
       | exception Failure msg ->
           Fail ("spec audit reported missing evidence:\n" ^ String.trim msg))
 
+let contains needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec at i = i + nl <= hl && (String.equal (String.sub haystack i nl) needle || at (i + 1)) in
+  nl = 0 || at 0
+
+(* Copy a project tree (minus any .protoss store) so a build can run in a
+   throwaway location, leaving the repo untouched — the test suite must never
+   inherit a generated store (see CLAUDE.md). *)
+let rec copy_tree src dst =
+  if Sys.is_directory src then (
+    (try Unix.mkdir dst 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Sys.readdir src |> Array.to_list |> List.sort String.compare
+    |> List.iter (fun name ->
+           if not (String.equal name ".protoss") then
+             copy_tree (Filename.concat src name) (Filename.concat dst name)))
+  else
+    let ic = open_in_bin src and oc = open_out_bin dst in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic; close_out_noerr oc)
+      (fun () -> output_string oc (really_input_string ic (in_channel_length ic)))
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Sys.readdir path |> Array.iter (fun n -> rm_rf (Filename.concat path n));
+      try Unix.rmdir path with _ -> ())
+    else try Sys.remove path with _ -> ()
+
+(* Build a golden project from a pid-qualified throwaway copy, leaving no
+   .protoss store behind in the repo. The temp path never enters any hash, so
+   output determinism is preserved. *)
+let golden_build base name =
+  let tmp =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "protoss-doctor-golden-%d-%s" (Unix.getpid ()) name)
+  in
+  rm_rf tmp;
+  copy_tree (Filename.concat base name) tmp;
+  Fun.protect
+    ~finally:(fun () -> rm_rf tmp)
+    (fun () ->
+      ignore (Workspace.build ~write:false (Workspace.parse_manifest (Workspace.project_root tmp))))
+
+let golden_valid =
+  [ "hello-world"; "pure-library"; "process-clock"; "human-ask"; "migration-demo"; "patch-demo" ]
+
+let golden_projects () =
+  match find_up (Sys.getcwd ()) "examples/golden" with
+  | None -> Not_yet "checklist §19: examples/golden not found from CWD (best-effort)"
+  | Some base -> (
+      let failures =
+        List.filter_map
+          (fun name ->
+            match golden_build base name with
+            | () -> None
+            | exception Kernel.Error m -> Some (name ^ ": " ^ m)
+            | exception Workspace.Error m -> Some (name ^ ": " ^ m)
+            | exception Failure m -> Some (name ^ ": " ^ m))
+          golden_valid
+      in
+      if failures <> [] then Fail ("golden project(s) failed to build: " ^ String.concat "; " failures)
+      else
+        (* capability-denied-demo must be rejected for a missing capability. *)
+        match
+          try `Built (golden_build base "capability-denied-demo")
+          with Kernel.Error m | Workspace.Error m | Failure m -> `Rejected m
+        with
+        | `Built () -> Fail "capability-denied-demo built but must be rejected"
+        | `Rejected m ->
+            if contains "capability" m then Pass
+            else Fail ("capability-denied-demo rejected for the wrong reason: " ^ m))
+
 (* ----- the check list ---------------------------------------------------- *)
 
 let checks : check list =
@@ -248,8 +320,8 @@ let checks : check list =
     {
       id = "golden-projects";
       section = "19";
-      description = "golden projects validate from a clean checkout";
-      run = (fun () -> Not_yet "checklist §19: wired by goal G2 (examples/golden)");
+      description = "golden projects build, and capability-denied is rejected";
+      run = golden_projects;
     };
     {
       id = "web-build-determinism";

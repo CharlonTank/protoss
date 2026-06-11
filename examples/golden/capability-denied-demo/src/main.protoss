@@ -1,0 +1,9 @@
+; capability-denied-demo: this program MUST FAIL to check.
+; It performs an Http.get effect but never declares the Http.get capability
+; (no top-level `(capabilities ...)`, empty `capabilities` in protoss.toml).
+; The checker rejects it before any canonical graph or store is written.
+;
+; Expected failure (see VALIDATE.md for the exact observed output):
+;   exit 1, public code CAP001 (CapabilityDenied),
+;   "missing capability: Http.get" with a path:line:column location.
+(def fetchData (Process String) (Http.get "https://example.invalid/data"))

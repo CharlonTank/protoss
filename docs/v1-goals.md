@@ -52,7 +52,7 @@ satisfaites.
 - **Done** : `protoss doctor --v1` tourne sur le repo et son rapport liste
   honnêtement les sections vertes et les manquantes ; test de panne ; fulltest vert.
 
-### G2 — Golden projects [pending]
+### G2 — Golden projects [done]
 - **Périmètre agent** : `examples/golden/**` (nouveaux projets), un script de
   validation `examples/golden/run.sh` ou équivalent. Rien d'autre.
 - **Dépendances** : aucune. **Agent** : oui.
@@ -225,4 +225,12 @@ satisfaites.
   `protoss doctor --v1 [--json]`, test d'injection de panne (`aggregate_exit`)
   dans la section core ; `@fulltest` vert. Décision consignée : le doctor est
   auto-suffisant (sources embarquées, indépendant du CWD) + preuves best-effort
-  sur artefacts localisables (spec).
+  sur artefacts localisables (spec). Commit 6583284.
+- 2026-06-11 — G2 Golden projects : 7 projets sous `examples/golden/` (6 valides +
+  capability-denied), `run.sh`, VALIDATE.md par projet, patches JSON. Preuve
+  `golden-projects` branchée dans le doctor (build `~write:false` sur copie tmp
+  pid-qualifiée → zéro pollution `.protoss` du repo ; capability-denied rejeté
+  pour capability manquante), dep `examples/golden` ajoutée à `test-fixtures`,
+  assertion ciblée dans la section core ; doctor = 12 pass / 0 fail / 10 not-yet ;
+  `@fulltest` vert. Arbitrage hérité de l'agent : capability-denied surface CAP001
+  en check isolé, WORKSPACE001 (msg « missing capability ») en voie workspace.

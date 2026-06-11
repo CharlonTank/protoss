@@ -1,0 +1,3 @@
+; hello-world: the smallest valid Protoss project.
+; One pure definition, no capabilities, no stdlib.
+(def main String "hello, world")

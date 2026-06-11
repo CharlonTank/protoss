@@ -1,0 +1,11 @@
+name = "golden-capability-denied-demo"
+version = "1.0.0"
+entrypoints = ["src/main.protoss"]
+stdlib = "none"
+source_dirs = ["src"]
+store_dir = ".protoss/store"
+cache_dir = ".protoss/cache"
+# Intentionally empty: the source uses Http.get without declaring it, so the
+# checker MUST reject this project with CAP001 (CapabilityDenied). The failure
+# is the expected, tested behavior of this golden project.
+capabilities = []

@@ -1,0 +1,12 @@
+; human-ask: a Process that asks a human a question through the Human.ask
+; capability. Running it suspends as an AskHuman request; resuming with a
+; response continues the process.
+(capabilities Human.ask)
+
+; Single question, suspends as AskHuman "What is your name?".
+(def askName (Process String) (Human.ask "What is your name?"))
+
+; A def-level capability scope plus a continuation: ask, then ask again.
+(defcap askTwice (capabilities Human.ask) (Process String)
+  (bind (Human.ask "First name?")
+    (lambda (first String) (Human.ask "Last name?"))))

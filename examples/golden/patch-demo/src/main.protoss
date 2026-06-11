@@ -1,0 +1,6 @@
+; patch-demo: a tiny project that a structured JSON patch will edit.
+; The patch under patches/add_total.json adds a `total` definition that
+; depends on `base`. `patch check` validates it against the built store and
+; `patch apply` commits it as a content-addressed, audited change.
+(def base Nat 2)
+(def label String "demo")

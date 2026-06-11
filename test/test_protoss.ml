@@ -266,6 +266,14 @@ let () =
     List.length (List.filter (function _, Doctor.Pass -> true | _ -> false) results)
   in
   assert_true "doctor wires a healthy floor of real proofs (>= 10)" (passed >= 10);
+  (* The golden-projects proof (G2) must be wired and passing, not deferred. *)
+  let status_of id =
+    List.find_map
+      (fun ((c : Doctor.check), st) -> if String.equal c.id id then Some st else None)
+      results
+  in
+  assert_true "doctor golden-projects proof is wired and passing"
+    (match status_of "golden-projects" with Some Doctor.Pass -> true | _ -> false);
   (* Panic injection: the doctor must exit non-zero iff an available proof
      breaks, and zero when only Not_yet remain. *)
   assert_equal "doctor passes when all proofs pass or defer" "0"

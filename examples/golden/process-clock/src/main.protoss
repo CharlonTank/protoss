@@ -1,0 +1,11 @@
+; process-clock: a Process that reads the wall clock through the Clock.read
+; capability. The effect is declared at the top and the def-level scope is
+; pinned with defcap, so the checker verifies the capability is in scope.
+(capabilities Clock.read)
+
+; Bare clock read as a Process String.
+(def now (Process String) (Clock.read))
+
+; Same effect, but with an explicit def-level capability scope.
+(defcap readTime (capabilities Clock.read) (Process String)
+  (Clock.read))

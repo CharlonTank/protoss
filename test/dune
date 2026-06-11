@@ -32,6 +32,7 @@
   (source_tree %{workspace_root}/examples/web/todo_app/src)
   %{workspace_root}/examples/web/todo_app/protoss.toml
   (source_tree %{workspace_root}/examples/harness_project)
+  (source_tree %{workspace_root}/examples/golden)
   (source_tree %{workspace_root}/patches)))
 
 (rule

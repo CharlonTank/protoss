@@ -1,0 +1,37 @@
+; pure-library: a few reusable, effect-free definitions with explicit types.
+; No capabilities, no Process: everything here is total and pure.
+
+; Polymorphic identity, instantiated below.
+(defpoly identity (params A) (-> A A)
+  (lambda (x A) x))
+
+; Polymorphic constant function.
+(defpoly const (params A B) (-> A (-> B A))
+  (lambda (x A) (lambda (y B) x)))
+
+; Monomorphic Nat helpers, no recursion outside the structural foldNat.
+(def double (-> Nat Nat)
+  (lambda (n Nat) (foldNat n 0 (lambda (acc Nat) (succ (succ acc))))))
+
+(def add (-> Nat (-> Nat Nat))
+  (lambda (a Nat) (lambda (b Nat) (foldNat a b (lambda (acc Nat) (succ acc))))))
+
+; A small named record type reused as a value.
+(record Point (x Nat) (y Nat))
+
+(def origin Point (record (x 0) (y 0)))
+
+; A named variant type plus its eliminator.
+(variant Step (Stay Unit) (Move Nat))
+
+(def stepSize (-> Step Nat)
+  (lambda (s Step) (case s (Stay 0) (Move n n))))
+
+; Worked examples that exercise the definitions above (and pin types).
+(def four Nat (double 2))
+(def seven Nat ((add 3) 4))
+(def idNat Nat ((inst identity Nat) 9))
+(def keepFirst Nat (((inst const Nat Bool) 5) true))
+(def originX Nat (get origin x))
+(def moved Nat (stepSize (variant Step Move 4)))
+(def stayed Nat (stepSize (variant Step Stay unit)))

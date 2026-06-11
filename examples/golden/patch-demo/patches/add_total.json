@@ -1,0 +1,7 @@
+{
+  "op": "AddDef",
+  "name": "total",
+  "deps": ["base"],
+  "type": "Nat",
+  "expr": ["succ", "base"]
+}
