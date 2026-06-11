@@ -251,6 +251,63 @@ let golden_build base name =
 let golden_valid =
   [ "hello-world"; "pure-library"; "process-clock"; "human-ask"; "migration-demo"; "patch-demo" ]
 
+(* Build a golden project for real (write:true) in a pid-qualified temp copy and
+   run [f store tmp]; the temp tree (and its store) is always removed. Golden
+   projects are stdlib="none", so this is fast (no prelude eval). *)
+let with_golden_store base name f =
+  let tmp =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "protoss-doctor-store-%d-%s" (Unix.getpid ()) name)
+  in
+  rm_rf tmp;
+  copy_tree (Filename.concat base name) tmp;
+  Fun.protect
+    ~finally:(fun () -> rm_rf tmp)
+    (fun () ->
+      let manifest = Workspace.parse_manifest (Workspace.project_root tmp) in
+      ignore (Workspace.build manifest);
+      f (Workspace.store_root manifest) tmp manifest)
+
+let with_golden_base f =
+  match find_up (Sys.getcwd ()) "examples/golden" with
+  | None -> Not_yet "examples/golden not found from CWD (best-effort)"
+  | Some base -> f base
+
+(* §5.3: a real build writes a UniverseRoot and the project audits clean. *)
+let store_universe_root () =
+  with_golden_base (fun base ->
+      with_golden_store base "hello-world" (fun store _ manifest ->
+          if not (Sys.file_exists (Filename.concat store "universe.root")) then
+            Fail "build did not write universe.root"
+          else if not (String.equal "Audit OK\n" (Workspace.audit manifest)) then
+            Fail "freshly built project does not audit clean"
+          else Pass))
+
+(* §10.3: a structured patch is checked, applied, and the audit chain verifies. *)
+let patch_check_audit () =
+  with_golden_base (fun base ->
+      with_golden_store base "patch-demo" (fun store tmp _ ->
+          let patch = Filename.concat tmp "patches/add_total.json" in
+          if not (Sys.file_exists patch) then Not_yet "patch-demo add_total.json missing"
+          else (
+            ignore (Patch.check store patch);
+            ignore (Patch.apply store patch);
+            ignore (Patch_audit.verify_latest_matches_store store);
+            Pass)))
+
+(* §12: a built package locks, and check_package/check_lock agree. *)
+let packages_lock () =
+  with_golden_base (fun base ->
+      with_golden_store base "pure-library" (fun _ _ manifest ->
+          let _, lock_hash = Workspace.write_lock manifest in
+          let relocked = Workspace.check_lock manifest in
+          if not (String.equal lock_hash relocked) then
+            Fail "lock hash is not stable across lock/check"
+          else (
+            ignore (Workspace.write_package manifest);
+            ignore (Workspace.check_package manifest);
+            Pass)))
+
 let golden_projects () =
   match find_up (Sys.getcwd ()) "examples/golden" with
   | None -> Not_yet "checklist §19: examples/golden not found from CWD (best-effort)"
@@ -424,8 +481,8 @@ let checks : check list =
     {
       id = "store-universe-root";
       section = "5.3";
-      description = "content-addressed store + UniverseRoot rejects stale state";
-      run = (fun () -> Not_yet "checklist §5.2/§5.3: wire via a workspace fixture");
+      description = "a real build writes a UniverseRoot and the project audits clean";
+      run = store_universe_root;
     };
     {
       id = "ledger-replay";
@@ -436,8 +493,8 @@ let checks : check list =
     {
       id = "patch-check-audit";
       section = "10.3";
-      description = "patch check/apply with hash-linked audit chain";
-      run = (fun () -> Not_yet "checklist §10.3: wire via a store + patch fixture");
+      description = "a structured patch is checked, applied, and its audit chain verifies";
+      run = patch_check_audit;
     };
     {
       id = "harness";
@@ -448,8 +505,8 @@ let checks : check list =
     {
       id = "packages-lock-registries";
       section = "12";
-      description = "package build/lock/registry resolution by hash";
-      run = (fun () -> Not_yet "checklist §12: wire via a package fixture");
+      description = "a built package locks deterministically and check_package agrees";
+      run = packages_lock;
     };
     {
       id = "golden-projects";

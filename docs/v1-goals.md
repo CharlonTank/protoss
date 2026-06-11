@@ -295,3 +295,10 @@ satisfaites.
   Écarts §14.4 honnêtes (item `String`→record via MigrateType faute de record
   top-level, `priority` variant structurel, pas de marqueur `web_app` au build
   par défaut) consignés dans le rapport.
+- 2026-06-11 — Doctor (complétude, prérequis G14) : 3 not-yet branchés depuis
+  l'infra testée via copies golden pid-qualifiées (rapides, `stdlib=none`, repo
+  non pollué) — `store-universe-root` (§5.3 : build écrit `universe.root` + audit
+  OK), `patch-check-audit` (§10.3 : `Patch.check`/`Patch.apply` +
+  `verify_latest_matches_store`), `packages-lock-registries` (§12 : `write_lock`
+  déterministe + `write_package`/`check_package`). Doctor = 20 pass / 0 fail /
+  5 not-yet ; coretest ~1,7 s (pas de régression dev-loop) ; `@fulltest` vert.
