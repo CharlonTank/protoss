@@ -1783,6 +1783,26 @@ and check_elab ctx expected expr =
       require_type expected explicit_ty "variant expected type";
       let _, e = elaborate_variant_payload ctx expected con e in
       (expected, EVariant (expected, con, e))
+  (* Short variant-constructor sugar: against an expected Variant type, an
+     application [(Con payload)] elaborated as [EApp (EName Con, payload)]
+     resolves to the [Con] constructor of that variant, EXACTLY as the explicit
+     [(variant TYPE Con payload)] form. Only when [Con] is a constructor of the
+     expected variant AND is not a bound local/global name -- bound names keep
+     their normal resolution and are never shadowed by a constructor. *)
+  | TVariant cases, EApp (EName con, payload)
+    when assoc_opt con cases <> None
+         && not (List.mem_assoc con ctx.locals)
+         && lookup_global ctx con = None ->
+      let _, e = elaborate_variant_payload ctx expected con payload in
+      (expected, EVariant (expected, con, e))
+  (* Bare [Con] (no payload) against an expected Variant whose [Con] constructor
+     carries a Unit payload elaborates identically to [(variant TYPE Con unit)]. *)
+  | TVariant cases, EName con
+    when (match assoc_opt con cases with Some TUnit -> true | _ -> false)
+         && not (List.mem_assoc con ctx.locals)
+         && lookup_global ctx con = None ->
+      let _, e = elaborate_variant_payload ctx expected con EUnit in
+      (expected, EVariant (expected, con, e))
   | TFun (expected_arg, expected_body), ELambda (x, actual_arg, body) ->
       require_type expected_arg actual_arg "lambda parameter";
       let _, body = check_elab (bind_lambda ctx x actual_arg) expected_body body in
@@ -1826,6 +1846,13 @@ and check_elab ctx expected expr =
   | TView msg_ty, ERow children ->
       let _, children = check_elab ctx (TList (TView msg_ty)) children in
       (expected, ERow children)
+  (* Push the expected message type into a button's dispatched message so the
+     short variant-constructor sugar above (and Nil/inference) can fire there.
+     Equivalent to the bottom-up [infer_elab] path for already-typeable buttons. *)
+  | TView msg_ty, EButton (label, msg) ->
+      let _, label = check_elab ctx TString label in
+      let _, msg = check_elab ctx msg_ty msg in
+      (expected, EButton (label, msg))
   | TList item_ty, ECons (actual_item_ty, head, tail) ->
       require_type item_ty actual_item_ty "Cons type";
       let _, head = check_elab ctx item_ty head in

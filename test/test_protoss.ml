@@ -908,6 +908,94 @@ let () =
   assert_equal "row list literal arg canonical hash"
     (Kernel.hash_program row_annotated_list)
     (Kernel.hash_program row_inferred_list);
+  (* Short variant-constructor sugar: against an expected Variant type, a bare
+     application [(Con payload)] (and bare [Con] when the constructor carries a
+     Unit payload) elaborates to EXACTLY the explicit [(variant TYPE Con payload)]
+     graph -- identical canonical hash. The expected type reaches the constructor
+     through a button's dispatched-message position too. *)
+  let variant_con_explicit =
+    check
+      "(type Msg (Variant (Increment Unit) (Reset Unit)))\n\
+       (def useMsg (-> Msg Nat) (lambda (m Msg) 0))\n\
+       (def appCon Nat (useMsg (variant Msg Increment unit)))\n\
+       (def bareCon Nat (useMsg (variant Msg Reset unit)))"
+  in
+  let variant_con_short =
+    check
+      "(type Msg (Variant (Increment Unit) (Reset Unit)))\n\
+       (def useMsg (-> Msg Nat) (lambda (m Msg) 0))\n\
+       (def appCon Nat (useMsg (Increment unit)))\n\
+       (def bareCon Nat (useMsg Reset))"
+  in
+  assert_equal "short variant constructor (Con payload)/bare Con == explicit hash"
+    (Kernel.hash_program variant_con_explicit)
+    (Kernel.hash_program variant_con_short);
+  (* And the existing [(variant Con payload)] inferred form converges too. *)
+  let variant_con_inferred =
+    check
+      "(type Msg (Variant (Increment Unit) (Reset Unit)))\n\
+       (def useMsg (-> Msg Nat) (lambda (m Msg) 0))\n\
+       (def appCon Nat (useMsg (variant Increment unit)))\n\
+       (def bareCon Nat (useMsg (variant Reset unit)))"
+  in
+  assert_equal "inferred (variant Con payload) form == explicit hash"
+    (Kernel.hash_program variant_con_explicit)
+    (Kernel.hash_program variant_con_inferred);
+  (* Non-Unit payloads work in application position. *)
+  let variant_payload_explicit =
+    check
+      "(type MaybeN (Variant (None Unit) (Some Nat)))\n\
+       (def useM (-> MaybeN Nat) (lambda (m MaybeN) 0))\n\
+       (def some Nat (useM (variant MaybeN Some 5)))"
+  in
+  let variant_payload_short =
+    check
+      "(type MaybeN (Variant (None Unit) (Some Nat)))\n\
+       (def useM (-> MaybeN Nat) (lambda (m MaybeN) 0))\n\
+       (def some Nat (useM (Some 5)))"
+  in
+  assert_equal "short variant constructor with non-Unit payload == explicit hash"
+    (Kernel.hash_program variant_payload_explicit)
+    (Kernel.hash_program variant_payload_short);
+  (* The button target from the spec type-checks via the short form, and its
+     canonical hash equals the explicit-form scaffold. *)
+  let button_short =
+    check
+      "type alias Msg = Variant (Increment Unit) (Reset Unit)\n\
+       view : Nat -> View Msg\n\
+       view model =\n\
+      \    column [ button \"Increment\" (Increment unit), button \"Reset\" (Reset unit) ]"
+  in
+  let button_explicit =
+    check
+      "(def view (-> Nat (View (Variant (Increment Unit) (Reset Unit))))\n\
+      \  (lambda (model Nat)\n\
+      \    (column\n\
+      \      (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
+      \        (button \"Increment\" (variant (Variant (Increment Unit) (Reset Unit)) Increment unit))\n\
+      \        (Cons (View (Variant (Increment Unit) (Reset Unit)))\n\
+      \          (button \"Reset\" (variant (Variant (Increment Unit) (Reset Unit)) Reset unit))\n\
+      \          (Nil (View (Variant (Increment Unit) (Reset Unit)))))))))"
+  in
+  assert_equal "short variant constructor through button == explicit hash"
+    (Kernel.hash_program button_explicit) (Kernel.hash_program button_short);
+  (* An unknown constructor against an expected Variant stays rejected (not made
+     lax), with a located name error. *)
+  expect_check_error_contains
+    "(type Msg (Variant (Increment Unit) (Reset Unit)))\n\
+     (def useMsg (-> Msg Nat) (lambda (m Msg) 0))\n\
+     (def bad Nat (useMsg (Nope unit)))"
+    "unknown name: Nope";
+  (* A bound name that matches a constructor keeps its normal resolution and is
+     never shadowed by the constructor sugar (binder of type Msg referenced as a
+     value, not constructed). *)
+  let shadowing_binder =
+    check
+      "(type Msg (Variant (Increment Unit) (Reset Unit)))\n\
+       (def useMsg (-> Msg Nat) (lambda (m Msg) 0))\n\
+       (def shadowed (-> Msg Nat) (lambda (Increment Msg) (useMsg Increment)))"
+  in
+  ignore shadowing_binder;
   (* The empty list literal also receives its element type from context. *)
   ignore (check "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column []");
   (* A genuinely ill-typed element under a container keyword stays rejected. *)
