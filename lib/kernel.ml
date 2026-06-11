@@ -1820,6 +1820,12 @@ and check_elab ctx expected expr =
       let _, attrs = check_elab ctx (TList (TAttr msg_ty)) attrs in
       let _, children = check_elab ctx (TList (TView msg_ty)) children in
       (expected, ENode (tag, attrs, children))
+  | TView msg_ty, EColumn children ->
+      let _, children = check_elab ctx (TList (TView msg_ty)) children in
+      (expected, EColumn children)
+  | TView msg_ty, ERow children ->
+      let _, children = check_elab ctx (TList (TView msg_ty)) children in
+      (expected, ERow children)
   | TList item_ty, ECons (actual_item_ty, head, tail) ->
       require_type item_ty actual_item_ty "Cons type";
       let _, head = check_elab ctx item_ty head in

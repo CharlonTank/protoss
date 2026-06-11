@@ -866,6 +866,53 @@ let () =
   let inferred_list_value, _ = Runtime.normalize_def inferred_list "xs" in
   assert_equal "inferred list constructors normalize" "[1, 2]"
     (Runtime.value_to_string inferred_list_value);
+  (* Bidirectional element-type propagation: an untyped list literal in
+     argument position of a view container keyword (column/row) receives its
+     element type from the expected View type and must elaborate to exactly the
+     explicit typed Cons/Nil graph (same canonical hash). *)
+  let column_inferred_list =
+    check
+      "view : Nat -> View (Variant (A Unit) (B Unit))\n\
+       view m = column [ text \"hi\", button \"x\" (variant (Variant (A Unit) (B Unit)) A unit) ]"
+  in
+  let column_annotated_list =
+    check
+      "(def view (-> Nat (View (Variant (A Unit) (B Unit))))\n\
+      \  (lambda (m Nat)\n\
+      \    (column\n\
+      \      (Cons (View (Variant (A Unit) (B Unit)))\n\
+      \        (text \"hi\")\n\
+      \        (Cons (View (Variant (A Unit) (B Unit)))\n\
+      \          (button \"x\" (variant (Variant (A Unit) (B Unit)) A unit))\n\
+      \          (Nil (View (Variant (A Unit) (B Unit)))))))))"
+  in
+  assert_equal "column list literal arg canonical hash"
+    (Kernel.hash_program column_annotated_list)
+    (Kernel.hash_program column_inferred_list);
+  let row_inferred_list =
+    check
+      "view : Nat -> View (Variant (A Unit) (B Unit))\n\
+       view m = row [ text \"a\", text \"b\" ]"
+  in
+  let row_annotated_list =
+    check
+      "(def view (-> Nat (View (Variant (A Unit) (B Unit))))\n\
+      \  (lambda (m Nat)\n\
+      \    (row\n\
+      \      (Cons (View (Variant (A Unit) (B Unit)))\n\
+      \        (text \"a\")\n\
+      \        (Cons (View (Variant (A Unit) (B Unit)))\n\
+      \          (text \"b\")\n\
+      \          (Nil (View (Variant (A Unit) (B Unit)))))))))"
+  in
+  assert_equal "row list literal arg canonical hash"
+    (Kernel.hash_program row_annotated_list)
+    (Kernel.hash_program row_inferred_list);
+  (* The empty list literal also receives its element type from context. *)
+  ignore (check "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column []");
+  (* A genuinely ill-typed element under a container keyword stays rejected. *)
+  expect_check_error
+    "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column [ text \"hi\", 42 ]";
   let inferred_list_tail =
     check "(def xs (List Nat) (Cons 1 (Nil Nat)))"
   in
