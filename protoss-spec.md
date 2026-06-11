@@ -716,11 +716,13 @@ bundle deterministe dans `test/test_protoss.ml`.
 - [x] Inclure `index.html`, `protoss-runtime.js`, `protoss-app.json`,
   `protoss-graph.json`, `protoss-canon-graph.json`, `protoss-host-contract.json`,
   `protoss-capabilities.json`, `protoss-world.json`.
-- [ ] Ajouter backend bytecode Protoss VM.
+- [x] Ajouter backend bytecode Protoss VM.
   Preuves: cible `project build --target bytecode`,
-  `Workspace.build_compiler_backend`, manifeste
-  `protoss-vm-bytecode-manifest`, assertions "backend bytecode ..." dans
-  `test/test_protoss.ml`, `README.md`.
+  `Workspace.build_compiler_backend` + `Workspace.write_backend_bytecode`
+  (emet le module `.ptvm` deterministe = `Bytecode.encode_module` du
+  programme compile), manifeste `protoss-vm-bytecode-manifest`, assertions
+  "backend bytecode emits the encoded VM module" et "backend bytecode module
+  decodes round-trip stable" dans `test/test_protoss.ml`, `README.md`.
 - [ ] Ajouter backend WebAssembly.
   Preuves: cible `project build --target wasm`,
   manifeste `webassembly-module-manifest`, assertions "backend wasm ..." dans

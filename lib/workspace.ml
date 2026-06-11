@@ -1447,6 +1447,23 @@ let write_compiler_backend_manifest (build : build_result) artifact =
   write_file manifest_path (compiler_backend_manifest_content build artifact);
   manifest_path
 
+(* Emit the real, deterministic encoded bytecode module for the bytecode VM
+   target, next to the manifest. Codegen (Bytecode.compile_checked/encode_module)
+   already exists and is asserted round-trip-stable and at VM/interpreter parity;
+   this wires it into the build so [--target bytecode] produces an executable
+   artifact, not just a descriptor. The other backends stay manifest-only stubs
+   until their codegen lands. The bytecode bytes are content-derived, so this is
+   additive and does not touch the UniverseRoot-derived compiled-artifact ref. *)
+let write_backend_bytecode (build : build_result) artifact =
+  let bytes = Bytecode.encode_module (Bytecode.compile_checked build.checked) in
+  let path =
+    Filename.concat
+      (Filename.dirname artifact.compiled_artifact_path)
+      (sanitize_id artifact.compiled_artifact_ref ^ ".ptvm")
+  in
+  write_file path bytes;
+  path
+
 let build_compiler_backend manifest target =
   if not (is_compiler_backend_target target) then fail ("unknown compiler backend target: " ^ target);
   let build = build manifest in
@@ -1455,6 +1472,7 @@ let build_compiler_backend manifest target =
       ~optimization_policy:(compiler_backend_optimization_policy target)
   in
   ignore (write_compiler_backend_manifest build artifact);
+  if String.equal target "bytecode" then ignore (write_backend_bytecode build artifact);
   (build, artifact)
 
 let git_map_path manifest = Filename.concat (Filename.concat manifest.root ".protoss") "git.map"

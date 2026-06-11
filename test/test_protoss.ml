@@ -6234,7 +6234,23 @@ let () =
         && contains_substring manifest_content ("target=" ^ target)
         && contains_substring manifest_content ("universe-root=" ^ build_a.universe_root)
         && contains_substring manifest_content
-             ("compiled-artifact-ref=" ^ artifact.compiled_artifact_ref)))
+             ("compiled-artifact-ref=" ^ artifact.compiled_artifact_ref));
+      (* The bytecode VM target additionally emits the real encoded module: it
+         equals the deterministic codegen output and decodes round-trip stable
+         (the other backends stay manifest-only stubs). *)
+      if String.equal target "bytecode" then begin
+        let ptvm_path =
+          Filename.concat
+            (Filename.dirname artifact.compiled_artifact_path)
+            (Workspace.sanitize_id artifact.compiled_artifact_ref ^ ".ptvm")
+        in
+        let bytecode = Store.read_file ptvm_path in
+        assert_true "backend bytecode emits the encoded VM module"
+          (String.equal bytecode
+             (Bytecode.encode_module (Bytecode.compile_checked backend_build.Workspace.checked)));
+        assert_true "backend bytecode module decodes round-trip stable"
+          (String.equal bytecode (Bytecode.decode_then_encode bytecode))
+      end)
     [
       ("bytecode", "protoss-vm-bytecode-manifest");
       ("wasm", "webassembly-module-manifest");
