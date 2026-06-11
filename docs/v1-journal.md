@@ -35,7 +35,8 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
 - [x] Messages d'erreur : seuil « did you mean » relatif à la longueur (plus de `Nope`→`bad`) — FAIT, 5c7769e
 - [x] Inférence lambdas anonymes input/list (widgets `input`/`list`) — FAIT, 8f1592e
 - [x] Exemple full-stack réel : app todo réécrite en Protoss/H, hash identique, priority_demo PASS — FAIT, 51e78ae
-- [ ] Constructeurs de variant comme candidats de suggestion (`Nome`→`None`) — découvert ce tour
+- [x] Constructeurs de variant comme candidats de suggestion (`Nome`→`None`) — FAIT, 187571f
+- [x] README à jour (variants courts + inférence lambdas input/list) — FAIT, d35ea8b
 - [ ] `fmt --human` émet les formes courtes (`[...]`, variants courts) au lieu de Cons/Nil/variant explicites
 - [ ] Inférence lambda anonyme en 1ʳᵉ position (`List.map (\x -> ...) xs`) — kernel, reste du fix HOF
 - [ ] Cas check pour les widgets restants (`on`, `image`, `when`) si une lambda/variant court y est attendu
@@ -88,3 +89,10 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   success=311, structured=1689, **0 new + 0 known crash** → checker robuste sur entrée parsable.
   `@fulltest --force` vert (targets=5, strict). Découverte annexe : `fmt --human` est hash-safe mais
   émet du verbeux (Cons/Nil, variant explicite) → item « émetteur formes courtes » (tour dédié, load-bearing).
+- 2026-06-12 — **Suggestion de constructeurs + README FAIT** (187571f kernel, d35ea8b doc).
+  `suggestion` ne piochait que dans locals/globals/builtins → une typo sur un constructeur (`Nome` pour
+  `None`) n'était pas suggérée (les constructeurs vivent dans le corps des type aliases, pas dans un
+  namespace plat). Collecte des noms de constructeurs de tous les `TVariant` en scope → `(Nome unit)`
+  donne « Did you mean None? ». Error-path pur (0 hash), test ajouté, `@fulltest` vert. README : ajout
+  des variants courts + inférence lambdas input/list à la description de la surface Elm-like. Note :
+  `examples/web/site_vitrine` existe déjà comme app Protoss/H complète (en plus du todo réécrit).
