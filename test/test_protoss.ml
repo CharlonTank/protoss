@@ -1021,6 +1021,13 @@ let () =
      assert_true "unknown name Nope is reported" (contains_substring msg "unknown name: Nope");
      assert_true ("no nonsense suggestion for Nope, got: " ^ msg)
        (not (contains_substring msg "Did you mean")));
+  (* A typo on a variant constructor is suggested even though constructors live
+     in the type alias body, not in locals/globals: "Nome" -> "None". *)
+  expect_check_error_contains
+    "(type Maybe (Variant (None Unit) (Some Nat)))\n\
+     (def useM (-> Maybe Nat) (lambda (m Maybe) 0))\n\
+     (def bad Nat (useM (Nome unit)))"
+    "Did you mean None?";
   (* An unannotated Protoss/H lambda in input's handler / list's renderer gets
      its parameter type from the expected View type (the EInput/EListView
      check_elab cases), elaborating to EXACTLY the annotated-lambda S-expression

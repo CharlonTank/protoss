@@ -1062,8 +1062,18 @@ let edit_distance a b =
   prev.(lb)
 
 let suggestion ctx n =
+  (* Variant constructors live inside the in-scope type aliases' bodies, not in
+     locals/globals, so a typo on a constructor (e.g. "Nome" for "None") would
+     otherwise get no suggestion. Offer them as candidates too. *)
+  let constructor_names =
+    List.concat_map
+      (fun (alias : type_alias) ->
+        match alias.type_body with TVariant cases -> List.map fst cases | _ -> [])
+      ctx.type_aliases
+  in
   let names =
     List.map fst ctx.locals @ List.map fst ctx.globals @ builtin_names
+    @ constructor_names
     |> List.sort_uniq String.compare
   in
   names
