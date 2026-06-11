@@ -8,7 +8,7 @@
    Not_found, Invalid_argument, Match_failure, ...) is a robustness bug and is
    reported here.
 
-   The six targets and the exceptions treated as STRUCTURED (i.e. a clean,
+   The seven targets and the exceptions treated as STRUCTURED (i.e. a clean,
    acceptable failure) for each:
 
    1. S-expression parser
@@ -55,6 +55,15 @@
        the language is total so evaluation terminates on bounded inputs.
        Runtime.fail = Kernel.fail, so an eval error is a structured Kernel.Error
        and any other exception is a real runtime robustness bug.)
+
+   7. Canonical round-trip invariant (a CORRECTNESS property, not just no-crash)
+        Protoss.Kernel.check_program then a graph round-trip via Canonical_ir
+      structured: Parser.Error | Sexp.Error | Elm_syntax.Error | Kernel.Error
+      (parse/check failures are out of scope. On a VALID program the central
+       content-addressing invariant must hold: its canonical graph round-trips
+       back to the same canonical serialization, and re-deriving a checked
+       program from the graph preserves the program hash. A mismatch raises
+       Invariant_violation, which is NOT structured, so the fuzzer reports it.)
 
    Determinism: all randomness comes from a single Random.State seeded with a
    fixed integer (overridable via argv). Two runs with the same seed test the
@@ -226,6 +235,15 @@ let structured_check = function
   | Parser.Error _ | Sexp.Error _ | Elm_syntax.Error _ | Kernel.Error _ -> true
   | _ -> false
 
+(* The canonical-roundtrip target checks a correctness property, not just the
+   absence of a crash: parse/check failures are structured (the program is out
+   of scope), but a graph round-trip or hash mismatch on a VALID program is a
+   content-addressing bug, raised below as [Invariant_violation] -- which is NOT
+   in this set, so the fuzzer reports it. *)
+let structured_roundtrip = function
+  | Parser.Error _ | Sexp.Error _ | Elm_syntax.Error _ | Kernel.Error _ -> true
+  | _ -> false
+
 (* ------------------------------------------------------------------ *)
 (* Target runners (the exact functions under test)                    *)
 (* ------------------------------------------------------------------ *)
@@ -276,6 +294,25 @@ let run_eval (input : string) : unit =
      (Stack_overflow, Match_failure, Not_found...) is a real runtime bug. *)
   let checked = Kernel.check_program (Parser.parse_string input) in
   ignore (Runtime.normalize_all checked)
+
+(* A correctness-property violation on a valid program (not a structured parse/
+   check failure), reported by the canonical-roundtrip target as a crash. *)
+exception Invariant_violation of string
+
+let run_roundtrip (input : string) : unit =
+  (* Parse/check errors propagate structured. Below the program is VALID, so the
+     central content-addressing invariant must hold: its canonical graph must
+     round-trip back to the same canonical serialization, and re-deriving a
+     checked program from the graph must preserve the program hash. A mismatch
+     is a determinism/content-addressing bug, not an acceptable failure. *)
+  let checked = Kernel.check_program (Parser.parse_string input) in
+  let canonical = Kernel.serialize_checked_program checked in
+  let graph = Canonical_ir.serialize_graph checked in
+  if not (String.equal canonical (Canonical_ir.graph_to_program graph)) then
+    raise (Invariant_violation "canonical graph round-trip mismatch");
+  let graph_checked = Canonical_ir.checked_of_graph graph in
+  if not (String.equal (Kernel.hash_program checked) (Kernel.hash_program graph_checked)) then
+    raise (Invariant_violation "graph re-check program hash mismatch")
 
 (* ------------------------------------------------------------------ *)
 (* Seed corpus (embedded, so the fuzzer is self-contained)            *)
@@ -1041,6 +1078,13 @@ let () =
         name = "evaluator";
         structured = structured_check;
         run = run_eval;
+        next = next_sexp_input;
+        seeds = sexp_seeds;
+      };
+      {
+        name = "canonical-roundtrip";
+        structured = structured_roundtrip;
+        run = run_roundtrip;
         next = next_sexp_input;
         seeds = sexp_seeds;
       };
