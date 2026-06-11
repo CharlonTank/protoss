@@ -14,12 +14,15 @@ String))` in one atomic batch:
 - `headline` is intentionally NOT in the patch: whole-program revalidation
   must keep it typechecking against the replaced definitions.
 
-Run every command from the repository root, **in this order** (one-shot over
-a fresh store: step 0 is mandatory on re-runs — re-applying the patch fails
-with `PATCH001 … MigrateType target already exists`-style conflicts by
-design). The `env PROTOSS_GLOBAL_STORE=` prefix only disables global-object
-interning; it changes no output. `<REPO>` stands for the absolute repository
-root. Every `p2:` value is deterministic.
+Run every command from the repository root, **in this order**, over a fresh
+store: step 0 is mandatory on re-runs. (Unlike patch-demo's `AddDef`, this
+batch is accepted again on an already-patched store — `MigrateType` is
+replace-or-add and the `ReplaceDef` ops reproduce identical defs — but a
+second apply appends a second audit entry chained via `previous-ref`, so the
+exact outputs below only match the first apply on a fresh build.) The
+`env PROTOSS_GLOBAL_STORE=` prefix only disables global-object interning; it
+changes no output. `<REPO>` stands for the absolute repository root. Every
+`p2:` value is deterministic.
 
 0. Reset (mandatory for re-runs; `.protoss/` is git-ignored):
 

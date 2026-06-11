@@ -4,7 +4,9 @@ This project is a negative golden: it MUST be rejected. The source performs
 `(Http.get …)` but never declares the `Http.get` capability — there is no
 top-level `(capabilities …)` form and `protoss.toml` has `capabilities = []`.
 Every check path refuses it before writing any canonical graph or store
-(no `.protoss/` directory is created by the failing commands).
+content. (The project-level commands may scaffold empty `.protoss/store/`
+directories before failing, but they must not write any file in them — no
+canonical defs, objects, roots, or build refs.)
 
 Run every command from the repository root. The `env PROTOSS_GLOBAL_STORE=`
 prefix only disables global-object interning; it changes no output. `<REPO>`
@@ -35,7 +37,7 @@ stands for the absolute repository root.
    ```
 
 3. Project build — expect **exit 1**, same `WORKSPACE001` message as step 2,
-   and no `.protoss/` store may be created:
+   and no store content may be written (no files under `.protoss/`):
 
    ```sh
    env PROTOSS_GLOBAL_STORE= _build/default/bin/main.exe project build examples/golden/capability-denied-demo
