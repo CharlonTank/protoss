@@ -273,6 +273,20 @@ let with_golden_base f =
   | None -> Not_yet "examples/golden not found from CWD (best-effort)"
   | Some base -> f base
 
+(* §11: a passing harness reports pass and a failing one reports fail. *)
+let harness_proof () =
+  let checked = check_source "(def two Nat 2)" in
+  let status content =
+    match Json.field "status" (Json.parse (Harness.run_json checked ~source:"<doctor>" content)) with
+    | Some v -> ( match Json.string v with Some s -> s | None -> "")
+    | None -> ""
+  in
+  if not (String.equal (status "harness ok = unit two == 2\n") "pass") then
+    Fail "a passing harness did not report pass"
+  else if String.equal (status "harness bad = unit two == 3\n") "pass" then
+    Fail "a failing harness reported pass"
+  else Pass
+
 (* §5.3: a real build writes a UniverseRoot and the project audits clean. *)
 let store_universe_root () =
   with_golden_base (fun base ->
@@ -499,8 +513,8 @@ let checks : check list =
     {
       id = "harness";
       section = "11";
-      description = "harness run and affected-by-patch detection";
-      run = (fun () -> Not_yet "checklist §11: wire via a harness fixture");
+      description = "a passing harness reports pass and a failing one reports fail";
+      run = harness_proof;
     };
     {
       id = "packages-lock-registries";

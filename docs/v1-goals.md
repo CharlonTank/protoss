@@ -302,3 +302,8 @@ satisfaites.
   `verify_latest_matches_store`), `packages-lock-registries` (§12 : `write_lock`
   déterministe + `write_package`/`check_package`). Doctor = 20 pass / 0 fail /
   5 not-yet ; coretest ~1,7 s (pas de régression dev-loop) ; `@fulltest` vert.
+- 2026-06-11 — Doctor : preuve `harness` (§11) branchée — `Harness.run_json`
+  in-memory, un harness passant rapporte `pass`, un échouant `fail`
+  (auto-suffisant, sans I/O). Doctor = 21 pass / 0 fail / 4 not-yet restants
+  (ledger-replay §8.3, parités self-hosted canonicalizer/patch-validator §17,
+  benchmarks §20) ; `@fulltest` vert.
