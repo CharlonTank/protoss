@@ -10,7 +10,8 @@
 
 (rule
  (alias runtest)
- (action (run ./smoke.exe)))
+ (action (setenv PROTOSS_GLOBAL_STORE ""
+          (run ./smoke.exe))))
 
 ; Every test_protoss section reads fixtures from the source tree (stdlib
 ; prelude, examples, patches), so the rules declare them through this alias:
@@ -30,30 +31,35 @@
   (glob_files %{workspace_root}/examples/self_host/*.protoss)
   (source_tree %{workspace_root}/examples/web/todo_app/src)
   %{workspace_root}/examples/web/todo_app/protoss.toml
+  (source_tree %{workspace_root}/examples/harness_project)
   (source_tree %{workspace_root}/patches)))
 
 (rule
  (alias coretest)
  (deps (alias test-fixtures))
- (action (run ./test_protoss.exe)))
+ (action (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe))))
 
 (rule
  (alias selftest)
  (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_SELF_HOST_TESTS 1
-          (run ./test_protoss.exe))))
+          (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))
 
 (rule
  (alias stdlibtest)
  (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_STDLIB_TESTS 1
-          (run ./test_protoss.exe))))
+          (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))
 
 (rule
  (alias integrationtest)
  (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
-          (run ./test_protoss.exe))))
+          (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))
 
 ; The integration section dominates the suite, so it is further split into
 ; independent parts (workspace/packages, web, runtime store) selected by
@@ -64,7 +70,8 @@
  (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
-           (run ./test_protoss.exe)))))
+           (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe))))))
 
 ; The workspace part itself dominates the integration section, so it is
 ; sliced once more by PROTOSS_WORKSPACE_PART (project chain / consumer
@@ -77,7 +84,8 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (setenv PROTOSS_WORKSPACE_PART project
-            (run ./test_protoss.exe))))))
+            (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))))
 
 (rule
  (alias integrationtest-workspace-consumer)
@@ -85,7 +93,8 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (setenv PROTOSS_WORKSPACE_PART consumer
-            (run ./test_protoss.exe))))))
+            (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))))
 
 (rule
  (alias integrationtest-workspace-corruption)
@@ -93,14 +102,16 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART workspace
            (setenv PROTOSS_WORKSPACE_PART corruption
-            (run ./test_protoss.exe))))))
+            (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))))
 
 (rule
  (alias integrationtest-web)
  (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
-           (run ./test_protoss.exe)))))
+           (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe))))))
 
 ; The web part dominates the integration section once the workspace slices
 ; run on the mini stdlib, so it is sliced by PROTOSS_WEB_PART (app artifacts
@@ -113,7 +124,8 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (setenv PROTOSS_WEB_PART app
-            (run ./test_protoss.exe))))))
+            (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))))
 
 (rule
  (alias integrationtest-web-patches)
@@ -121,7 +133,8 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (setenv PROTOSS_WEB_PART patches
-            (run ./test_protoss.exe))))))
+            (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))))
 
 (rule
  (alias integrationtest-web-audit)
@@ -129,14 +142,16 @@
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART web
            (setenv PROTOSS_WEB_PART audit
-            (run ./test_protoss.exe))))))
+            (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe)))))))
 
 (rule
  (alias integrationtest-runtime)
  (deps (alias test-fixtures))
  (action (setenv PROTOSS_RUN_INTEGRATION_TESTS 1
           (setenv PROTOSS_INTEGRATION_PART runtime
-           (run ./test_protoss.exe)))))
+           (setenv PROTOSS_GLOBAL_STORE ""
+            (run ./test_protoss.exe))))))
 
 ; fulltest aggregates the per-section aliases so dune runs them as separate
 ; processes in parallel (wall clock = slowest section instead of their sum).
