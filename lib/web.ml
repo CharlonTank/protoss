@@ -668,6 +668,72 @@ let runtime_js =
       resume: resume
     };
   }
+  // Two vnodes patch in place only when their structural signature matches.
+  // For "node" kind the tag participates in the signature so a div->button
+  // change forces a replace rather than an in-place mutation.
+  function vnodeKey(node) {
+    if (!node) return "";
+    if (node.kind === "node") return "node:" + (node.tag || "div");
+    return String(node.kind || "");
+  }
+  // Listener bookkeeping: every event handler we attach is recorded under a
+  // stable slot name on el.__protossListeners so a later patch can remove the
+  // exact previous function before binding the next one (rebinding on change).
+  function ensureListenerStore(el) {
+    if (!el.__protossListeners) el.__protossListeners = {};
+    return el.__protossListeners;
+  }
+  function setListener(el, slot, event, handler) {
+    var store = ensureListenerStore(el);
+    var prev = store[slot];
+    if (prev) {
+      el.removeEventListener(prev.event, prev.handler);
+      delete store[slot];
+    }
+    if (handler) {
+      el.addEventListener(event, handler);
+      store[slot] = { event: event, handler: handler };
+    }
+  }
+  function clearListeners(el) {
+    if (!el || !el.__protossListeners) return;
+    var store = el.__protossListeners;
+    Object.keys(store).forEach(function (slot) {
+      var rec = store[slot];
+      if (rec) el.removeEventListener(rec.event, rec.handler);
+    });
+    el.__protossListeners = {};
+  }
+  function inputHandlerFor(el, node, dispatch) {
+    return function () { dispatch({ inputHandler: node.handler, value: el.value }); };
+  }
+  function attrListenerSlot(attr) { return "on:" + (attr.event || ""); }
+  // Bind/rebind the {kind:"on"} listeners declared on a "node" vnode, removing
+  // any previously-bound "on:*" slots that the new attribute set no longer
+  // declares. Inline on* attributes are handled separately (and blocked).
+  function syncNodeListeners(el, attributes, dispatch) {
+    var store = ensureListenerStore(el);
+    var keep = {};
+    (attributes || []).forEach(function (attr) {
+      if (attr.kind !== "on") return;
+      var slot = attrListenerSlot(attr);
+      keep[slot] = true;
+      setListener(el, slot, attr.event || "", function () { dispatch(attr.message); });
+    });
+    Object.keys(store).forEach(function (slot) {
+      if (slot.indexOf("on:") === 0 && !keep[slot]) setListener(el, slot, null, null);
+    });
+  }
+  function applyAttributes(el, attributes) {
+    (attributes || []).forEach(function (attr) {
+      if (attr.kind === "attr") {
+        var name = String(attr.name || "");
+        // Block inline event-handler attributes (onclick, onload, ...) to avoid script injection.
+        if (/^on/i.test(name)) return;
+        el.setAttribute(name, attr.value || "");
+      }
+    });
+  }
   function renderView(node, dispatch) {
     if (!node) return text("");
     if (node.kind === "text") return text(node.text || "");
@@ -682,15 +748,13 @@ let runtime_js =
     if (node.kind === "input") {
       var input = document.createElement("input");
       input.value = node.value || "";
-      input.addEventListener("input", function () {
-        dispatch({ inputHandler: node.handler, value: input.value });
-      });
+      setListener(input, "input", "input", inputHandlerFor(input, node, dispatch));
       return input;
     }
     if (node.kind === "button") {
       var button = document.createElement("button");
       button.textContent = node.label || "";
-      button.addEventListener("click", function () { dispatch(node.message); });
+      setListener(button, "click", "click", function () { dispatch(node.message); });
       return button;
     }
     if (node.kind === "row" || node.kind === "column") {
@@ -701,20 +765,132 @@ let runtime_js =
     }
     if (node.kind === "node") {
       var el = document.createElement(node.tag || "div");
-      (node.attributes || []).forEach(function (attr) {
-        if (attr.kind === "attr") {
-          var name = String(attr.name || "");
-          // Block inline event-handler attributes (onclick, onload, ...) to avoid script injection.
-          if (/^on/i.test(name)) return;
-          el.setAttribute(name, attr.value || "");
-        } else if (attr.kind === "on") {
-          el.addEventListener(attr.event || "", function () { dispatch(attr.message); });
-        }
-      });
+      applyAttributes(el, node.attributes);
+      syncNodeListeners(el, node.attributes, dispatch);
       (node.children || []).forEach(function (child) { el.appendChild(renderView(child, dispatch)); });
       return el;
     }
     return text("");
+  }
+  // Diff a "node" vnode's attributes against the previous ones, mutating the
+  // existing DOM element: drop attributes that disappeared, set/update the rest,
+  // then rebind the {kind:"on"} listeners. Inline on* names stay blocked.
+  function patchAttributes(el, oldAttributes, newAttributes, dispatch) {
+    var oldNamed = {};
+    (oldAttributes || []).forEach(function (attr) {
+      if (attr.kind === "attr") {
+        var name = String(attr.name || "");
+        if (/^on/i.test(name)) return;
+        oldNamed[name] = attr.value || "";
+      }
+    });
+    var newNamed = {};
+    (newAttributes || []).forEach(function (attr) {
+      if (attr.kind === "attr") {
+        var name = String(attr.name || "");
+        if (/^on/i.test(name)) return;
+        newNamed[name] = attr.value || "";
+        if (oldNamed[name] !== newNamed[name]) el.setAttribute(name, newNamed[name]);
+      }
+    });
+    Object.keys(oldNamed).forEach(function (name) {
+      if (!(name in newNamed)) el.removeAttribute(name);
+    });
+    syncNodeListeners(el, newAttributes, dispatch);
+  }
+  // Positional child diff: walk old/new children in parallel, patching the DOM
+  // child at each index. NOTE: this is intentionally NOT keyed — reordered lists
+  // are diffed by position, so a prepend re-patches every following node rather
+  // than moving existing DOM nodes. Sufficient for focus/scroll preservation of
+  // in-place edits; keyed reconciliation is a future step.
+  function patchChildren(domEl, oldChildren, newChildren, dispatch) {
+    oldChildren = oldChildren || [];
+    newChildren = newChildren || [];
+    var max = Math.max(oldChildren.length, newChildren.length);
+    for (var i = 0; i < max; i++) {
+      // domEl.childNodes[i] is the DOM node currently rendering oldChildren[i].
+      patch(domEl, domEl.childNodes[i], oldChildren[i], newChildren[i], dispatch);
+    }
+  }
+  // Core VDOM patch. Mutates the real DOM under `parent` to match newVNode,
+  // reusing `domNode` (the node currently rendering oldVNode) wherever possible
+  // so unchanged elements — notably a focused <input> — stay the same DOM object.
+  //   oldVNode absent  -> create + insert.
+  //   newVNode absent  -> remove domNode.
+  //   signature differs -> replace domNode with a fresh render.
+  //   signature matches -> update in place, then recurse into children.
+  // Returns the DOM node now occupying the slot (or null when removed).
+  function patch(parent, domNode, oldVNode, newVNode, dispatch) {
+    if (!oldVNode && !newVNode) return domNode || null;
+    if (!oldVNode) {
+      var created = renderView(newVNode, dispatch);
+      parent.appendChild(created);
+      return created;
+    }
+    if (!newVNode) {
+      if (domNode) {
+        clearDeep(domNode);
+        parent.removeChild(domNode);
+      }
+      return null;
+    }
+    if (!domNode || vnodeKey(oldVNode) !== vnodeKey(newVNode)) {
+      var replacement = renderView(newVNode, dispatch);
+      if (domNode) {
+        clearDeep(domNode);
+        parent.replaceChild(replacement, domNode);
+      } else {
+        parent.appendChild(replacement);
+      }
+      return replacement;
+    }
+    // Same structural signature: update the existing domNode in place.
+    if (newVNode.kind === "text") {
+      var nextText = newVNode.text || "";
+      if (domNode.textContent !== nextText) domNode.textContent = nextText;
+      return domNode;
+    }
+    if (newVNode.kind === "image") {
+      if (domNode.src !== (newVNode.src || "")) domNode.src = newVNode.src || "";
+      if (domNode.alt !== (newVNode.alt || "")) domNode.alt = newVNode.alt || "";
+      return domNode;
+    }
+    if (newVNode.kind === "input") {
+      // Overwrite the live value only when the *model* changed it (old vnode
+      // value differs from new), not merely when it differs from the live DOM.
+      // A controlled input whose model value is unchanged keeps the user's
+      // in-progress text and caret instead of being stomped on every render.
+      var oldValue = oldVNode.value || "";
+      var newValue = newVNode.value || "";
+      if (oldValue !== newValue && domNode.value !== newValue) domNode.value = newValue;
+      setListener(domNode, "input", "input", inputHandlerFor(domNode, newVNode, dispatch));
+      return domNode;
+    }
+    if (newVNode.kind === "button") {
+      var nextLabel = newVNode.label || "";
+      if (domNode.textContent !== nextLabel) domNode.textContent = nextLabel;
+      setListener(domNode, "click", "click", function () { dispatch(newVNode.message); });
+      return domNode;
+    }
+    if (newVNode.kind === "row" || newVNode.kind === "column") {
+      patchChildren(domNode, oldVNode.children, newVNode.children, dispatch);
+      return domNode;
+    }
+    if (newVNode.kind === "node") {
+      patchAttributes(domNode, oldVNode.attributes, newVNode.attributes, dispatch);
+      patchChildren(domNode, oldVNode.children, newVNode.children, dispatch);
+      return domNode;
+    }
+    return domNode;
+  }
+  // Detach all listeners on a subtree before it leaves the DOM, so removed
+  // nodes don't retain handler references.
+  function clearDeep(domNode) {
+    if (!domNode || domNode.nodeType !== 1) return;
+    clearListeners(domNode);
+    var kids = domNode.childNodes;
+    if (!kids) return;
+    for (var i = 0; i < kids.length; i++) clearDeep(kids[i]);
   }
   window.ProtossRuntime = {
     start: function (app) {
@@ -722,6 +898,9 @@ let runtime_js =
       mount.className = "protoss-app";
       var machine = evalProgram(app.program);
       var hostContract = hostContractIndex(app.hostContract || {});
+      // Previous virtual tree the mount's single child currently renders; null
+      // before the first render so patch() builds the initial DOM from scratch.
+      var prevVNode = null;
       var modelValue = app.initialModel;
       var worldRef = app.worldRef;
       var ledger = [];
@@ -809,9 +988,14 @@ let runtime_js =
         }
       }
       function render() {
-        mount.innerHTML = "";
         var view = machine.view(app.view, modelValue);
-        mount.appendChild(renderView(view.view, dispatch));
+        var nextVNode = view.view || null;
+        // Diff the new virtual tree against the previous one and mutate only the
+        // changed parts of the real DOM, reusing existing nodes (so a focused
+        // input keeps focus/caret). mount.firstChild is the DOM node currently
+        // rendering prevVNode; on the first render it is null and patch() creates.
+        patch(mount, mount.firstChild, prevVNode, nextVNode, dispatch);
+        prevVNode = nextVNode;
       }
       // The dev server ships no pre-rendered model (prerender:false); evaluate
       // init in the browser instead. Production bundles carry initialModel.
