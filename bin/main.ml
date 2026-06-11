@@ -34,6 +34,7 @@ let usage () =
      \       protoss self parse|resolve|deps|capabilities|static <file> [--json]\n\
      \       protoss self typecheck <file> [--json] | type-of <file> --entry <name> | compare-typecheck <file>\n\
      \       protoss self fmt [--check] <file> | protoss self canon <file> [--compare]\n\
+     \       protoss init [project] [--minimal]   (alias for project init: scaffold a full-stack app)\n\
      \       protoss project init|check|build|lock|package|interface|export-layout [project] [--stats|--locked|--check [interface.json]|--json|--out <dir>]\n\
      \       protoss build [project] [--target web] [--stats] [--locked]\n\
      \       protoss patch check|apply <store> <patch.json> | protoss patch audit <store> [latest|ref] | protoss patch review <patch.json>\n\
@@ -774,12 +775,22 @@ let command_project = function
          keeps the trivial `(def main Nat 0)` module with no stdlib. *)
       let minimal = List.mem "--minimal" args in
       let root = project_arg (List.filter (fun a -> not (String.equal a "--minimal")) args) in
+      (* Full-stack app by default, but it needs the prelude path for its
+         manifest. If the prelude can't be located (e.g. an installed binary
+         without the packaged prelude), fall back to a minimal module so init
+         always succeeds rather than erroring out. *)
+      let stdlib = if minimal then None else (try Some (prelude_path ()) with _ -> None) in
       let path =
-        if minimal then Protoss.Workspace.init root
-        else Protoss.Workspace.init ~app:true ~stdlib:(prelude_path ()) root
+        match stdlib with
+        | Some s -> Protoss.Workspace.init ~app:true ~stdlib:s root
+        | None -> Protoss.Workspace.init root
       in
       Printf.printf "Initialized %s\n" path;
-      if not minimal then Printf.printf "Run it:  protoss live %s\n" root
+      (match stdlib with
+      | Some _ -> Printf.printf "Run it:  protoss live %s\n" root
+      | None ->
+          if not minimal then
+            Printf.printf "(prelude not found; created a minimal module — set PROTOSS_STDLIB for full-stack)\n")
   | "check" :: args ->
       let root = project_arg args in
       let manifest = Protoss.Workspace.parse_manifest (Protoss.Workspace.project_root root) in
@@ -1733,6 +1744,7 @@ let () =
       | "harness" :: args -> command_harness args
       | "self" :: args -> command_self args
       | "project" :: args -> command_project args
+      | "init" :: args -> command_project ("init" :: args)
       | "build" :: args -> command_project_build args
       | "patch" :: args -> command_patch args
       | "diff" :: args -> command_diff args
