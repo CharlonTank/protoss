@@ -142,7 +142,7 @@ satisfaites.
 
 ## Vague 3 — le prélude (monopole orchestrateur, séquentiel)
 
-### G8 — Patch validator self-hosted [pending]
+### G8 — Patch validator self-hosted [session dédiée — cadré]
 - **Périmètre** : `stdlib/prelude.protoss`, `bin/main.ml`, `test/test_protoss.ml`,
   `lib/public_error.ml` — orchestrateur uniquement.
 - **Dépendances** : aucune (pattern établi). **Agent** : non.
@@ -155,7 +155,7 @@ satisfaites.
 - **Done** : sweep de parité de verdict vert avec plancher + cas de divergence
   volontaire ; spec check OK ; fulltest vert.
 
-### G9 — Normalizer self-hosted [pending]
+### G9 — Normalizer self-hosted [session dédiée — cadré]
 - **Périmètre** : idem G8 — orchestrateur uniquement.
 - **Dépendances** : G8 (file du prélude). **Agent** : non.
 - **Goal** : normalizer en Protoss sur le fragment pur supporté, parité
@@ -345,3 +345,20 @@ satisfaites.
   Exécuté : **V1.0 gate PASS** (tout le vert). Le gate note honnêtement que la
   parité self-hosted patch-validator (§17, G8) reste not-yet → V1.0 pas encore
   SHIPPED au sens strict de la définition finale tant que G8/G9 ne sont pas verts.
+- 2026-06-11 — G8/G9 reconçus (arbitrage, règle « reconçois le goal si besoin »).
+  Analyse : un patch validator (G8) à *parité de verdict* avec `Patch.check`, et un
+  normalizer (G9) à parité avec `protoss nf`, exigent de reproduire en Protoss le
+  parsing complet des ops + la validation/normalisation whole-program — chacun de
+  l'ampleur du canonicalizer self-hosté (commit fd64324, ~2900 lignes Protoss, une
+  session dédiée). Un périmètre trivial donnerait un faux-vert (parité sur un
+  fragment sans valeur). Conformément à la discipline anti-faux-vert, G8/G9 sont
+  **reportés en sessions dédiées**, périmètre cadré ci-dessous, à attaquer via un
+  `/goal` propre (pattern : mémoire `protoss-self-hosted-component-patterns` +
+  l'infra `Protoss.canonProgramText` réutilisable pour la re-canonicalisation).
+  Périmètre G8 : `Protoss.patchValidateText` parse le patch JSON (Json.parseText),
+  parse type/expr via les parsers self-hostés, reproduit les règles de `Patch.check`
+  (op, deps, merge), re-canonicalise via `canonProgramText` ; `protoss self
+  patch-check --compare` à parité de verdict sur `patches/*.json` ; recocher 664/986
+  seulement si la parité couvre les fixtures. Périmètre G9 : normalizer du fragment
+  pur à parité byte-à-byte avec `protoss nf`. Le doctor garde les 2 not-yet §17
+  correspondants honnêtes (canonicalizer déjà prouvé par le sweep @selftest).
