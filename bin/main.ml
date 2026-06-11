@@ -64,6 +64,7 @@ let usage () =
      \       protoss spec check [protoss-spec.md]\n\
      \       protoss bench build <project>\n\
      \       protoss bytecode <file> | protoss bytecode run <file> --entry <name>\n\
+     \       protoss edit import|explain <store-or-project-a> <store-or-project-b>\n\
      \       protoss doctor --v1 [--json]\n\
      \       protoss cache stats|list <dir>\n\
      \       protoss store list|get|deps|roots|graphs|graph|graph-put|host-contracts|host-contract|stats|gc [args]";
@@ -1553,6 +1554,20 @@ let command_bench = function
       Printf.printf "benchmark-ref=%s\n%s" benchmark_ref content
   | _ -> usage ()
 
+(* Treat a text edit as a view: derive a structured patch candidate from the
+   difference between two store/project versions (import), or explain that diff. *)
+let command_edit = function
+  | [ "import"; a; b ] ->
+      print_string
+        (Protoss.Workspace.patch_from_diff
+           (Protoss.Workspace.store_of_arg a) (Protoss.Workspace.store_of_arg b))
+  | [ "explain"; a; b ] ->
+      print_string
+        (Protoss.Workspace.diff_to_text
+           (Protoss.Workspace.diff
+              (Protoss.Workspace.store_of_arg a) (Protoss.Workspace.store_of_arg b)))
+  | _ -> usage ()
+
 (* Compile a program to VM bytecode (hash of the deterministic module), or run
    an entry on the VM — which executes at parity with the interpreter. *)
 let command_bytecode = function
@@ -1631,6 +1646,7 @@ let () =
       | "grammar" :: args -> command_grammar args
       | "spec" :: args -> command_spec args
       | "bytecode" :: args -> command_bytecode args
+      | "edit" :: args -> command_edit args
       | "doctor" :: args -> command_doctor args
       | "bench" :: args -> command_bench args
       | "cache" :: args -> command_cache args

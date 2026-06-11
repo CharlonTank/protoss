@@ -62,6 +62,16 @@ let contains needle haystack =
   let rec at i = i + nl <= hl && (String.equal (String.sub haystack i nl) needle || at (i + 1)) in
   nl = 0 || at 0
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let write_file path contents =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc contents)
+
 (* ----- embedded programs ------------------------------------------------- *)
 
 let rich_program =
@@ -205,11 +215,6 @@ let spec_audit () =
       | exception Failure msg ->
           Fail ("spec audit reported missing evidence:\n" ^ String.trim msg))
 
-let contains needle haystack =
-  let nl = String.length needle and hl = String.length haystack in
-  let rec at i = i + nl <= hl && (String.equal (String.sub haystack i nl) needle || at (i + 1)) in
-  nl = 0 || at 0
-
 (* Copy a project tree (minus any .protoss store) so a build can run in a
    throwaway location, leaving the repo untouched — the test suite must never
    inherit a generated store (see CLAUDE.md). *)
@@ -286,6 +291,47 @@ let harness_proof () =
   else if String.equal (status "harness bad = unit two == 3\n") "pass" then
     Fail "a failing harness reported pass"
   else Pass
+
+(* §10.4: a text edit is a view — the difference between two built versions
+   derives a structured patch candidate (a changed def becomes a ReplaceDef),
+   and that derived patch is itself valid against the original version. *)
+let edit_import () =
+  let mk dir body =
+    rm_rf dir;
+    (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    (try Unix.mkdir (Filename.concat dir "src") 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    write_file (Filename.concat dir "protoss.toml")
+      "name = \"edit\"\n\
+       version = \"0.0.0\"\n\
+       entrypoints = [\"src/main.protoss\"]\n\
+       stdlib = \"none\"\n\
+       source_dirs = [\"src\"]\n\
+       store_dir = \".protoss/store\"\n\
+       cache_dir = \".protoss/cache\"\n\
+       capabilities = []\n";
+    write_file (Filename.concat dir "src/main.protoss") body;
+    let m = Workspace.parse_manifest (Workspace.project_root dir) in
+    ignore (Workspace.build m);
+    Workspace.store_root m
+  in
+  let tmp suffix =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "protoss-doctor-edit%s-%d" suffix (Unix.getpid ()))
+  in
+  let a = tmp "a" and b = tmp "b" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf a; rm_rf b)
+    (fun () ->
+      let store_a = mk a "(def n Nat 1)\n" in
+      let store_b = mk b "(def n Nat 2)\n" in
+      let patch = Workspace.patch_from_diff store_a store_b in
+      if not (contains "ReplaceDef" patch) then
+        Fail "edit import did not derive a ReplaceDef for a changed def"
+      else (
+        let pf = Filename.concat a "derived.json" in
+        write_file pf patch;
+        ignore (Patch.check store_a pf);
+        Pass))
 
 (* §7.1/§6.5: the effect cache key is partitioned by capability scope and
    world ref (no cross-capability or cross-world cache leak) and stable for
@@ -387,16 +433,6 @@ let golden_projects () =
         | `Rejected m ->
             if contains "capability" m then Pass
             else Fail ("capability-denied-demo rejected for the wrong reason: " ^ m))
-
-let read_file path =
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
-let write_file path contents =
-  let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc contents)
 
 (* Rewrite a project's relative stdlib path to absolute so the project still
    builds after being copied out of the repo tree. *)
@@ -581,6 +617,12 @@ let checks : check list =
       section = "10.3";
       description = "a structured patch is checked, applied, and its audit chain verifies";
       run = patch_check_audit;
+    };
+    {
+      id = "edit-import";
+      section = "10.4";
+      description = "a text edit (diff of two versions) derives a valid structured patch";
+      run = edit_import;
     };
     {
       id = "harness";

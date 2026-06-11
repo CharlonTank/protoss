@@ -179,7 +179,7 @@ satisfaites.
 - **Done** : tests de partitionnement verts ; aucune régression perf du dev loop
   (byte-diff/PERF_STATS) ; fulltest vert.
 
-### G11 — Édition texte comme vue (import → patch) [pending]
+### G11 — Édition texte comme vue (import → patch) [done]
 - **Périmètre** : nouveau module + CLI — orchestrateur ou agent selon taille.
 - **Dépendances** : G6 souhaitable. **Agent** : possible.
 - **Goal** : `protoss edit import` (une édition de vue texte devient une
@@ -332,3 +332,10 @@ satisfaites.
   ni inter-monde), stable sur entrées identiques ; la clé pure partitionne par
   arguments. Exécutée en core (non-heavy), clés inchangées (zéro régression perf).
   Doctor = 24 pass / 0 fail / 2 not-yet. `@fulltest` vert.
+- 2026-06-11 — G11 Édition texte comme vue : CLI `protoss edit import|explain
+  <a> <b>` (wrappers sur `Workspace.patch_from_diff`/`diff` existants — une
+  différence entre deux versions devient un patch structuré candidate ; déjà
+  exposé aussi via MCP `proposePatch`). Preuve doctor `edit-import` (§10.4) : deux
+  mini-builds tmp (def modifiée), `patch_from_diff` dérive un `ReplaceDef`, et le
+  patch dérivé est valide (`Patch.check`) contre la version d'origine. Doctor =
+  25 pass / 0 fail / 2 not-yet (parités self-hosted §17). `@fulltest` vert.
