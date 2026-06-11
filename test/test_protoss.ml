@@ -470,6 +470,32 @@ let rec find_up start rel =
     let parent = Filename.dirname start in
     if String.equal parent start then fail ("cannot find " ^ rel) else find_up parent rel
 
+(* Bytecode format (G4): every example fixture that checks in isolation must
+   compile to bytecode whose encoding is deterministic and decode-round-trip
+   stable. Execution parity with the interpreter is G5. *)
+let () =
+  let examples_dir = Filename.dirname (find_up (Sys.getcwd ()) "examples/basic.protoss") in
+  let covered = ref 0 in
+  Sys.readdir examples_dir |> Array.to_list |> List.sort String.compare
+  |> List.iter (fun f ->
+         if Filename.check_suffix f ".protoss" then
+           let path = Filename.concat examples_dir f in
+           match Parser.parse_string (Store.read_file path) |> Kernel.check_program with
+           | exception _ -> () (* does not check in isolation: out of scope *)
+           | checked ->
+               let m = Bytecode.compile_checked checked in
+               let bytes1 = Bytecode.encode_module m in
+               let bytes2 = Bytecode.encode_module (Bytecode.decode_module bytes1) in
+               assert_true ("bytecode decode round-trip stable for " ^ f)
+                 (String.equal bytes1 bytes2);
+               assert_true ("bytecode hash deterministic for " ^ f)
+                 (String.equal (Bytecode.hash_module m)
+                    (Bytecode.hash_module (Bytecode.compile_checked checked)));
+               incr covered);
+  assert_true
+    (Printf.sprintf "bytecode sweep covers a healthy floor of fixtures (%d, need >= 20)" !covered)
+    (!covered >= 20)
+
 let () =
   let valid = "(def main Nat (succ 1))" in
   let invalid = "(def main Nat (succ 1)" in

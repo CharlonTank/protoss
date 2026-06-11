@@ -105,6 +105,17 @@ let ptb_roundtrip src =
     && String.equal binary (Canonical_binary.checked_to_binary back))
     "Protoss/B round-trip changed the canonical hash or is non-deterministic"
 
+let bytecode_roundtrip src =
+  let checked = check_source src in
+  let m = Bytecode.compile_checked checked in
+  let bytes1 = Bytecode.encode_module m in
+  let bytes2 = Bytecode.encode_module (Bytecode.decode_module bytes1) in
+  pass_if
+    (String.equal bytes1 bytes2
+    && String.equal (Bytecode.hash_module m)
+         (Bytecode.hash_module (Bytecode.compile_checked (check_source src))))
+    "bytecode encode/decode is non-deterministic or not round-trip stable"
+
 let human_roundtrip src =
   let program = Parser.parse_string src in
   let rendered = Surface_syntax.render_program program in
@@ -330,10 +341,16 @@ let checks : check list =
       run = (fun () -> Not_yet "checklist §14: wire via the todo app build");
     };
     {
+      id = "bytecode-encoding";
+      section = "15";
+      description = "graph compiles to bytecode with deterministic, round-trip-stable encoding";
+      run = (fun () -> bytecode_roundtrip rich_program);
+    };
+    {
       id = "bytecode-parity";
       section = "15";
       description = "bytecode VM executes at parity with the reference interpreter";
-      run = (fun () -> Not_yet "checklist §15: wired by goals G4/G5 (lib/bytecode)");
+      run = (fun () -> Not_yet "checklist §15: wired by goal G5 (bytecode executor)");
     };
     {
       id = "self-hosted-canonicalizer-parity";

@@ -79,7 +79,7 @@ satisfaites.
 - **Done** : cible de test dédiée, N itérations seedées en CI locale, zéro crash
   non structuré ; corpus de régression ; fulltest vert.
 
-### G4 — VM bytecode (format + compilation) [pending]
+### G4 — VM bytecode (format + compilation) [done]
 - **Périmètre agent** : nouveau `lib/bytecode.ml` (format d'instructions,
   encodage déterministe content-addressed, compilation graphe canonique →
   bytecode). Pas d'exécuteur dans ce goal. Rien d'autre.
@@ -234,3 +234,11 @@ satisfaites.
   assertion ciblée dans la section core ; doctor = 12 pass / 0 fail / 10 not-yet ;
   `@fulltest` vert. Arbitrage hérité de l'agent : capability-denied surface CAP001
   en check isolé, WORKSPACE001 (msg « missing capability ») en voie workspace.
+- 2026-06-11 — G4 VM bytecode (format) : `lib/bytecode.ml` (machine à pile, 44
+  opcodes, couverture exhaustive de `cterm`, encodage déterministe big-endian
+  longueur-préfixé, `compile_checked`/`encode_module`/`decode_module`/
+  `hash_module`). Preuve `bytecode-encoding` branchée dans le doctor (compile +
+  encode/decode round-trip + hash déterministe sur le programme riche), sweep de
+  test sur toutes les fixtures `examples/` isolées (plancher ≥ 20) ; doctor =
+  13 pass / 0 fail. `@fulltest` vert. Compile du premier coup, aucun symbole
+  kernel à exposer. Parité d'exécution = G5.
