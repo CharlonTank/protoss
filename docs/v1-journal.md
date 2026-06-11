@@ -138,3 +138,11 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   README + spec à jour, `spec check` 308 (était 307), doctor spec-audit PASS, `@fulltest` vert. Vérifié au
   passage : runtime web JS gère TOUS les widgets (ListView/WhenView/On/Node) → pas de trou de cohérence.
   Autres backends (wasm/llvm/js/sql/gpu) restent des stubs manifeste (post-V1).
+- 2026-06-12 — **`bytecode exec` FAIT** (commit 27ba586). Le backend émettait le `.ptvm` mais rien ne le
+  consommait, et `Bytecode_vm.exec_module` (exécute un module nu décodé, sans contexte checked) n'avait
+  aucun appelant. Branché à une commande CLI : `protoss bytecode exec <file.ptvm> --entry <name>` décode
+  le module buildé et exécute la def sur la VM → backend bytecode END-TO-END (build → .ptvm → exec, sans
+  source). Globals résolus parmi les defs du module, scope de capabilities vide → exact sur le fragment
+  pur (`bytecode run <src>` pour les defs à effets qui ont besoin des capabilities déclarées). Vérifié :
+  `main` d'un module buildé exec → 3 == run depuis source. Test de parité ajouté, README/usage à jour,
+  `@fulltest` vert. Le backend bytecode est désormais le 1er backend complet (compile + exécute).
