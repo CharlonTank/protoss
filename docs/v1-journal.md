@@ -40,7 +40,8 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
 - [ ] Inférence lambda anonyme en 1ʳᵉ position (`List.map (\x -> ...) xs`) — kernel, reste du fix HOF
 - [ ] Cas check pour les widgets restants (`on`, `image`, `when`) si une lambda/variant court y est attendu
 - [ ] Robustesse runtime/ledger/Process (audit ce tour : mûr — approfondir les cas limites resume/replay)
-- [ ] Fuzzer : nouvelle passe sur parser/checker/runtime pour débusquer des crashs non structurés
+- [x] Fuzzer : 5e target `checker` (parse + check_program), 0 crash / 2000 iter — FAIT, 9535f9b
+- [ ] `fmt --human` formes courtes : l'émetteur est hash-safe mais VERBEUX (émet `column (Cons …)` et `variant (Variant …) Set t` au lieu de `[ … ]` / `Set t`). Load-bearing → tour dédié (agent ?)
 - [ ] Audit spec : features de protoss-spec.md / ship-checklist marquées faibles ou incomplètes
 - [ ] Doc : cheatsheet de la syntaxe humaine Protoss/H
 
@@ -79,3 +80,11 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   inféré==annoté `p2:f359c2…` ; `priority_demo.sh` PASS (15 checks, patch+migration intacts) ; `@fulltest` vert.
   Série widgets bidirectionnels complète : column/row (7e82b31) → button (4071106) → input/list (8f1592e).
   Protoss/H exprime désormais une app full-stack entière à hash identique.
+- 2026-06-12 — **Fuzzer étendu au checker FAIT** (commit 9535f9b, harnais de test seul, 0 hash). Le
+  fuzzer de robustesse (G3) couvrait les 4 décodeurs d'entrée mais s'arrêtait au parser ; un programme
+  qui parse mais fait crasher le checker de façon non structurée passait. Ajout d'un 5e target `checker`
+  (parse + `check_program` sur seeds mutés bornés en profondeur → total → termine), + un seed « vue
+  complète » (column/input/list/button) pour couvrir les cas check_elab des widgets. Résultat :
+  success=311, structured=1689, **0 new + 0 known crash** → checker robuste sur entrée parsable.
+  `@fulltest --force` vert (targets=5, strict). Découverte annexe : `fmt --human` est hash-safe mais
+  émet du verbeux (Cons/Nil, variant explicite) → item « émetteur formes courtes » (tour dédié, load-bearing).
