@@ -1088,19 +1088,14 @@ let content_type path =
   else "text/plain"
 
 (* Dev-server live reload. `web build` stays pure/deterministic; this script is
-   injected only into the page that `serve`/`live` hands out. The client polls
-   /livereload for the current build id and reloads when it changes. *)
+   injected only into the page that `serve`/`live` hands out. The browser opens
+   an SSE stream (/livereload) and reloads when the server PUSHES an event after
+   a rebuild — no client-side polling. *)
 let livereload_script =
   "<script>\n\
   \  (function () {\n\
-  \    var last = null;\n\
-  \    function poll() {\n\
-  \      fetch('/livereload').then(function (r) { return r.text(); }).then(function (v) {\n\
-  \        if (last === null) { last = v; }\n\
-  \        else if (v !== last) { location.reload(); }\n\
-  \      }).catch(function () {}).then(function () { setTimeout(poll, 1000); });\n\
-  \    }\n\
-  \    poll();\n\
+  \    var es = new EventSource('/livereload');\n\
+  \    es.onmessage = function () { location.reload(); };\n\
   \  })();\n\
    </script>\n"
 
@@ -1116,9 +1111,8 @@ let inject_before_body html =
 
 let serve ?(port = 8080) project =
   let output = ref (build project) in
-  (* Watch the project's .protoss sources by mtime; rebuild lazily when a poll
-     arrives and something changed (mtimes drive only the dev watch, never the
-     deterministic store/bundle). *)
+  (* Watch the project's .protoss sources by mtime. mtimes drive only the dev
+     watch, never the deterministic store/bundle. *)
   let source_mtimes () =
     let manifest = Workspace.parse_manifest (Workspace.project_root project) in
     Workspace.project_source_files manifest
@@ -1144,22 +1138,24 @@ let serve ?(port = 8080) project =
   Unix.listen sock 10;
   Printf.printf "Serving %s on http://127.0.0.1:%d/  (live reload on .protoss save)\n%!"
     (!output).out_dir port;
-  let rec loop () =
-    let client, _ = Unix.accept sock in
-    let ic = Unix.in_channel_of_descr client and oc = Unix.out_channel_of_descr client in
-    let line = try input_line ic with End_of_file -> "GET / HTTP/1.1" in
-    let raw_path =
-      match String.split_on_char ' ' line with
-      | _ :: raw :: _ -> if raw = "/" then "/index.html" else raw
-      | _ -> "/index.html"
-    in
+  (* Open SSE streams. Both channels are retained so the fd isn't GC-closed. *)
+  let sse_clients = ref [] in
+  let notify_reload () =
+    sse_clients :=
+      List.filter
+        (fun (_ic, oc) ->
+          match (try output_string oc "data: reload\n\n"; flush oc; true with _ -> false) with
+          | true -> true
+          | false ->
+              (try close_out_noerr oc with _ -> ());
+              false)
+        !sse_clients
+  in
+  let serve_file oc raw_path =
     let path = Filename.basename raw_path in
     let out_dir = (!output).out_dir in
     let status, body =
       match raw_path with
-      | "/livereload" ->
-          if sources_changed () then rebuild ();
-          ("200 OK", (!output).build.Workspace.build_id ^ "\n")
       | "/index.html" -> ("200 OK", inject_before_body (read_file (Filename.concat out_dir "index.html")))
       | "/app" -> ("200 OK", read_file (Filename.concat out_dir "protoss-app.json"))
       | "/graph" -> ("200 OK", read_file (Filename.concat out_dir "protoss-graph.json"))
@@ -1176,9 +1172,38 @@ let serve ?(port = 8080) project =
       ("HTTP/1.1 " ^ status ^ "\r\nContent-Type: " ^ content_type file
      ^ "\r\nContent-Length: " ^ string_of_int (String.length body)
      ^ "\r\nConnection: close\r\n\r\n" ^ body);
-    flush oc;
-    close_in_noerr ic;
-    close_out_noerr oc;
+    flush oc
+  in
+  let handle_connection () =
+    let client, _ = Unix.accept sock in
+    let ic = Unix.in_channel_of_descr client and oc = Unix.out_channel_of_descr client in
+    let line = try input_line ic with End_of_file -> "GET / HTTP/1.1" in
+    let raw_path =
+      match String.split_on_char ' ' line with
+      | _ :: raw :: _ -> if raw = "/" then "/index.html" else raw
+      | _ -> "/index.html"
+    in
+    if String.equal raw_path "/livereload" then (
+      (* SSE stream: send headers, keep the connection open, push on rebuild. *)
+      output_string oc
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/event-stream\r\n\
+         Cache-Control: no-cache\r\n\
+         Connection: keep-alive\r\n\r\n: connected\n\n";
+      flush oc;
+      sse_clients := (ic, oc) :: !sse_clients)
+    else (
+      serve_file oc raw_path;
+      close_in_noerr ic;
+      close_out_noerr oc)
+  in
+  (* Multiplex: wait up to 200ms for a connection; on timeout, check the sources
+     and push a reload to open SSE streams if anything changed. The visible part
+     (the browser) never polls — it just holds an SSE stream. *)
+  let rec loop () =
+    let ready = try let r, _, _ = Unix.select [ sock ] [] [] 0.2 in r with _ -> [] in
+    if ready = [] then (if sources_changed () then (rebuild (); notify_reload ()))
+    else handle_connection ();
     loop ()
   in
   loop ()
