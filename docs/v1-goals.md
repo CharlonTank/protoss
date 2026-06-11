@@ -66,7 +66,7 @@ satisfaites.
 - **Done** : chaque projet validé par ses commandes depuis la racine du repo ;
   intégration par l'orchestrateur dans doctor + tests ; fulltest vert.
 
-### G3 — Fuzzing parsers et formats [pending]
+### G3 — Fuzzing parsers et formats [done]
 - **Périmètre agent** : nouveau `test/fuzz_protoss.ml` (+ corpus sous
   `test/fuzz-corpus/**`). Rien d'autre ; le `dune` du test est branché par
   l'orchestrateur.
@@ -242,3 +242,17 @@ satisfaites.
   test sur toutes les fixtures `examples/` isolées (plancher ≥ 20) ; doctor =
   13 pass / 0 fail. `@fulltest` vert. Compile du premier coup, aucun symbole
   kernel à exposer. Parité d'exécution = G5.
+- 2026-06-11 — G3 Fuzzing : `test/fuzz_protoss.ml` (fuzzer déterministe seedé,
+  4 cibles — parser S-expr, Elm-like, décodeur `.ptb`, patch JSON — 2000
+  itérations/cible, mutation de corpus + génération bornée), corpus de régression
+  `test/fuzz-corpus/` (24 fichiers), alias `@fuzztest` (mode `--strict`) branché
+  dans `@fulltest`. L'agent a trouvé 3 vrais crashs `int_of_string` non
+  structurés ; **corrigés dans le noyau** (`lib/parser.ml` TVar/Forall via
+  `int_atom`, `lib/kernel.ml` `type_of_canonical_sexp` TVar/Forall et
+  `cterm_of_canonical_sexp` CVar via `parse_nat_atom` → erreur structurée). Les
+  fichiers `crash_*` reclassés en `clean_*` (gardes de régression). Preuve doctor
+  `structured-errors-on-hostile-input` (§21) ajoutée ; doctor = 14 pass / 0 fail.
+  Fuzzer strict : 8000 itérations, 0 crash non structuré ; `@fulltest` vert.
+  Corrections d'entrée invalide uniquement → aucun hash de programme valide
+  affecté. Finding mineur restant (Sexp.Error wrappé INTERNAL001 en loader/patch)
+  noté, non bloquant (déjà structuré).

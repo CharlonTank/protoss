@@ -1,0 +1,1 @@
+{ "op":"AddDef", "name":"x", "deps":[], "type":{"source":"(Forall abc Nat)"}, "expr":{"source":"1"} }

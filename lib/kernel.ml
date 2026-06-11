@@ -3533,9 +3533,12 @@ let rec type_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "Stream"; t ] -> TStream (type_of_canonical_sexp t)
   | Sexp.List [ Sexp.Atom "Automaton"; state; output ] ->
       TAutomaton (type_of_canonical_sexp state, type_of_canonical_sexp output)
-  | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom i ] -> TVar (int_of_string i)
-  | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom arity; body ] ->
-      TForall (int_of_string arity, type_of_canonical_sexp body)
+  | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom i ] -> (
+      match parse_nat_atom i with Some n -> TVar n | None -> fail ("invalid TVar index: " ^ i))
+  | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom arity; body ] -> (
+      match parse_nat_atom arity with
+      | Some n -> TForall (n, type_of_canonical_sexp body)
+      | None -> fail ("invalid Forall arity: " ^ arity))
   | Sexp.List (Sexp.Atom "Named" :: Sexp.Atom n :: args) ->
       TNamed (n, List.map type_of_canonical_sexp args)
   | Sexp.List (Sexp.Atom "Record" :: fields) ->
@@ -3576,7 +3579,10 @@ let rec cterm_of_canonical_sexp = function
   | Sexp.List [ Sexp.Atom "ref"; Sexp.Atom def_id ] -> CGlobal def_id
   | Sexp.Atom s -> (
       match (strip_prefix "#" s, strip_prefix "@" s, parse_nat_atom s) with
-      | Some i, _, _ -> CVar (int_of_string i)
+      | Some i, _, _ -> (
+          match parse_nat_atom i with
+          | Some n -> CVar n
+          | None -> fail ("invalid canonical De Bruijn index: " ^ s))
       | _, Some name, _ -> CGlobal name
       | _, _, Some n -> CNat n
       | _ -> fail ("invalid canonical atom: " ^ s))

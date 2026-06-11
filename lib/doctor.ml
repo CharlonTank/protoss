@@ -84,6 +84,14 @@ let structural_rec = "(defrec count (-> Nat Nat) (nat n) (zero 0) (step acc (suc
 
 let ill_typed = "(def bad Nat true)"
 
+(* Hostile inputs that once crashed the parser with a raw int_of_string; they
+   must now fail through the structured error layer, never a bare exception. *)
+let hostile_inputs =
+  [
+    "(def m (TVar abc) 0)";
+    "(def m (Forall x Nat) (lambda (y Nat) y))";
+  ]
+
 (* ----- proofs ------------------------------------------------------------ *)
 
 let ptc_roundtrip src =
@@ -104,6 +112,15 @@ let ptb_roundtrip src =
     (String.equal (Kernel.hash_program checked) (Kernel.hash_program back)
     && String.equal binary (Canonical_binary.checked_to_binary back))
     "Protoss/B round-trip changed the canonical hash or is non-deterministic"
+
+(* A hostile input must be rejected through the structured error layer
+   (Kernel.Error / Parser.Error), not by a raw exception (Failure, Not_found,
+   …) escaping to the user. *)
+let structured_rejection src =
+  match check_source src with
+  | _ -> Fail ("hostile input was accepted: " ^ src)
+  | exception (Kernel.Error _ | Parser.Error _) -> Pass
+  | exception e -> Fail ("hostile input crashed unstructured: " ^ Printexc.to_string e)
 
 let bytecode_roundtrip src =
   let checked = check_source src in
@@ -363,6 +380,18 @@ let checks : check list =
       section = "17";
       description = "Protoss patch validator matches Patch.check verdicts";
       run = (fun () -> Not_yet "checklist §17: wired by goal G8");
+    };
+    {
+      id = "structured-errors-on-hostile-input";
+      section = "21";
+      description = "malformed input fails through the structured error layer, never a raw crash";
+      run =
+        (fun () ->
+          let rec all = function
+            | [] -> Pass
+            | src :: rest -> ( match structured_rejection src with Pass -> all rest | other -> other)
+          in
+          all hostile_inputs);
     };
     {
       id = "benchmarks-thresholds";

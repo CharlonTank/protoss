@@ -140,8 +140,12 @@ let rec parse_type = function
       TCmd (Some (parse_capability_atoms "command capability" caps), parse_type t)
   | Sexp.List [ Sexp.Atom "SecretRef"; Sexp.Atom scope; t ] ->
       TSecretRef (scope, parse_type t)
-  | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> TVar (int_of_string n)
-  | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom n; t ] -> TForall (int_of_string n, parse_type t)
+  | Sexp.List [ Sexp.Atom "TVar"; Sexp.Atom n ] -> (
+      match int_atom n with Some i -> TVar i | None -> fail ("invalid TVar index: " ^ n))
+  | Sexp.List [ Sexp.Atom "Forall"; Sexp.Atom n; t ] -> (
+      match int_atom n with
+      | Some i -> TForall (i, parse_type t)
+      | None -> fail ("invalid Forall arity: " ^ n))
   | Sexp.List [ Sexp.Atom "->"; a; b ] -> TFun (parse_type a, parse_type b)
   | Sexp.List (Sexp.Atom "Tuple" :: elems) ->
       ensure_tuple_arity "Tuple type" elems;

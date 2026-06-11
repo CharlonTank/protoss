@@ -8,6 +8,25 @@
  (modules smoke)
  (libraries protoss unix))
 
+(executable
+ (name fuzz_protoss)
+ (modules fuzz_protoss)
+ (libraries protoss unix))
+
+; Deterministic (seeded) fuzz harness over the parser/decoder surfaces. Runs in
+; --strict mode: any unstructured crash fails the run. The crash_* corpus files
+; that pinned the old int_of_string crashes are now clean_* regression guards.
+(rule
+ (alias fuzztest)
+ (deps
+  (source_tree fuzz-corpus)
+  (glob_files %{workspace_root}/examples/*.protoss)
+  (glob_files %{workspace_root}/examples/*.ptb)
+  (glob_files %{workspace_root}/patches/*.json))
+ (action
+  (setenv PROTOSS_GLOBAL_STORE ""
+   (run ./fuzz_protoss.exe --strict))))
+
 (rule
  (alias runtest)
  (action (setenv PROTOSS_GLOBAL_STORE ""
@@ -168,6 +187,7 @@
   (alias coretest)
   (alias selftest)
   (alias stdlibtest)
+  (alias fuzztest)
   (alias integrationtest-workspace)
   (alias integrationtest-web-app)
   (alias integrationtest-web-patches)
