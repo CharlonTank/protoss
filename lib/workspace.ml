@@ -254,38 +254,64 @@ let project_root path =
    init/update/view, the architecture `protoss app check` and `web build`/`serve`
    expect. It uses the prelude (Nat.toString, String.concat), so the generated
    manifest points `stdlib` at the resolved prelude path. *)
-(* The scaffold is written in Protoss/H (the Elm-like surface), so the first
-   thing `protoss init` shows is the ergonomic syntax: a transparent [type
-   alias], list literals [ ... ], and short variant constructors [(Increment
-   unit)]. It canonicalizes byte-identically to the explicit S-expression form
-   (proven: this source and the verbose [(variant (Variant ...) Increment unit)]
-   / [Cons/Nil] form both build to p2:b96036…), so nothing downstream changes. *)
+(* The scaffold is a FULL-STACK app, Lamdera-shaped: src/app.protoss is the
+   frontend in Protoss/H (the Elm-like surface — transparent type aliases, list
+   literals, short variant constructors, bare lambdas) with a local counter AND
+   a shared counter that round-trips through the backend (`bind (Server.request
+   "__backend" ...)` — the browser runtime POSTs it to /__server and resumes
+   with the response). src/backend.protoss holds the backend half
+   (initBackend/updateBackend over the ledger-backed BackendModel,
+   docs/backend-architecture.md); it stays in S-expression form until the
+   Elm-like surface can spell a nested `Cmd { caps }` scope. *)
 let counter_app_source =
   String.concat "\n"
-    [ "type alias Msg =";
-      "    Variant (Increment Unit) (Reset Unit)";
+    [ "capabilities Server.request";
       "";
-      "init : Process Nat";
+      "type alias Msg =";
+      "    Variant (Bump Unit) (BumpShared Unit)";
+      "";
+      "type alias Model =";
+      "    { count : Nat, shared : String }";
+      "";
+      "init : Process Model";
       "init =";
-      "    done 0";
+      "    done { count = 0, shared = \"(click Bump shared)\" }";
       "";
-      "update : Msg -> Nat -> Process Nat";
+      "update : Msg -> Model -> Process Model";
       "update msg model =";
       "    case msg of";
-      "        Increment _ -> done (succ model)";
-      "        Reset _ -> done 0";
+      "        Bump _ -> done { model | count = succ model.count }";
+      "        BumpShared _ ->";
+      "            bind (Server.request \"__backend\" \"(Bump unit)\") (\\reply -> done { model \
+       | shared = reply })";
       "";
-      "view : Nat -> View Msg";
+      "view : Model -> View Msg";
       "view model =";
       "    column";
-      "        [ text (String.concat \"Count: \" (Nat.toString model))";
-      "        , button \"Increment\" (Increment unit)";
-      "        , button \"Reset\" (Reset unit)";
+      "        [ text \"Protoss full-stack counter\"";
+      "        , text (String.concat \"local: \" (Nat.toString model.count))";
+      "        , button \"Bump local\" (Bump unit)";
+      "        , text (String.concat \"backend: \" model.shared)";
+      "        , button \"Bump shared (via server)\" (BumpShared unit)";
       "        ]";
       "";
     ]
 
-let manifest_source ~entrypoint ~stdlib =
+let backend_app_source =
+  String.concat "\n"
+    [ "(def initBackend (Record (count Nat)) (record (count 0)))";
+      "";
+      "(def updateBackend";
+      "  (-> (Variant (Bump Unit))";
+      "      (-> (Record (count Nat))";
+      "          (Tuple (Record (count Nat)) (Cmd (capabilities) (Variant (Synced Nat))))))";
+      "  (lambda (msg (Variant (Bump Unit)))";
+      "    (lambda (model (Record (count Nat)))";
+      "      (tuple (record (count (succ (get model count)))) unit))))";
+      "";
+    ]
+
+let manifest_source ?(capabilities = []) ~entrypoint ~stdlib () =
   Printf.sprintf
     "name = \"protoss-app\"\n\
      version = \"0.1.0\"\n\
@@ -294,7 +320,7 @@ let manifest_source ~entrypoint ~stdlib =
      source_dirs = [\"src\"]\n\
      store_dir = \".protoss/store\"\n\
      cache_dir = \".protoss/cache\"\n\
-     capabilities = []\n\
+     capabilities = [%s]\n\
      policies = []\n\
      package_aliases = []\n\
      package_policy_aliases = []\n\
@@ -304,6 +330,7 @@ let manifest_source ~entrypoint ~stdlib =
      package_interfaces = []\n\
      package_contracts = []\n"
     entrypoint stdlib
+    (String.concat ", " (List.map (fun c -> "\"" ^ c ^ "\"") capabilities))
 
 (* [app] generates the full-stack counter skeleton instead of the trivial
    [(def main Nat 0)]. [stdlib] is the prelude path recorded in the manifest
@@ -321,10 +348,16 @@ let init ?(force = false) ?(app = false) ?stdlib root =
   if Sys.file_exists manifest && not force then fail ("manifest already exists: " ^ manifest);
   let stdlib_line = match stdlib with Some p -> p | None -> "none" in
   let entrypoint = if app then "src/app.protoss" else "src/main.protoss" in
-  write_file manifest (manifest_source ~entrypoint ~stdlib:stdlib_line);
+  write_file manifest
+    (manifest_source
+       ~capabilities:(if app then [ "Server.request" ] else [])
+       ~entrypoint ~stdlib:stdlib_line ());
   let source_file = Filename.concat src (if app then "app.protoss" else "main.protoss") in
   if not (Sys.file_exists source_file) then
     write_file source_file (if app then counter_app_source else "(def main Nat 0)\n");
+  (if app then
+     let backend_file = Filename.concat src "backend.protoss" in
+     if not (Sys.file_exists backend_file) then write_file backend_file backend_app_source);
   manifest
 
 let source_extensions = [ ".protoss"; ".pt" ]

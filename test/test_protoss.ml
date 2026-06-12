@@ -6187,24 +6187,31 @@ let () =
   if workspace_part "project" then (
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
-  (* init ~app generates the runnable full-stack skeleton: app.protoss with
-     init/update/view, wired to the given prelude path. It is written in
-     Protoss/H (the Elm-like surface), so the skeleton carries signatures and
-     short variant constructors, not the verbose S-expression def forms. *)
+  (* init ~app generates the runnable FULL-STACK skeleton: a Protoss/H frontend
+     (app.protoss, init/update/view + a Server.request round-trip to the
+     backend) and the backend half (backend.protoss, initBackend/updateBackend),
+     with the Server.request capability declared in the manifest. *)
   (let app_init_root = temp_dir "project-init-app" in
    ignore (Workspace.init ~app:true ~stdlib:"/p/prelude.protoss" app_init_root);
    let toml = Store.read_file (Filename.concat app_init_root "protoss.toml") in
    let app_src = Store.read_file (Filename.concat app_init_root "src/app.protoss") in
+   let backend_src = Store.read_file (Filename.concat app_init_root "src/backend.protoss") in
    assert_true "init --app points the entrypoint at app.protoss"
      (contains_substring toml "src/app.protoss");
    assert_true "init --app records the prelude path in stdlib"
      (contains_substring toml "/p/prelude.protoss");
+   assert_true "init --app declares the Server.request capability"
+     (contains_substring toml "capabilities = [\"Server.request\"]");
    assert_true "init --app writes a Protoss/H init/update/view skeleton"
-     (contains_substring app_src "init : Process Nat"
-     && contains_substring app_src "update : Msg -> Nat -> Process Nat"
-     && contains_substring app_src "view : Nat -> View Msg");
-   assert_true "init --app skeleton uses the short Protoss/H surface forms"
-     (contains_substring app_src "button \"Increment\" (Increment unit)"));
+     (contains_substring app_src "init : Process Model"
+     && contains_substring app_src "update : Msg -> Model -> Process Model"
+     && contains_substring app_src "view : Model -> View Msg");
+   assert_true "init --app frontend round-trips through the backend"
+     (contains_substring app_src "Server.request \"__backend\""
+     && contains_substring app_src "button \"Bump local\" (Bump unit)");
+   assert_true "init --app writes the backend half"
+     (contains_substring backend_src "def initBackend"
+     && contains_substring backend_src "def updateBackend"));
   let init_manifest = Workspace.parse_manifest project_init_root in
   Workspace.check_project init_manifest;
   let init_build = Workspace.build init_manifest in
