@@ -1233,6 +1233,19 @@ let runtime_js =
       var worldRef = app.worldRef;
       var ledger = [];
       var pending = {};
+      // --- Time-travel debugger state (dev tooling; see _active.debug) ---
+      // [history] is every dispatched msg in present order; [responses] maps a
+      // deterministic requestId to the typed response it resumed with, so a
+      // past state can be REFOLDED from init without re-firing any transport
+      // (replay resolves suspensions from this table). While traveling,
+      // [presentModel] carries the real model forward silently and incoming
+      // dispatches park in [travelQueue] (replayed on return), so the past
+      // view stays stable without losing the present.
+      var history = [];
+      var responses = {};
+      var presentModel = null;
+      var travelIndex = null;
+      var travelQueue = [];
       function record(kind, payload) {
         var body = JSON.stringify({ world: worldRef, kind: kind, payload: payload });
         var eventRef = hashString("event:" + body);
@@ -1256,6 +1269,7 @@ let runtime_js =
         if (request.expected === "Value" && !(typed && typed.tag))
           throw new Error("backend response is not a structured value");
         delete pending[requestId];
+        responses[requestId] = typed;
         record("resume", {
           requestId: requestId,
           requestSignatureRef: request.requestSignatureRef,
@@ -1268,6 +1282,9 @@ let runtime_js =
       }
       function handleProcess(process) {
         if (process.tag === "Done") {
+          // While time traveling, a completing process (e.g. a POST that was
+          // in flight) advances the PRESENT silently; the past view stays put.
+          if (travelIndex !== null) { presentModel = process.value; return; }
           modelValue = process.value;
           render();
           return;
@@ -1330,6 +1347,10 @@ let runtime_js =
         var msg = rawMsg && rawMsg.inputHandler
           ? machine.apply(rawMsg.inputHandler, jsToStringValue(rawMsg.value))
           : rawMsg;
+        // Frozen past: park the msg (UI clicks AND pushed broadcasts) and
+        // replay it through this same path when travel returns to present.
+        if (travelIndex !== null) { travelQueue.push(msg); return; }
+        history.push(msg);
         record("message", msg);
         var result = machine.update(app.update, msg, modelValue);
         if (app.architecture === "cmd") {
@@ -1338,6 +1359,56 @@ let runtime_js =
         } else {
           handleProcess(result);
         }
+      }
+      // Refold the model after history[0..k-1] from init, resolving process
+      // suspensions from [responses] — never re-firing a transport. A msg whose
+      // request was never answered leaves the model unchanged, exactly like the
+      // real run did. Returns {ok:false} when init itself suspends (effectful
+      // init has no replayable starting point).
+      function replayModel(k) {
+        var model;
+        if (app.initialModel != null) { model = app.initialModel; }
+        else {
+          var initP = machine.def(app.init);
+          if (initP.tag !== "Done") return { ok: false, reason: "effectful init" };
+          model = initP.value;
+        }
+        for (var i = 0; i < k && i < history.length; i++) {
+          var p = machine.update(app.update, history[i], model);
+          if (app.architecture === "cmd") { model = modelFromCommandResult(p); continue; }
+          var guard = 0;
+          while (p.tag !== "Done" && guard++ < 1000) {
+            var resp = responses[p.requestId];
+            if (resp === undefined) break;
+            p = machine.resume(p, resp);
+          }
+          if (p.tag === "Done") model = p.value;
+        }
+        return { ok: true, model: model };
+      }
+      function travelTo(k) {
+        var r = replayModel(k);
+        if (!r.ok) return r;
+        if (travelIndex === null) presentModel = modelValue;
+        travelIndex = k;
+        modelValue = r.model;
+        render();
+        return { ok: true, index: k };
+      }
+      function travelPresent() {
+        if (travelIndex === null) return { ok: true };
+        modelValue = presentModel;
+        travelIndex = null;
+        presentModel = null;
+        render();
+        var parked = travelQueue.slice();
+        travelQueue = [];
+        parked.forEach(dispatch);
+        return { ok: true };
+      }
+      function msgLabel(m) {
+        if (m && m.tag === "Variant") return m.constructor;
+        return (m && m.tag) || "?";
       }
       function render() {
         var view = machine.view(app.view, modelValue);
@@ -1357,7 +1428,16 @@ let runtime_js =
         pending: pending,
         resume: resumeRequest,
         model: function () { return modelValue; },
-        world: function () { return worldRef; }
+        world: function () { return worldRef; },
+        // Time-travel debugger API (consumed by the dev server's devbar; also
+        // usable from the console). Replay is pure over recorded history —
+        // no transport is ever re-fired.
+        debug: {
+          timeline: function () { return history.map(msgLabel); },
+          traveling: function () { return travelIndex; },
+          travelTo: travelTo,
+          travelPresent: travelPresent
+        }
       };
       // Server->client receive (docs/backend-architecture.md): iff the app
       // declares `fromBackend : ToFrontend -> Msg`, subscribe to the broadcast
@@ -1752,15 +1832,138 @@ let livereload_script =
   \  })();\n\
    </script>\n"
 
+(* Full-stack time-travel devbar (dev tooling only, like the livereload script:
+   injected into the served page, never into built bundles). Left pane: the
+   frontend message history from the runtime's debug API — clicking an entry
+   refolds the model at that point (transport never re-fired) and freezes the
+   page in the past (orange outline; incoming messages park and replay on
+   "present"). Right pane: the backend's to-backend ledger history with the
+   folded BackendModel after each event, fetched from /__debug/backend. *)
+let debug_bar_script =
+  "<script>\n\
+   (function () {\n\
+  \  var open = false;\n\
+  \  var btn = document.createElement('button');\n\
+  \  btn.id = 'protoss-devbar-toggle';\n\
+  \  btn.textContent = '\\u29D7';\n\
+  \  btn.title = 'Protoss time-travel debugger';\n\
+  \  btn.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:99990;width:40px;height:40px;'\n\
+  \    + 'border-radius:20px;border:1px solid #10202c;background:#10202c;color:#fff;'\n\
+  \    + 'font:700 18px system-ui;cursor:pointer;opacity:0.85;';\n\
+  \  var bar = document.createElement('div');\n\
+  \  bar.id = 'protoss-devbar';\n\
+  \  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:260px;z-index:99989;'\n\
+  \    + 'display:none;background:#0d1722;color:#dfe7ee;font:12px ui-monospace,Menlo,monospace;'\n\
+  \    + 'border-top:2px solid #1f3242;box-shadow:0 -8px 30px rgba(0,0,0,0.35);';\n\
+  \  bar.innerHTML =\n\
+  \    '<div style=\"display:flex;height:100%\">'\n\
+  \    + '<div style=\"flex:1;display:flex;flex-direction:column;border-right:1px solid #1f3242;min-width:0\">'\n\
+  \    +   '<div style=\"padding:6px 10px;border-bottom:1px solid #1f3242;display:flex;gap:8px;align-items:center\">'\n\
+  \    +     '<b>frontend</b><span id=\"protoss-tt-state\" style=\"color:#7fd1b9\"></span>'\n\
+  \    +     '<span style=\"flex:1\"></span>'\n\
+  \    +     '<button id=\"protoss-tt-init\" style=\"cursor:pointer\">\\u23EE init</button>'\n\
+  \    +     '<button id=\"protoss-tt-present\" style=\"cursor:pointer\">\\u25B6 present</button>'\n\
+  \    +   '</div>'\n\
+  \    +   '<div id=\"protoss-tt-msgs\" style=\"flex:1;overflow:auto;padding:6px 10px\"></div>'\n\
+  \    + '</div>'\n\
+  \    + '<div style=\"flex:1;display:flex;flex-direction:column;min-width:0\">'\n\
+  \    +   '<div style=\"padding:6px 10px;border-bottom:1px solid #1f3242;display:flex;gap:8px;align-items:center\">'\n\
+  \    +     '<b>backend</b><span style=\"color:#9db4c6\">to-backend ledger</span>'\n\
+  \    +     '<span style=\"flex:1\"></span>'\n\
+  \    +     '<button id=\"protoss-tt-refresh\" style=\"cursor:pointer\">\\u21BB refresh</button>'\n\
+  \    +   '</div>'\n\
+  \    +   '<div id=\"protoss-tt-backend\" style=\"flex:1;overflow:auto;padding:6px 10px\"></div>'\n\
+  \    + '</div>'\n\
+  \    + '</div>';\n\
+  \  function dbg() {\n\
+  \    return window.ProtossRuntime && window.ProtossRuntime._active && window.ProtossRuntime._active.debug;\n\
+  \  }\n\
+  \  function compact(v) {\n\
+  \    var s = JSON.stringify(v);\n\
+  \    return s.length > 70 ? s.slice(0, 70) + '\\u2026' : s;\n\
+  \  }\n\
+  \  function renderFrontend() {\n\
+  \    var d = dbg();\n\
+  \    if (!d) return;\n\
+  \    var at = d.traveling();\n\
+  \    var labels = d.timeline();\n\
+  \    document.getElementById('protoss-tt-state').textContent =\n\
+  \      at === null ? labels.length + ' msgs (live)' : 'time traveling @' + at + '/' + labels.length;\n\
+  \    document.body.style.outline = at === null ? '' : '3px solid #d97706';\n\
+  \    document.body.style.outlineOffset = at === null ? '' : '-3px';\n\
+  \    var host = document.getElementById('protoss-tt-msgs');\n\
+  \    host.innerHTML = '';\n\
+  \    labels.forEach(function (label, i) {\n\
+  \      var row = document.createElement('div');\n\
+  \      row.textContent = i + ' \\u2192 ' + label;\n\
+  \      var here = at !== null && at === i + 1;\n\
+  \      row.style.cssText = 'padding:2px 6px;cursor:pointer;border-radius:4px;'\n\
+  \        + (here ? 'background:#d97706;color:#0d1722;font-weight:700;' : '');\n\
+  \      row.onmouseenter = function () { if (!here) row.style.background = '#16283a'; };\n\
+  \      row.onmouseleave = function () { if (!here) row.style.background = ''; };\n\
+  \      row.onclick = function () { d.travelTo(i + 1); renderFrontend(); };\n\
+  \      host.appendChild(row);\n\
+  \    });\n\
+  \    if (!labels.length) host.textContent = '(no messages dispatched yet)';\n\
+  \  }\n\
+  \  function renderBackend() {\n\
+  \    fetch('/__debug/backend').then(function (r) {\n\
+  \      if (!r.ok) throw new Error('no backend');\n\
+  \      return r.text();\n\
+  \    }).then(function (t) {\n\
+  \      var data = JSON.parse(t);\n\
+  \      var host = document.getElementById('protoss-tt-backend');\n\
+  \      host.innerHTML = '';\n\
+  \      var init = document.createElement('div');\n\
+  \      init.textContent = 'init \\u2192 ' + compact(data.initial);\n\
+  \      init.style.cssText = 'padding:2px 6px;color:#9db4c6';\n\
+  \      host.appendChild(init);\n\
+  \      (data.events || []).forEach(function (e, i) {\n\
+  \        var row = document.createElement('div');\n\
+  \        row.textContent = i + ' ' + e.message + ' \\u2192 ' + compact(e.model);\n\
+  \        row.style.cssText = 'padding:2px 6px';\n\
+  \        host.appendChild(row);\n\
+  \      });\n\
+  \      if (!(data.events || []).length) {\n\
+  \        var empty = document.createElement('div');\n\
+  \        empty.textContent = '(no to-backend events yet)';\n\
+  \        empty.style.cssText = 'padding:2px 6px;color:#9db4c6';\n\
+  \        host.appendChild(empty);\n\
+  \      }\n\
+  \    }).catch(function () {\n\
+  \      document.getElementById('protoss-tt-backend').textContent = '(no backend half)';\n\
+  \    });\n\
+  \  }\n\
+  \  var timer = null;\n\
+  \  btn.onclick = function () {\n\
+  \    open = !open;\n\
+  \    bar.style.display = open ? 'block' : 'none';\n\
+  \    if (open) {\n\
+  \      renderFrontend();\n\
+  \      renderBackend();\n\
+  \      timer = setInterval(renderFrontend, 2000);\n\
+  \    } else if (timer) { clearInterval(timer); timer = null; }\n\
+  \  };\n\
+  \  document.addEventListener('DOMContentLoaded', function () {\n\
+  \    document.body.appendChild(btn);\n\
+  \    document.body.appendChild(bar);\n\
+  \    document.getElementById('protoss-tt-init').onclick = function () { var d = dbg(); if (d) { d.travelTo(0); renderFrontend(); } };\n\
+  \    document.getElementById('protoss-tt-present').onclick = function () { var d = dbg(); if (d) { d.travelPresent(); renderFrontend(); } };\n\
+  \    document.getElementById('protoss-tt-refresh').onclick = renderBackend;\n\
+  \  });\n\
+   })();\n\
+   </script>\n"
+
 let inject_before_body html =
   let needle = "</body>" in
+  let injected = livereload_script ^ debug_bar_script in
   let nl = String.length needle and sl = String.length html in
   let rec find i =
     if i + nl > sl then None else if String.equal (String.sub html i nl) needle then Some i else find (i + 1)
   in
   match find 0 with
-  | Some i -> String.sub html 0 i ^ livereload_script ^ String.sub html i (sl - i)
-  | None -> html ^ livereload_script
+  | Some i -> String.sub html 0 i ^ injected ^ String.sub html i (sl - i)
+  | None -> html ^ injected
 
 (* [server_request] is the typed transport hook (docs/backend-architecture.md):
    the browser runtime POSTs suspended transport effects to /__server. Two
@@ -1777,8 +1980,10 @@ let inject_before_body html =
    called once per new /__events subscriber with the current checked program,
    it returns [Some toFrontendValueJson] to push to THAT client immediately —
    the Lamdera "send the connecting client the current state" move.
+   [backend_debug] feeds the time-travel devbar: GET /__debug/backend answers
+   its JSON (the backend timeline — read-only over the ledger), 404 when absent.
    [bind_any] listens on 0.0.0.0 for deployment. *)
-let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event project =
+let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event ?backend_debug project =
   (* Every browser reload drops and reopens its SSE stream, so the next push
      writes to a closed socket. Ignore SIGPIPE so that write raises an EPIPE
      exception the notify loop catches and prunes, instead of killing the
@@ -2021,6 +2226,23 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event proj
     in
     if String.equal meth "POST" && String.equal raw_path "/__server" then (
       handle_server_post ic oc;
+      close_in_noerr ic;
+      close_out_noerr oc)
+    else if String.equal raw_path "/__debug/backend" then (
+      (* Time-travel devbar feed: the backend's to-backend history with the
+         folded model after each event. Read-only; dev server only. *)
+      (match backend_debug with
+      | None -> respond_text oc "404 Not Found" "debug endpoint unavailable\n"
+      | Some bd -> (
+          match
+            try bd ~checked:(!output).build.Workspace.checked
+            with e ->
+              Printf.eprintf "protoss live: /__debug/backend failed: %s\n%!"
+                (match e with Kernel.Error m | Error m -> m | e -> Printexc.to_string e);
+              None
+          with
+          | Some json -> respond_text oc "200 OK" json
+          | None -> respond_text oc "404 Not Found" "no backend half\n"));
       close_in_noerr ic;
       close_out_noerr oc)
     else if String.equal raw_path "/livereload" then (

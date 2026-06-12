@@ -655,6 +655,24 @@ let () =
      fail "forged message-ref should fail replay integrity"
    with Backend.Error msg ->
      assert_true "forged ref is BACKEND005" (contains_substring msg "BACKEND005"));
+  (* Time-travel feed: the to-backend history with the folded model AFTER each
+     event — the per-prefix folds of the same deterministic fold as [state]. *)
+  let tl_init, tl_steps = Backend.timeline ledger_b checked b world_b in
+  assert_equal "timeline initial model is initBackend" "{count = 0}"
+    (Runtime.value_to_string tl_init);
+  assert_equal "timeline covers every to-backend event" "4"
+    (string_of_int (List.length tl_steps));
+  assert_equal "timeline folds each prefix (bump bump reset bump)" "1;2;0;1"
+    (String.concat ";"
+       (List.map
+          (fun (_, m) ->
+            match Runtime.force_value m with
+            | Runtime.VRecord [ ("count", n) ] -> Runtime.value_to_string n
+            | v -> Runtime.value_to_string v)
+          tl_steps));
+  assert_equal "timeline carries the source messages"
+    "(Bump unit);(Bump unit);(Reset unit);(Bump unit)"
+    (String.concat ";" (List.map fst tl_steps));
   (* onConnect welcome: absent => no welcome value; present => the welcome is
      the pure projection of the CURRENT fold (ephemeral, ledger untouched). *)
   assert_true "connect_value without onConnect is None"

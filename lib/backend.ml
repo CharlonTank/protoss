@@ -220,6 +220,32 @@ let branch_world root =
   let path = Ledger.branch_path root backend_branch in
   if Sys.file_exists path then String.trim (Ledger.read_file path) else Ledger.initial_world
 
+(* Full-stack time-travel feed: the world's to-backend history with the folded
+   BackendModel AFTER each event (one incremental pass), plus the initial
+   model. Read-only over the ledger — powers the dev server's
+   GET /__debug/backend timeline; builds never call it. *)
+let timeline root checked (b : Web.backend_contract) world =
+  let texts =
+    Ledger.replay_events root world
+    |> List.filter_map (fun event ->
+           let fields = Ledger.event_fields root event in
+           match Ledger.field "kind" fields with
+           | Some "to-backend" -> (
+               match Ledger.field "to-backend" fields with
+               | Some escaped -> Some (Scanf.unescaped escaped)
+               | None -> fail ("BACKEND004 to-backend event missing payload: " ^ event))
+           | _ -> None)
+  in
+  let init = initial_model checked b in
+  let _, steps =
+    List.fold_left
+      (fun (model, acc) text ->
+        let model', _cmd = step checked b model (message_value b text) in
+        (model', (text, model') :: acc))
+      (init, []) texts
+  in
+  (init, List.rev steps)
+
 (* Welcome push (Lamdera onConnect): if the app defines
    [onConnect : BackendModel -> ToFrontend] (validated by the backend contract,
    WEB042), evaluate it against the world's current folded model. The dev

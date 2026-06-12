@@ -936,6 +936,31 @@ let live_server_request project ~checked ~route ~payload ~backend_send =
           (Protoss.Runtime.value_to_string model, broadcast_json cmd)
     with Protoss.Backend.Error msg -> Protoss.Kernel.fail msg
 
+(* Time-travel devbar feed (GET /__debug/backend): the backend's to-backend
+   history with the folded BackendModel after each event, as JSON. Read-only
+   over the ledger; apps without a backend half yield None (the route 404s). *)
+let live_backend_debug project ~checked =
+  match
+    try Some (Protoss.Backend.contract checked) with Protoss.Backend.Error _ -> None
+  with
+  | None -> None
+  | Some b ->
+      let root =
+        Filename.concat
+          (Protoss.Workspace.project_root project)
+          (Filename.concat ".protoss" "ledger")
+      in
+      let world = Protoss.Backend.branch_world root in
+      let init, steps = Protoss.Backend.timeline root checked b world in
+      let event (message, model) =
+        "{ \"message\": \"" ^ Protoss.Json.escape message ^ "\", \"model\": "
+        ^ Protoss.Web.value_to_json model ^ " }"
+      in
+      Some
+        ("{ \"initial\": " ^ Protoss.Web.value_to_json init ^ ", \"events\": ["
+        ^ String.concat ", " (List.map event steps)
+        ^ "] }")
+
 (* onConnect welcome hook for the dev server: when a client subscribes to
    /__events and the app defines [onConnect : BackendModel -> ToFrontend],
    evaluate it against the current fold and hand back the ToFrontend value-JSON
@@ -972,7 +997,8 @@ let command_web = function
       Protoss.Web.serve ~port
         ~bind_any:(List.mem "--public" args)
         ~server_request:(live_server_request project)
-        ~connect_event:(live_connect_event project) project
+        ~connect_event:(live_connect_event project)
+        ~backend_debug:(live_backend_debug project) project
   | _ -> usage ()
 
 (* `protoss live [project] [--port N] [--public]`: the convenience "run my app"
@@ -993,7 +1019,8 @@ let command_live args =
   let project = project_arg (strip args) in
   Protoss.Web.serve ~port ~bind_any:public
     ~server_request:(live_server_request project)
-    ~connect_event:(live_connect_event project) project
+    ~connect_event:(live_connect_event project)
+    ~backend_debug:(live_backend_debug project) project
 
 let command_runtime = function
   | [ "init"; project ] -> print_string (Protoss.Runtime_store.init project)
