@@ -122,6 +122,13 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
 - **Agent « storage-adapter » lancé** (brique 3 : interface d'adaptateur store + FS byte-identique +
   SQLite si voie propre sans dépendance opam obligatoire — contrainte deploy distant). À intégrer avec
   preuves refaites (sweep worktree parent, équivalence FS/SQLite, @fulltest).
+- **Brique 3 storage adapter FAIT** (commit d7c36a4, agent ab44f77b, scope honnête) : `Store.BACKEND`
+  (objets content-addressed + graphes), `Fs_backend` verbatim (interning/hardlinks préservés), sélection
+  env/manifest `store_backend` (défaut fs, HORS UniverseRoot — choix physique), inconnu → STORE001.
+  SQLite ÉCARTÉ avec mur caractérisé (~30 lecteurs FS directs bypassent l'API + contrat hardlink) ;
+  séquençage recommandé documenté au design doc au lieu d'un adaptateur truqué. Preuves : projet complet
+  Build/UniverseRoot/BackendModelRef identiques avant/après (refait sur main) ; sweep agent 103 fixtures
+  + arbre 6344 fichiers byte-identique + inodes partagés ; @fulltest vert.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
