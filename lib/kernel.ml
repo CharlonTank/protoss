@@ -2082,7 +2082,7 @@ and check_elab ctx expected expr =
       | Some (_, expr) -> (expected, expr)
       | None ->
           let actual, expr = infer_elab ctx expr in
-          require_type_expr expected actual "expected context" expr;
+          require_type_expr expected actual "checked against the expected type" expr;
           (expected, expr))
   | _, ECase (scrut, branches) ->
       let scrut_ty, scrut = infer_elab ctx scrut in
@@ -2098,7 +2098,7 @@ and check_elab ctx expected expr =
       (expected, EStrict e)
   | _ ->
       let actual, expr = infer_elab ctx expr in
-      require_type_expr expected actual "expected context" expr;
+      require_type_expr expected actual "checked against the expected type" expr;
       (expected, expr)
 
 and check_fold_list_step_elab ctx xs item_ty result_ty step =
@@ -4325,7 +4325,12 @@ let check_program_uncached (program : program) =
          ^ string_of_typ actual ^ ", expression " ^ string_of_expr d.body);
       { d with body }
     with Error msg ->
-      fail ("definition " ^ d.name ^ ": " ^ msg ^ ", expression " ^ string_of_expr d.body)
+      (* Append the def body for context -- but not when the inner error already
+         ends with exactly that expression (the faulty sub-expression IS the
+         whole body), which printed the same expression twice. *)
+      let suffix = ", expression " ^ string_of_expr d.body in
+      if String.ends_with ~suffix msg then fail ("definition " ^ d.name ^ ": " ^ msg)
+      else fail ("definition " ^ d.name ^ ": " ^ msg ^ suffix)
   in
   let elaborated_defs =
     List.map
