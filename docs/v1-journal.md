@@ -19,9 +19,18 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   toFrontend=…`. Additif : app frontend-only → `backend = None`, host contract intact, hash compteur
   inchangé `b96036…`. Non-laxité : WEB021 (model mismatch), WEB001 (initBackend manquant). Pas eu besoin
   d'agent worktree : le changement est dans web.ml (pas le kernel), additif, prouvé par hash + @fulltest.
-  Prochaine action : **brique ② — BackendModel adossé au ledger** (ToBackend = événement ledger,
-  BackendModel = fold déterministe `updateBackend` depuis `initBackend`, rejouable ; CLI backend
-  state/send pour le démontrer).
+  **Brique ② FAITE** (commit ee7779e) : BackendModel = fold déterministe d'`updateBackend` sur les
+  événements `to-backend` du ledger (nouveau kind, même discipline content-addressed `add_event`,
+  validation stricte). `lib/backend.ml` : messages typés par le kernel via mini-programme structurel
+  (mal typé → rejet AVANT append) ; chaque événement porte le hash de la valeur canonique typée,
+  re-vérifié au replay (BACKEND005 si forgé). CLI `protoss backend state|send` (ledger sous
+  `.protoss/ledger`, branche `backend`), codes BACKEND001-005 au catalogue. Preuves : bump/bump/reset/
+  bump → {count = 1} ; state (replay pur) == dernier send (même BackendModelRef p2:970a41…) ; 2 ledgers
+  indépendants, même séquence → world ET model refs byte-identiques ; `ledger replay` natif valide les
+  événements. `@fulltest` vert.
+  Prochaine brique : au choix — **transport** (câbler `Server.request "__backend"` du frontend live →
+  `Backend.send` dans le serveur dev, boucle full-stack réelle dans le navigateur) ou **snapshots**
+  (cache content-addressed du fold, brique perf). Trancher au prochain tour.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
