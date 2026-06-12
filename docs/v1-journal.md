@@ -49,12 +49,11 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   Item syntaxe : gérer le scope `{caps}` dans le parseur de type imbriqué (fix ciblé, hash-preserving
   à prouver vs la forme S-exp). En attendant, les apps backend s'écrivent en S-exp.
 - **DÉPLOIEMENT RÉEL RÉUSSI** (2026-06-12) : cax11 ARM épuisé dans les 3 DC EU → cpx11/ash (x86 US,
-  ~4.35€/mois). Serveur `protoss-demo` = 178.156.212.59. Pipeline complet OK : create → provision
+  ~4.35€/mois). Serveur `protoss-demo` (IP : `hcloud server ip protoss-demo` — on ne committe pas les IP d'origine). Pipeline complet OK : create → provision
   opam/ocaml-system (build OCaml 4.14 distant passe) → rsync sources + build → sync app → systemd :80.
   VÉRIFIÉ EN PROD : frontend HTTP 200 ; backend event-sourcé `POST /__server (Bump unit)` → {count = 1}
   → {count = 2} (ledger de prod persiste et fold) ; mal typé → 500 propre. DNS : pas de
-  CLOUDFLARE_API_TOKEN en env → record à créer par le user : `A demo.charlon.dev → 178.156.212.59
-  (proxied)` ; avec le token exporté, le prochain `protoss deploy` le fera seul. Destruction :
+  CLOUDFLARE_API_TOKEN en env → record à créer par le user : `A demo.charlon.dev → <hcloud server ip protoss-demo> (proxied)` ; avec le token exporté, le prochain `protoss deploy` le fera seul. Destruction :
   `hcloud server delete protoss-demo`.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
