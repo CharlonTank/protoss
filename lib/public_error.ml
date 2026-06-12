@@ -112,6 +112,11 @@ let catalog =
       description = "view returns a View whose message type does not match update.";
     };
     {
+      code = "WEB030";
+      name = "WebPortInUse";
+      description = "The dev server port is already taken; the error names the holder and a free port.";
+    };
+    {
       code = "BACKEND001";
       name = "BackendMissing";
       description =

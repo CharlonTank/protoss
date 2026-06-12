@@ -1513,8 +1513,54 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
   in
   let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt sock Unix.SO_REUSEADDR true;
-  Unix.bind sock
-    (Unix.ADDR_INET ((if bind_any then Unix.inet_addr_any else Unix.inet_addr_loopback), port));
+  (* A taken port is the most common dev-server failure: name who holds it and
+     point at the nearest free port instead of a bare bind() errno. *)
+  let port_in_use_message () =
+    let holders =
+      try
+        let ic =
+          Unix.open_process_in
+            (Printf.sprintf
+               "lsof -nP -iTCP:%d -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print \"  \" $1 \" (pid \
+                \" $2 \") on \" $9}'"
+               port)
+        in
+        let buf = Buffer.create 128 in
+        (try
+           while true do
+             Buffer.add_channel buf ic 1
+           done
+         with End_of_file -> ());
+        ignore (Unix.close_process_in ic);
+        String.trim (Buffer.contents buf)
+      with _ -> ""
+    in
+    let next_free =
+      let rec probe candidate left =
+        if left = 0 then None
+        else
+          let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+          let free =
+            try
+              Unix.bind s (Unix.ADDR_INET (Unix.inet_addr_loopback, candidate));
+              true
+            with _ -> false
+          in
+          (try Unix.close s with _ -> ());
+          if free then Some candidate else probe (candidate + 1) (left - 1)
+      in
+      probe (port + 1) 20
+    in
+    "WEB030 port " ^ string_of_int port ^ " is already in use"
+    ^ (if holders = "" then "" else " by:\n" ^ holders)
+    ^ (match next_free with
+      | Some p -> Printf.sprintf "\nTry: protoss live --port %d" p
+      | None -> "")
+  in
+  (try
+     Unix.bind sock
+       (Unix.ADDR_INET ((if bind_any then Unix.inet_addr_any else Unix.inet_addr_loopback), port))
+   with Unix.Unix_error (Unix.EADDRINUSE, _, _) -> fail (port_in_use_message ()));
   Unix.listen sock 10;
   Printf.printf "Serving %s on http://%s:%d/  (live reload on .protoss save)\n%!"
     (!output).out_dir
