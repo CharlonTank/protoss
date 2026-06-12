@@ -25,6 +25,7 @@ val assoc_opt : string -> (string * 'a) list -> 'a option
 val require : bool -> string -> unit
 val option_or_fail : string -> 'a option -> 'a
 val type_to_canonical : Ast.typ -> string
+val backend_send_capability : string
 val req_capability : Ast.req -> string
 val req_tag : Ast.req -> string
 val req_payload_type : Ast.req -> Ast.typ
@@ -209,6 +210,7 @@ type cterm =
   | COn of cterm * cterm
   | CDone of cterm
   | CRequest of Ast.req
+  | CBackendSend of cterm * Ast.typ
   | CBind of cterm * Ast.typ * cterm
 and cbranch = CBBool of bool * cterm | CBVariant of string * cterm
 val index_of : string -> string list -> int -> int option

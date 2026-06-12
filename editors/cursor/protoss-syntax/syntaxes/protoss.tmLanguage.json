@@ -164,7 +164,7 @@
         },
         {
           "name": "keyword.operator.expression.protoss",
-          "match": "\\b(?:lambda|foldNat|foldList|foldVariant|caseList|match|record|variant|get|inst|done|bind|request|recur|text|image|button|input|column|row|list|when)\\b"
+          "match": "\\b(?:lambda|foldNat|foldList|foldVariant|caseList|match|record|variant|get|inst|done|bind|sendToBackend|request|recur|text|image|button|input|column|row|list|when)\\b"
         }
       ]
     },
@@ -172,7 +172,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.protoss",
-          "match": "\\b(?:succ|foldNat|foldList|foldVariant|caseList|recur|text|image|button|input|column|row|list|when|node|attr|on|done|bind)\\b"
+          "match": "\\b(?:succ|foldNat|foldList|foldVariant|caseList|recur|text|image|button|input|column|row|list|when|node|attr|on|done|bind|sendToBackend)\\b"
         }
       ]
     },

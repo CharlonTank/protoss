@@ -37,6 +37,7 @@ expr ::= (variant type Constructor expr) | (inst Name type*)
 expr ::= (case expr branch*) | (foldNat ...) | (foldList ...) | (foldVariant ...)
 expr ::= (Nil type) | (Cons type expr expr) | (caseList expr expr Name Name expr)
 expr ::= (done expr) | (request request) | (bind expr binder expr)
+expr ::= (sendToBackend expr)
 request ::= (AskHuman String) | (HttpGet String) | ReadClock | (SaveLocal ...) | ...
 branch ::= (true expr) | (false expr) | (Constructor binder? expr) | (_ expr)
 binder ::= Name | (Name type)
@@ -202,6 +203,13 @@ or sequences with `bind`:
 are capability-named effects. They require a matching capability in scope; see
 [capabilities.md](capabilities.md). The underlying canonical requests are `ReadClock`,
 `AskHuman`, `HttpGet`, `SaveLocal`, `LoadLocal`, and `ServerRequest`.
+
+`(sendToBackend e)` is the typed full-stack transport (a distinct effect node,
+not a `request`): `e` is checked against the program's `ToBackend` type and the
+result is the program's `BackendModel`, both read by the kernel from
+`updateBackend`. It requires the `Server.request` capability and is rejected with
+`BACKEND010` when the program has no backend half. See
+[backend-architecture.md](backend-architecture.md).
 
 ## Sugar that does not change the hash
 

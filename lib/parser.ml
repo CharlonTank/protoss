@@ -333,6 +333,10 @@ let rec parse_expr = function
   | Sexp.List [ Sexp.Atom "Local.load"; Sexp.Str key ] -> ERequest (LoadLocal key)
   | Sexp.List [ Sexp.Atom "Server.request"; Sexp.Str route; Sexp.Str payload ] ->
       ERequest (ServerRequest (route, payload))
+  | Sexp.List [ Sexp.Atom "sendToBackend"; payload ] ->
+      (* The BackendModel type is filled by the elaborator; TUnit is an inert
+         placeholder until then. *)
+      ESendToBackend (TUnit, parse_expr payload)
   | Sexp.List [ Sexp.Atom "bind"; p; Sexp.List [ Sexp.Atom "lambda"; binding; body ] ]
     ->
       (match parse_lambda_binding binding with
@@ -698,6 +702,10 @@ let rec qualify_expr local_defs local_types type_params bound = function
           qualify_expr local_defs local_types type_params bound msg )
   | EDone e -> EDone (qualify_expr local_defs local_types type_params bound e)
   | ERequest req -> ERequest req
+  | ESendToBackend (t, payload) ->
+      ESendToBackend
+        ( qualify_type local_types type_params t,
+          qualify_expr local_defs local_types type_params bound payload )
   | EBind (p, x, t, body) ->
       EBind
         ( qualify_expr local_defs local_types type_params bound p,

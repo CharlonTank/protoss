@@ -47,6 +47,38 @@ let message_value (b : Web.backend_contract) text =
 
 let message_ref value = Hashcons.hash (Runtime.value_to_canonical value)
 
+(* Render an already-typed ToBackend value back to parseable Protoss source so
+   the typed [send_value] path stores the SAME canonical [to-backend] event text
+   the text path does (re-parseable by [message_value] on replay). Type-directed
+   via each value's carried [Ast.typ]; only the ToBackend data fragment is
+   supported (Unit/Bool/Nat/String/List/Record/Variant). *)
+let rec value_to_source (v : Runtime.value) : string =
+  match Runtime.force_value v with
+  | Runtime.VUnit -> "unit"
+  | Runtime.VBool true -> "true"
+  | Runtime.VBool false -> "false"
+  | Runtime.VNat n -> string_of_int n
+  | Runtime.VString s -> Ast.quote s
+  | Runtime.VList (item_ty, []) -> "(Nil " ^ Ast.string_of_typ item_ty ^ ")"
+  | Runtime.VList (item_ty, xs) ->
+      List.fold_right
+        (fun x acc -> "(Cons " ^ Ast.string_of_typ item_ty ^ " " ^ value_to_source x ^ " " ^ acc ^ ")")
+        xs
+        ("(Nil " ^ Ast.string_of_typ item_ty ^ ")")
+  | Runtime.VRecord fields ->
+      "(record "
+      ^ String.concat " "
+          (List.map (fun (n, fv) -> "(" ^ n ^ " " ^ value_to_source fv ^ ")") (Ast.sort_fields fields))
+      ^ ")"
+  | Runtime.VVariant (_, con, payload) ->
+      (* Short constructor form `(Con payload)`: it re-checks against the expected
+         ToBackend variant in [message_value] EXACTLY as the explicit
+         `(variant TYPE Con payload)` form, and matches the conventional source
+         spelling so the typed and text transport paths write byte-identical
+         to-backend events for the same message. *)
+      "(" ^ con ^ " " ^ value_to_source payload ^ ")"
+  | other -> fail ("BACKEND006 cannot render ToBackend value as source: " ^ Runtime.value_to_string other)
+
 let initial_model checked (b : Web.backend_contract) =
   fst (Runtime.normalize_def checked b.Web.init_backend_def.Kernel.def.Ast.name)
 
@@ -119,3 +151,12 @@ let send root checked (b : Web.backend_contract) world text =
   in
   ignore (Ledger.fork root backend_branch next_world);
   (event, next_world, model', cmd)
+
+(* Typed transport entry (sendToBackend): the ToBackend message arrives as an
+   already-typed Runtime value (decoded from the browser's value-JSON). Render it
+   to source and route through [send] so the `to-backend` ledger event keeps its
+   exact form (canonical message text + message-ref) — replay is identical
+   whether the message came in as text or as a typed value. Re-typing in [send]
+   re-validates the value against ToBackend as defense-in-depth. *)
+let send_value root checked (b : Web.backend_contract) world value =
+  send root checked b world (value_to_source value)

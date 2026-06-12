@@ -399,6 +399,16 @@ let run_checked checked args =
       Printf.printf "RequestSignatureRef %s\n" (Protoss.Kernel.req_signature_ref s.req);
       Printf.printf "Event %s\n" event;
       Printf.printf "NextWorldRef %s\n" next_world
+  | Protoss.Runtime.VBackendSend s ->
+      (* A sendToBackend suspension: the ToBackend value and the BackendModel
+         response type. The actual fold + ledger event is driven by the backend
+         transport (`protoss backend send` / the live server), not `run`, which
+         only surfaces the suspension. *)
+      Printf.printf "WorldRef %s\n" Protoss.Ledger.initial_world;
+      Printf.printf "BackendSend %s\n" (Protoss.Runtime.value_to_string s.Protoss.Runtime.bs_payload);
+      Printf.printf "ResponseType %s\n"
+        (Protoss.Ast.string_of_typ s.Protoss.Runtime.bs_response_ty);
+      Printf.printf "CapScope %s\n" (String.concat "," s.Protoss.Runtime.bs_cap_scope)
   | other ->
       Protoss.Kernel.fail ("run entry is not a Process: " ^ Protoss.Runtime.value_to_string other)
 
@@ -886,7 +896,7 @@ let command_deploy args =
    appended to the project ledger, and folded (Backend.send); the process
    resumes with the new BackendModel's text. Uses the CURRENT build's checked
    program (hot reload keeps the handler in sync). *)
-let live_server_request project ~checked ~route ~payload =
+let live_server_request project ~checked ~route ~payload ~backend_send =
   if not (String.equal route "__backend") then
     Protoss.Kernel.fail ("unknown server route: " ^ route)
   else
@@ -898,8 +908,19 @@ let live_server_request project ~checked ~route ~payload =
           (Filename.concat ".protoss" "ledger")
       in
       let world = Protoss.Backend.branch_world root in
-      let _, _, model, _cmd = Protoss.Backend.send root checked b world payload in
-      Protoss.Runtime.value_to_string model
+      match backend_send with
+      | Some payload_json ->
+          (* Typed transport (sendToBackend): decode the ToBackend value-JSON
+             against the program's ToBackend type, fold it, and answer the new
+             BackendModel as value-JSON — the format the browser runtime resumes
+             with directly (a structured value, not display text). *)
+          let value = Protoss.Web.value_of_json b.Protoss.Web.to_backend_ty payload_json in
+          let _, _, model, _cmd = Protoss.Backend.send_value root checked b world value in
+          Protoss.Web.value_to_json model
+      | None ->
+          (* Legacy stringly Server.request path: text in, display text out. *)
+          let _, _, model, _cmd = Protoss.Backend.send root checked b world payload in
+          Protoss.Runtime.value_to_string model
     with Protoss.Backend.Error msg -> Protoss.Kernel.fail msg
 
 let command_web = function

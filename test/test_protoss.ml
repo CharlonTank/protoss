@@ -622,6 +622,127 @@ let () =
    with Backend.Error msg ->
      assert_true "forged ref is BACKEND005" (contains_substring msg "BACKEND005"))
 
+(* Typed full-stack transport (sendToBackend): a NEW effect node, typed
+   end-to-end against the program's ToBackend/BackendModel (read from
+   updateBackend). Covers: elaboration + result type, the exact canonical form
+   (`(backendSend ...)`), S-exp == Elm-like surface convergence, graph
+   round-trip, mistyped/no-backend rejection, the JSON-value <-> Runtime.value
+   transport codec, and the typed Backend.send_value writing the SAME ledger
+   event as the text path. *)
+let () =
+  let backend_defs =
+    "(capabilities Server.request)\n\
+     (def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple (record (count (succ (get model count)))) \
+      unit))))\n"
+  in
+  let go_sexp =
+    backend_defs
+    ^ "(def go (Process (capabilities Server.request) (Record (count Nat))) (bind (sendToBackend \
+       (Bump unit)) (lambda (m (Record (count Nat))) (done m))))\n"
+  in
+  let checked = check go_sexp in
+  (* Elaboration assigns the Process result type = BackendModel. *)
+  let go = List.find (fun (d : Kernel.checked_def) -> d.def.name = "go") checked.Kernel.defs in
+  assert_equal "sendToBackend go result type"
+    "(Process (capabilities Server.request) (Record (count Nat)))"
+    (Ast.string_of_typ go.def.typ);
+  (* The canonical form is the dedicated (backendSend payload BackendModel) node:
+     the short ctor (Bump unit) elaborated to the full variant, and the carried
+     type is the BackendModel. *)
+  assert_true "sendToBackend canonical node"
+    (contains_substring go.Kernel.canonical
+       "(backendSend (variant (Variant (Bump Unit)) Bump unit) (Record (count Nat)))");
+  (* Payload-sugar convergence: the short ToBackend constructor (Bump unit)
+     lowers to the SAME canonical hash as the explicit (variant ...) form inside
+     sendToBackend (the payload is checked against ToBackend, so both spellings
+     elaborate identically — the central same-hash-for-equivalent-source
+     invariant). The Elm-like surface of the whole node is proven separately by
+     the scaffold round-trip (it cannot host the backend half, which needs a
+     nested Cmd-caps type the Elm surface does not yet spell). *)
+  let go_explicit =
+    backend_defs
+    ^ "(def go (Process (capabilities Server.request) (Record (count Nat))) (bind (sendToBackend \
+       (variant (Variant (Bump Unit)) Bump unit)) (lambda (m (Record (count Nat))) (done m))))\n"
+  in
+  assert_equal "sendToBackend short-ctor == explicit-variant hash" (Kernel.hash_program checked)
+    (Kernel.hash_program (check go_explicit));
+  (* Graph round-trip: emit the canonical graph JSON, parse it back, and the
+     re-checked program hashes and serializes identically (the new BackendSend
+     graph node and its parser are inverse). *)
+  let graph_json = Kernel.checked_to_graph_json checked in
+  let graph_checked = Canonical_ir.checked_of_graph graph_json in
+  assert_equal "sendToBackend graph round-trip hash" (Kernel.hash_program checked)
+    (Kernel.hash_program graph_checked);
+  assert_equal "sendToBackend graph round-trip serialization"
+    (Kernel.serialize_checked_program checked)
+    (Kernel.serialize_checked_program graph_checked);
+  (* Static typing PROVEN: a non-existent ToBackend constructor is rejected. *)
+  (try
+     ignore
+       (check
+          (backend_defs
+          ^ "(def go (Process (capabilities Server.request) (Record (count Nat))) (bind \
+             (sendToBackend (Typo unit)) (lambda (m (Record (count Nat))) (done m))))\n"));
+     fail "sendToBackend with unknown constructor should be rejected"
+   with Kernel.Error msg ->
+     assert_true "bad ctor rejected naming Typo" (contains_substring msg "Typo"));
+  (* sendToBackend without a backend half: dedicated BACKEND010. *)
+  (try
+     ignore
+       (check
+          "(capabilities Server.request)\n\
+           (def go (Process (capabilities Server.request) Nat) (sendToBackend unit))\n");
+     fail "sendToBackend with no backend half should be rejected"
+   with Kernel.Error msg ->
+     assert_true "no backend half is BACKEND010" (contains_substring msg "BACKEND010"));
+  (* Missing capability: sendToBackend needs Server.request declared (same
+     backend defs, but the capabilities line dropped). *)
+  (try
+     ignore
+       (check
+          ("(def initBackend (Record (count Nat)) (record (count 0)))\n\
+            (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record \
+            (count Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant \
+            (Bump Unit))) (lambda (model (Record (count Nat))) (tuple model unit))))\n\
+            (def go (Process (capabilities Server.request) (Record (count Nat))) (sendToBackend \
+            (Bump unit)))\n"));
+     fail "sendToBackend without declared Server.request capability should be rejected"
+   with Kernel.Error msg ->
+     assert_true "missing cap names Server.request" (contains_substring msg "Server.request"));
+  (* Transport codec: ToBackend value-JSON <-> Runtime.value is the inverse of
+     value_to_json, directed by the ToBackend type. *)
+  let b = Backend.contract checked in
+  let bump_value = Backend.message_value b "(Bump unit)" in
+  let bump_json = Web.value_to_json bump_value in
+  let decoded = Web.value_of_json b.Web.to_backend_ty (Json.parse bump_json) in
+  assert_equal "ToBackend value-JSON round-trips to the same canonical value"
+    (Runtime.value_to_canonical bump_value)
+    (Runtime.value_to_canonical decoded);
+  (* Backend.send_value (typed path) writes the SAME to-backend event the text
+     path does, and folds identically — so replay is transport-agnostic. *)
+  let ledger_text = temp_dir "backend-send-text" in
+  let ledger_value = temp_dir "backend-send-value" in
+  let _, world_text, model_text, _ =
+    Backend.send ledger_text checked b Ledger.initial_world "(Bump unit)"
+  in
+  let _, world_value, model_value, _ =
+    Backend.send_value ledger_value checked b Ledger.initial_world decoded
+  in
+  assert_equal "typed send_value reaches the same world as text send" world_text world_value;
+  assert_equal "typed send_value reaches the same model as text send"
+    (Runtime.value_to_canonical model_text)
+    (Runtime.value_to_canonical model_value);
+  (* The server answers a BackendModel value-JSON the browser resumes with; it
+     decodes back to the folded model. *)
+  let model_json = Web.value_to_json model_value in
+  assert_equal "BackendModel response value-JSON decodes back to the folded model"
+    (Runtime.value_to_canonical model_value)
+    (Runtime.value_to_canonical
+       (Web.value_of_json b.Web.backend_model_ty (Json.parse model_json)))
+
 (* Regression guards for crashes found by the deterministic fuzzer (G3). *)
 let () =
   (* "case ofx": find_sub used to match the space inside "case ", driving
@@ -6188,7 +6309,7 @@ let () =
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
   (* init ~app generates the runnable FULL-STACK skeleton: a Protoss/H frontend
-     (app.protoss, init/update/view + a Server.request round-trip to the
+     (app.protoss, init/update/view + a TYPED sendToBackend round-trip to the
      backend) and the backend half (backend.protoss, initBackend/updateBackend),
      with the Server.request capability declared in the manifest. *)
   (let app_init_root = temp_dir "project-init-app" in
@@ -6206,8 +6327,9 @@ let () =
      (contains_substring app_src "init : Process Model"
      && contains_substring app_src "update : Msg -> Model -> Process Model"
      && contains_substring app_src "view : Model -> View Msg");
-   assert_true "init --app frontend round-trips through the backend"
-     (contains_substring app_src "Server.request \"__backend\""
+   assert_true "init --app frontend round-trips through the backend via typed sendToBackend"
+     (contains_substring app_src "sendToBackend (Bump unit)"
+     && contains_substring app_src "Nat.toString m.count"
      && contains_substring app_src "button \"Bump local\" (Bump unit)");
    assert_true "init --app writes the backend half"
      (contains_substring backend_src "def initBackend"

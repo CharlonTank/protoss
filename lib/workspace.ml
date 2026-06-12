@@ -257,12 +257,16 @@ let project_root path =
 (* The scaffold is a FULL-STACK app, Lamdera-shaped: src/app.protoss is the
    frontend in Protoss/H (the Elm-like surface — transparent type aliases, list
    literals, short variant constructors, bare lambdas) with a local counter AND
-   a shared counter that round-trips through the backend (`bind (Server.request
-   "__backend" ...)` — the browser runtime POSTs it to /__server and resumes
-   with the response). src/backend.protoss holds the backend half
-   (initBackend/updateBackend over the ledger-backed BackendModel,
-   docs/backend-architecture.md); it stays in S-expression form until the
-   Elm-like surface can spell a nested `Cmd { caps }` scope. *)
+   a shared counter that round-trips through the backend via the TYPED transport
+   `bind (sendToBackend (Bump unit)) (\m -> ...)` — `sendToBackend` is typed
+   end-to-end against the program's ToBackend/BackendModel (read from
+   updateBackend by the kernel), the browser runtime POSTs the ToBackend value
+   to /__server, and the process resumes with the BackendModel `m` (so
+   `Nat.toString m.count` reads a typed field, not a stringly reply).
+   src/backend.protoss holds the backend half (initBackend/updateBackend over
+   the ledger-backed BackendModel, docs/backend-architecture.md); it stays in
+   S-expression form until the Elm-like surface can spell a nested
+   `Cmd { caps }` scope. *)
 let counter_app_source =
   String.concat "\n"
     [ "capabilities Server.request";
@@ -282,8 +286,8 @@ let counter_app_source =
       "    case msg of";
       "        Bump _ -> done { model | count = succ model.count }";
       "        BumpShared _ ->";
-      "            bind (Server.request \"__backend\" \"(Bump unit)\") (\\reply -> done { model \
-       | shared = reply })";
+      "            bind (sendToBackend (Bump unit)) (\\m -> done { model | shared = \
+       Nat.toString m.count })";
       "";
       "view : Model -> View Msg";
       "view model =";
@@ -580,6 +584,7 @@ let rec expr_type_refs = function
       expr_type_refs a @ expr_type_refs b
   | ENode (tag, attrs, children) ->
       expr_type_refs tag @ expr_type_refs attrs @ expr_type_refs children
+  | ESendToBackend (t, payload) -> type_refs t @ expr_type_refs payload
   | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
   | EBindInfer (p, _, body) -> expr_type_refs p @ expr_type_refs body
 

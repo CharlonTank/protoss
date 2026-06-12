@@ -412,6 +412,7 @@ and render_inline_plain _lvl at e =
   | Ast.ERequest (Ast.LoadLocal key) -> app "Local.load" [ Ast.quote key ]
   | Ast.ERequest (Ast.ServerRequest (route, payload)) ->
       app "Server.request" [ Ast.quote route; Ast.quote payload ]
+  | Ast.ESendToBackend (_, payload) -> app "sendToBackend" [ arg payload ]
   | Ast.EBind (p, x, _, body) | Ast.EBindInfer (p, x, body) ->
       app "bind"
         [
@@ -715,7 +716,7 @@ expr ::= Name | Nat | true | false | String | unit
        | (recur expr)
        | (Nil type?) | (Cons type? expr expr)
        | (inst Name type*)
-       | (done expr) | (bind expr expr) | request
+       | (done expr) | (bind expr expr) | request | (sendToBackend expr)
        | (text expr) | (image expr expr) | (button expr expr)
        | (input expr) | (column expr) | (row expr) | (list expr expr)
        | (when expr expr) | (node expr expr expr) | (attr expr expr) | (on expr expr)

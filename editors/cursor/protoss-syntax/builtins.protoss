@@ -78,3 +78,8 @@ LoadLocal : String -> Process String
 SaveLocal : String -> String -> Process Unit
 
 ServerRequest : String -> String -> Process String
+
+-- Transport full-stack typé (docs/backend-architecture.md) : l'argument est
+-- typé contre ToBackend, le résultat est le BackendModel du programme (tous deux
+-- lus depuis updateBackend). Exige la capability Server.request.
+sendToBackend : ToBackend -> Process BackendModel

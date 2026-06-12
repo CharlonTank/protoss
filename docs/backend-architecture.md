@@ -88,6 +88,23 @@ To build (ordered bricks, each shippable and proven):
 5. **Transport + end-to-end demo.** Wire `sendToBackend`/`sendToFrontend`; ship a
    toy full-stack app (a shared list) exercising frontend → ToBackend →
    updateBackend → ledger → ToFrontend.
+   - **`sendToBackend` landed.** `sendToBackend e : Process BackendModel` is a
+     first-class typed effect node (`Ast.ESendToBackend` → `Kernel.CBackendSend`,
+     under the `Server.request` capability — distinct from `ServerRequest`
+     because its payload is a value and its response type, the program's
+     `BackendModel`, is read by the kernel from `updateBackend`). The kernel
+     checks the payload against `ToBackend` (short variant constructors work),
+     types the result as `BackendModel`, and rejects a missing backend half with
+     the stable `BACKEND010` error. The browser runtime evaluates the payload to
+     a value, POSTs it to `/__server` as value-JSON (`{route:"__backend",
+     backendSend:<value-JSON>}`), the dev server decodes it back to a typed
+     `Runtime.value` (`Web.value_of_json`, the inverse of `value_to_json`), folds
+     it via `Backend.send_value` (which writes the SAME `to-backend` ledger event
+     as the stringly text path — transport-agnostic replay), and answers the new
+     `BackendModel` as value-JSON, which the process resumes with directly. The
+     scaffold (`protoss project init`) uses
+     `bind (sendToBackend (Bump unit)) (\m -> done { model | shared = Nat.toString m.count })`.
+     Still to wire: `sendToFrontend` (server → client push) and the shared-list demo.
 
 Each brick is built in isolation (kernel changes via worktree agents with
 determinism proofs), `@fulltest` green before commit, hashes proven stable.

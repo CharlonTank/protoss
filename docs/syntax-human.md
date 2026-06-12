@@ -111,6 +111,21 @@ askName =
 `(Process (capabilities Cap.name) A)`. The bare `Process A` form is the legacy
 unconstrained annotation.
 
+Full-stack apps send typed messages to the backend with `sendToBackend e`, which
+parses as an ordinary application and lowers to the same `(sendToBackend e)`
+canonical node as the S-expression surface (no special Protoss/H rule):
+
+```elm
+update msg model =
+    case msg of
+        BumpShared _ ->
+            bind (sendToBackend (Bump unit)) (\m -> done { model | shared = Nat.toString m.count })
+```
+
+`sendToBackend e : Process BackendModel` is typed against the program's
+`ToBackend`/`BackendModel` (read from `updateBackend`); see
+[backend-architecture.md](backend-architecture.md).
+
 ## Why the hashes match
 
 Protoss/H lowers to the same canonical S-expression AST, so equivalent programs hash

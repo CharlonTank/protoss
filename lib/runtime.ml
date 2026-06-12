@@ -39,6 +39,12 @@ type value =
   | VBuiltinSucc
   | VProcessDone of value
   | VProcessRequest of suspended
+  (* Typed full-stack transport suspension (docs/backend-architecture.md): the
+     [bs_payload] ToBackend value is sent; the process resumes with a
+     [bs_response_ty] (the program's BackendModel) value. Kept separate from
+     [VProcessRequest]/[req] because the payload is a value and the response type
+     is program-dependent; the [continuation] machinery (resume) is shared. *)
+  | VBackendSend of backend_suspended
   | VThunk of thunk
 
 and thunk = {
@@ -50,6 +56,13 @@ and suspended = {
   req : req;
   cont : continuation;
   cap_scope : string list;
+}
+
+and backend_suspended = {
+  bs_payload : value;
+  bs_response_ty : typ;
+  bs_cont : continuation;
+  bs_cap_scope : string list;
 }
 
 and view =
@@ -133,6 +146,7 @@ let rec value_to_string = function
   | VBuiltinSucc -> "<builtin:succ>"
   | VProcessDone v -> "Done " ^ value_to_string v
   | VProcessRequest s -> "Request " ^ Kernel.req_to_canonical s.req
+  | VBackendSend s -> "BackendSend " ^ value_to_string s.bs_payload
 
 and view_to_string = function
   | VText s -> "(text " ^ Ast.quote s ^ ")"
@@ -189,6 +203,7 @@ let rec value_to_cache_key = function
   | VBuiltinSucc -> "BuiltinSucc"
   | VProcessDone value -> "(Done " ^ value_to_cache_key value ^ ")"
   | VProcessRequest suspended -> "(Suspended " ^ suspended_to_cache_key suspended ^ ")"
+  | VBackendSend s -> "(BackendSuspended " ^ backend_suspended_to_cache_key s ^ ")"
 
 and view_to_cache_key = function
   | VText s -> "(Text " ^ Ast.quote s ^ ")"
@@ -223,6 +238,12 @@ and suspended_to_cache_key suspended =
   ^ continuation_to_cache_key suspended.cont ^ ") (cap-scope "
   ^ String.concat " " (List.sort_uniq String.compare suspended.cap_scope) ^ ")"
 
+and backend_suspended_to_cache_key s =
+  "(payload " ^ value_to_cache_key s.bs_payload ^ ") (response-type "
+  ^ Kernel.type_to_canonical s.bs_response_ty ^ ") (cont "
+  ^ continuation_to_cache_key s.bs_cont ^ ") (cap-scope "
+  ^ String.concat " " (List.sort_uniq String.compare s.bs_cap_scope) ^ ")"
+
 let recur_stack_to_cache_key frames =
   match frames with
   | [] -> "recur:none"
@@ -247,7 +268,8 @@ let rec consume_cterm budget term =
     | CRequest _ | CNil _ ->
         Some budget
     | CLambda (_, body) | CStrict body | CField (body, _) | CVariant (_, _, body)
-    | CRecur body | CText body | CColumn body | CRow body | CDone body ->
+    | CRecur body | CText body | CColumn body | CRow body | CDone body
+    | CBackendSend (body, _) ->
         consume_cterm budget body
     | CApp (a, b) | CLet (a, b) | CImage (a, b) | CButton (a, b) | CInput (a, b)
     | CListView (a, b) | CWhenView (a, b) | CAttr (a, b) | COn (a, b)
@@ -295,6 +317,9 @@ let rec consume_cache_value budget value =
         Option.bind (consume_cache_value budget state) (fun budget ->
             consume_cache_value budget step)
     | VProcessRequest suspended -> consume_cache_suspended budget suspended
+    | VBackendSend s ->
+        Option.bind (consume_cache_value budget s.bs_payload) (fun budget ->
+            consume_cache_continuation budget s.bs_cont)
 
 and consume_cache_view budget = function
   | _ when budget <= 0 -> None
@@ -386,7 +411,8 @@ let rec cache_value_to_canonical = function
       | Some v -> Some ("(Variant " ^ Kernel.type_to_canonical typ ^ " " ^ con ^ " " ^ v ^ ")"))
   | VView _ -> None
   | VAttribute _ -> None
-  | VClosure _ | VStream _ | VAutomaton _ | VBuiltinSucc | VProcessDone _ | VProcessRequest _ ->
+  | VClosure _ | VStream _ | VAutomaton _ | VBuiltinSucc | VProcessDone _ | VProcessRequest _
+  | VBackendSend _ ->
       None
 
 and cache_values_to_canonical = function
@@ -841,11 +867,21 @@ let rec eval_cterm st env = function
       | v -> fail ("on event on non-String runtime value: " ^ value_to_string v))
   | Kernel.CDone e -> VProcessDone (eval_cterm st env e)
   | Kernel.CRequest req -> VProcessRequest { req; cont = KDone; cap_scope = st.cap_scope }
+  | Kernel.CBackendSend (payload, backend_model_ty) ->
+      VBackendSend
+        {
+          bs_payload = force_value (eval_cterm st env payload);
+          bs_response_ty = backend_model_ty;
+          bs_cont = KDone;
+          bs_cap_scope = st.cap_scope;
+        }
   | Kernel.CBind (p, _, body) -> (
       match eval_cterm st env p with
       | VProcessDone v -> eval_cterm st (v :: env) body
       | VProcessRequest s ->
           VProcessRequest { s with cont = KBind (s.cont, body, env, st.cap_scope) }
+      | VBackendSend s ->
+          VBackendSend { s with bs_cont = KBind (s.bs_cont, body, env, st.cap_scope) }
       | other -> fail ("bind on non-process runtime value: " ^ value_to_string other))
 
 and expect_view = function
@@ -1227,6 +1263,7 @@ let rec value_to_canonical = function
   | VBuiltinSucc -> "BuiltinSucc"
   | VProcessDone v -> "(Done " ^ value_to_canonical v ^ ")"
   | VProcessRequest s -> "(Suspended " ^ suspended_payload_to_canonical s ^ ")"
+  | VBackendSend s -> "(BackendSuspended " ^ backend_suspended_payload_to_canonical s ^ ")"
 
 and view_to_canonical = function
   | VText s -> "(Text " ^ Ast.quote s ^ ")"
@@ -1262,10 +1299,26 @@ and suspended_payload_to_canonical s =
   ^ ") (continuation-id " ^ Kernel.hash_string ("cont:" ^ cont) ^ ") (cont " ^ cont
   ^ ") (cap-scope (" ^ cap_scope ^ ")))"
 
+(* The canonical "request" text identifying a backend send: the ToBackend value
+   plus its BackendModel response type. Hashed for the request-id, exactly as the
+   [req] reqs hash [req_to_canonical]. *)
+and backend_request_canonical s =
+  "(BackendSend " ^ value_to_canonical s.bs_payload ^ " "
+  ^ Kernel.type_to_canonical s.bs_response_ty ^ ")"
+
+and backend_suspended_payload_to_canonical s =
+  let request = backend_request_canonical s in
+  let cont = continuation_to_canonical s.bs_cont in
+  let cap_scope = String.concat " " (List.sort_uniq String.compare s.bs_cap_scope) in
+  "(backend-suspended (request-id " ^ Kernel.hash_string ("request:" ^ request) ^ ") (request "
+  ^ request ^ ") (continuation-id " ^ Kernel.hash_string ("cont:" ^ cont) ^ ") (cont " ^ cont
+  ^ ") (cap-scope (" ^ cap_scope ^ ")))"
+
 let serialize_suspended s = "(" ^ runtime_version ^ " " ^ suspended_payload_to_canonical s ^ ")"
 
 let with_cap_scope cap_scope = function
   | VProcessRequest s -> VProcessRequest { s with cap_scope = List.sort_uniq String.compare cap_scope }
+  | VBackendSend s -> VBackendSend { s with bs_cap_scope = List.sort_uniq String.compare cap_scope }
   | v -> v
 
 let request_id s = Kernel.hash_string ("request:" ^ Kernel.req_to_canonical s.req)
@@ -1480,8 +1533,14 @@ let rec apply_cont st cont response =
       | VProcessDone v ->
           eval_with_cap_scope st cap_scope (fun () -> eval_cterm st (v :: env) body)
       | VProcessRequest s -> VProcessRequest { s with cont = KBind (s.cont, body, env, cap_scope) }
+      | VBackendSend s -> VBackendSend { s with bs_cont = KBind (s.bs_cont, body, env, cap_scope) }
       | other -> fail ("invalid resumed process value: " ^ value_to_string other))
 
 let resume checked suspended response =
   let st = state checked in
   apply_cont st suspended.cont response
+
+(* Resume a backend send with the BackendModel value the server returned. *)
+let resume_backend checked (s : backend_suspended) response =
+  let st = state checked in
+  apply_cont st s.bs_cont response

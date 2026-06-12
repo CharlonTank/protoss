@@ -74,6 +74,15 @@ type expr =
   | EOn of expr * expr
   | EDone of expr
   | ERequest of req
+  (* Typed full-stack transport (docs/backend-architecture.md): the payload is a
+     ToBackend value; the result is a Process whose value is the program's
+     BackendModel. A distinct effect node, not a [req], because its payload is a
+     value and its response type is program-dependent. The carried [typ] is the
+     BackendModel (the Process result): meaningless in surface text (the parser
+     fills the [TUnit] placeholder and [string_of_expr] ignores it), filled by
+     the elaborator from updateBackend before canonicalization, which lowers it
+     to [Kernel.CBackendSend]. *)
+  | ESendToBackend of typ * expr
   | EBind of expr * string * typ * expr
   | EBindInfer of expr * string * expr
 
@@ -362,6 +371,7 @@ let rec string_of_expr_with_params params = function
       ^ string_of_expr_with_params params msg ^ ")"
   | EDone e -> "(done " ^ string_of_expr_with_params params e ^ ")"
   | ERequest req -> string_of_req req
+  | ESendToBackend (_, e) -> "(sendToBackend " ^ string_of_expr_with_params params e ^ ")"
   | EBind (p, x, t, body) ->
       "(bind " ^ string_of_expr_with_params params p ^ " (lambda (" ^ x ^ " "
       ^ string_of_typ_with_params params t ^ ") " ^ string_of_expr_with_params params body ^ "))"

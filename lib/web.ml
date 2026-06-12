@@ -244,6 +244,13 @@ let rec value_to_json = function
           json_field "tag" (json_string "Request");
           json_field "request" (json_string (Kernel.req_to_canonical s.req));
         ]
+  | Runtime.VBackendSend s ->
+      json_obj
+        [
+          json_field "tag" (json_string "BackendSend");
+          json_field "payload" (value_to_json s.Runtime.bs_payload);
+          json_field "responseType" (type_to_json s.Runtime.bs_response_ty);
+        ]
 
 and message_to_json = function
   | Runtime.VThunk thunk -> message_to_json (Runtime.force_value (Runtime.VThunk thunk))
@@ -328,6 +335,78 @@ and attr_to_json = function
           json_field "event" (json_string event);
           json_field "message" (message_to_json msg);
         ]
+
+(* Inverse of [value_to_json] for the ToBackend payload the browser POSTs: decode
+   the tagged value-JSON ({tag:"Nat",value},{tag:"Variant",constructor,payload},
+   {tag:"Record",fields:{..}},{tag:"List",items:[..]},...) back into a
+   Runtime.value, directed by the expected type so VList/VVariant/VRecord carry
+   the right [Ast.typ]. Strict: a tag/type mismatch or unknown
+   constructor/field fails loudly rather than guessing (determinism + typed
+   transport). Only the data fragment (Unit/Bool/Nat/String/List/Record/Variant)
+   is supported — the ToBackend surface. *)
+let rec value_of_json ty (json : Json.t) : Runtime.value =
+  let tag_of obj =
+    match Json.field "tag" obj with
+    | Some (Json.String t) -> t
+    | _ -> fail "WEB031 backend value-JSON missing tag"
+  in
+  let require_tag obj expected =
+    let t = tag_of obj in
+    if not (String.equal t expected) then
+      fail ("WEB032 backend value-JSON tag mismatch: expected " ^ expected ^ ", got " ^ t)
+  in
+  match ty with
+  | TUnit ->
+      require_tag json "Unit";
+      Runtime.VUnit
+  | TBool -> (
+      require_tag json "Bool";
+      match Json.field "value" json with
+      | Some (Json.Bool b) -> Runtime.VBool b
+      | _ -> fail "WEB033 backend Bool value-JSON missing boolean value")
+  | TNat -> (
+      require_tag json "Nat";
+      match Json.field "value" json with
+      | Some (Json.Num n) when n >= 0 -> Runtime.VNat n
+      | _ -> fail "WEB034 backend Nat value-JSON missing non-negative value")
+  | TString -> (
+      require_tag json "String";
+      match Json.field "value" json with
+      | Some (Json.String s) -> Runtime.VString s
+      | _ -> fail "WEB035 backend String value-JSON missing string value")
+  | TList item_ty -> (
+      require_tag json "List";
+      match Json.field "items" json with
+      | Some (Json.Array items) ->
+          Runtime.VList (item_ty, List.map (value_of_json item_ty) items)
+      | _ -> fail "WEB036 backend List value-JSON missing items array")
+  | TRecord fields -> (
+      require_tag json "Record";
+      match Json.field "fields" json with
+      | Some (Json.Object obj_fields) ->
+          Runtime.VRecord
+            (sort_fields
+               (List.map
+                  (fun (name, field_ty) ->
+                    match List.assoc_opt name obj_fields with
+                    | Some v -> (name, value_of_json field_ty v)
+                    | None -> fail ("WEB037 backend Record value-JSON missing field: " ^ name))
+                  fields))
+      | _ -> fail "WEB038 backend Record value-JSON missing fields object")
+  | TVariant cases -> (
+      require_tag json "Variant";
+      match Json.field "constructor" json with
+      | Some (Json.String con) -> (
+          match List.assoc_opt con cases with
+          | Some payload_ty ->
+              let payload =
+                match Json.field "payload" json with Some p -> p | None -> Json.Object [ ("tag", Json.String "Unit") ]
+              in
+              Runtime.VVariant (ty, con, value_of_json payload_ty payload)
+          | None -> fail ("WEB039 backend Variant value-JSON unknown constructor: " ^ con))
+      | _ -> fail "WEB040 backend Variant value-JSON missing constructor")
+  | t ->
+      fail ("WEB041 backend value-JSON cannot decode type " ^ string_of_typ t)
 
 let initial_model_and_view contract =
   match fst (Runtime.eval_entry contract.checked "init") with
@@ -681,6 +760,22 @@ let runtime_js =
             continuation: { tag: "Done" }
           };
         }
+        case "BackendSend": {
+          // Typed full-stack transport: evaluate the ToBackend payload to a value
+          // and suspend. The response is a structured BackendModel value
+          // (typedResponse passes it straight through), so expected is "Value".
+          var bsPayload = evalTerm(term.payload, env);
+          return {
+            tag: "BackendSend",
+            payload: bsPayload,
+            capability: term.capability,
+            capabilityRef: term.capabilityRef,
+            responseType: term.responseType,
+            requestId: hashString("backendSend:" + JSON.stringify(bsPayload)),
+            expected: "Value",
+            continuation: { tag: "Done" }
+          };
+        }
         case "Bind": {
           var p = evalTerm(term.process, env);
           if (p.tag === "Done") return evalTerm(term.body, [p.value].concat(env));
@@ -688,6 +783,18 @@ let runtime_js =
             return {
               tag: "Request",
               request: p.request,
+              requestId: p.requestId,
+              expected: p.expected,
+              continuation: { tag: "Bind", previous: p.continuation, body: term.body, env: env.slice() }
+            };
+          }
+          if (p.tag === "BackendSend") {
+            return {
+              tag: "BackendSend",
+              payload: p.payload,
+              capability: p.capability,
+              capabilityRef: p.capabilityRef,
+              responseType: p.responseType,
               requestId: p.requestId,
               expected: p.expected,
               continuation: { tag: "Bind", previous: p.continuation, body: term.body, env: env.slice() }
@@ -1066,7 +1173,12 @@ let runtime_js =
         var request = pending[requestId];
         if (!request) throw new Error("unknown pending request: " + requestId);
         var typed = typedResponse(request, response);
-        if (request.expected !== typed.tag) throw new Error("protocol response type mismatch");
+        // sendToBackend resumes with a structured BackendModel value (expected
+        // "Value"); every other capability fixes the response tag exactly.
+        if (request.expected !== "Value" && request.expected !== typed.tag)
+          throw new Error("protocol response type mismatch");
+        if (request.expected === "Value" && !(typed && typed.tag))
+          throw new Error("backend response is not a structured value");
         delete pending[requestId];
         record("resume", {
           requestId: requestId,
@@ -1109,6 +1221,25 @@ let runtime_js =
           pending[request.requestId] = request;
           record("request", request);
           window.dispatchEvent(new CustomEvent("protoss:request", { detail: request }));
+          return;
+        }
+        if (process.tag === "BackendSend") {
+          // Typed full-stack transport: carry the ToBackend payload value (as a
+          // structured value, not a string) so the transport can POST it and the
+          // server can decode it back to a Runtime value.
+          var bsRequest = {
+            requestId: process.requestId,
+            requestTag: "BackendSend",
+            capability: process.capability,
+            capabilityRef: process.capabilityRef,
+            responseType: process.responseType,
+            payload: process.payload,
+            expected: process.expected,
+            process: process
+          };
+          pending[bsRequest.requestId] = bsRequest;
+          record("request", bsRequest);
+          window.dispatchEvent(new CustomEvent("protoss:request", { detail: bsRequest }));
           return;
         }
         throw new Error("update returned non-process");
@@ -1186,6 +1317,28 @@ let runtime_js =
       });
     }).catch(function (err) {
       console.error("protoss: Server.request transport failed", err);
+    });
+  });
+  // Typed full-stack transport for suspended sendToBackend processes: POST the
+  // ToBackend value (as a structured value-JSON, route "__backend") to /__server
+  // and resume with the BackendModel value-JSON the server returns. The server
+  // decodes the payload back to a Runtime value, folds updateBackend, and answers
+  // the new BackendModel as value-JSON, which resume() passes straight through
+  // (typedResponse keeps a structured value untouched).
+  window.addEventListener("protoss:request", function (e) {
+    var r = e.detail || {};
+    if (r.requestTag !== "BackendSend") return;
+    fetch("/__server", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ route: "__backend", backendSend: r.payload })
+    }).then(function (res) {
+      return res.text().then(function (t) {
+        if (!res.ok) throw new Error(t);
+        window.ProtossRuntime.resume(r.requestId, JSON.parse(t));
+      });
+    }).catch(function (err) {
+      console.error("protoss: sendToBackend transport failed", err);
     });
   });
 })();
@@ -1477,10 +1630,14 @@ let inject_before_body html =
   | None -> html ^ livereload_script
 
 (* [server_request] is the typed transport hook (docs/backend-architecture.md):
-   the browser runtime POSTs every suspended `Server.request` to /__server as
-   {"route":..,"payload":..}; the callback (wired in bin/main.ml, which can see
-   Backend without a module cycle) answers with the response text the process
-   resumes with. [bind_any] listens on 0.0.0.0 for deployment. *)
+   the browser runtime POSTs suspended transport effects to /__server. Two
+   shapes share the endpoint: the stringly `Server.request` ({route,payload}
+   strings, [backend_send=None]) and the typed `sendToBackend`
+   ({route:"__backend", backendSend:<value-JSON>}, [backend_send=Some json]).
+   The callback (wired in bin/main.ml, which can see Backend without a module
+   cycle) answers with the response body the process resumes with: display text
+   for Server.request, BackendModel value-JSON for sendToBackend. [bind_any]
+   listens on 0.0.0.0 for deployment. *)
 let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
   (* Every browser reload drops and reopens its SSE stream, so the next push
      writes to a closed socket. Ignore SIGPIPE so that write raises an EPIPE
@@ -1639,15 +1796,23 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
                   | Some f -> Json.string f
                   | None -> None
                 in
-                match (text "route", text "payload") with
-                | Some route, Some payload -> Ok (route, payload)
-                | _ -> Error "request body must be {\"route\":..,\"payload\":..}"
+                (* Two shapes share /__server: the stringly Server.request
+                   ({route,payload} strings) and the typed sendToBackend
+                   ({route:"__backend", backendSend:<value-JSON>}). *)
+                match (text "route", text "payload", Json.field "backendSend" json) with
+                | Some route, Some payload, _ -> Ok (route, payload, None)
+                | Some route, None, Some backend_send -> Ok (route, "", Some backend_send)
+                | _ ->
+                    Error
+                      "request body must be {\"route\":..,\"payload\":..} or {\"route\":..,\"backendSend\":..}"
               with Json.Error msg -> Error ("invalid request JSON: " ^ msg)
             in
             match parsed with
             | Error msg -> respond_text oc "400 Bad Request" (msg ^ "\n")
-            | Ok (route, payload) -> (
-                match handler ~checked:(!output).build.Workspace.checked ~route ~payload with
+            | Ok (route, payload, backend_send) -> (
+                match
+                  handler ~checked:(!output).build.Workspace.checked ~route ~payload ~backend_send
+                with
                 | response -> respond_text oc "200 OK" response
                 | exception e ->
                     let msg =

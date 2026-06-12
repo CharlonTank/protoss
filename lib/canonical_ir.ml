@@ -282,6 +282,21 @@ let rec term_of_graph_json obj =
         (term_of_graph_json (json_field "event" obj), term_of_graph_json (json_field "message" obj))
   | "Done" -> Kernel.CDone (term_of_graph_json (json_field "value" obj))
   | "Request" -> Kernel.CRequest (req_of_graph_json (json_field "request" obj))
+  | "BackendSend" ->
+      let capability = json_string_field "capability" obj in
+      if not (String.equal capability Kernel.backend_send_capability) then
+        fail ("canonical graph backendSend capability mismatch: " ^ capability);
+      let capability_ref = json_string_field "capabilityRef" obj in
+      let expected_capability_ref =
+        match Kernel.capability_ref capability with
+        | Some ref -> ref
+        | None -> fail ("canonical graph backendSend unknown capability: " ^ capability)
+      in
+      if not (String.equal capability_ref expected_capability_ref) then
+        fail "canonical graph backendSend capabilityRef mismatch";
+      Kernel.CBackendSend
+        ( term_of_graph_json (json_field "payload" obj),
+          type_of_graph_json (json_field "responseType" obj) )
   | "Bind" ->
       Kernel.CBind
         ( term_of_graph_json (json_field "process" obj),
