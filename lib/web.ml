@@ -1691,11 +1691,28 @@ let content_type path =
    injected only into the page that `serve`/`live` hands out. The browser opens
    an SSE stream (/livereload) and reloads when the server PUSHES an event after
    a rebuild — no client-side polling. *)
+(* Besides reload-on-rebuild, the stream doubles as a liveness probe: when the
+   dev server goes away the EventSource errors, and a fixed banner tells the
+   user instead of leaving a silently frozen page. EventSource auto-reconnects;
+   when the server comes back the page reloads to resynchronize. *)
 let livereload_script =
   "<script>\n\
   \  (function () {\n\
   \    var es = new EventSource('/livereload');\n\
+  \    var wasDown = false;\n\
   \    es.onmessage = function () { location.reload(); };\n\
+  \    es.onerror = function () {\n\
+  \      wasDown = true;\n\
+  \      if (document.getElementById('protoss-disconnected')) return;\n\
+  \      var b = document.createElement('div');\n\
+  \      b.id = 'protoss-disconnected';\n\
+  \      b.textContent = 'Protoss server disconnected - reconnecting...';\n\
+  \      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +\n\
+  \        'background:#b91c1c;color:#fff;font:600 14px system-ui,sans-serif;' +\n\
+  \        'padding:10px 16px;text-align:center;';\n\
+  \      (document.body || document.documentElement).appendChild(b);\n\
+  \    };\n\
+  \    es.onopen = function () { if (wasDown) location.reload(); };\n\
   \  })();\n\
    </script>\n"
 
