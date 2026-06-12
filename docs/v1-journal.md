@@ -133,6 +133,28 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   doctor --v1 (fold 3 sends → n=3, snapshot pur-cache par rm+refold identique, broadcast dérivé du
   fold) → 26 pass / 0 fail ; seed full-loop au fuzzer (7 targets mutent sendToBackend/broadcast,
   0 crash). Piège noté : `Doctor.contains` prend le NEEDLE en premier.
+- **Self-hosted canon sendToBackend/broadcast FAIT** (d5a92ab, agent afc388f2, parité refaite sur
+  main : `self canon --compare` OK). Mur franchi : le fragment self-hosté n'avait PAS Tuple (le kernel
+  désucre en Record _1/_2 au parse) → désucration répliquée dans le prélude ; `canonBackendContract`
+  réplique backend_contract_types ; restrictions honnêtes (short-ctor payload → Err). @selftest +
+  @fulltest verts. V1-gate PASS à froid re-confirmé avant ce chantier.
+
+## RÉSUMÉ DE SESSION (boucle autonome ~14h, 2026-06-12)
+Le cycle complet « Lamdera mais content-addressed, total, déterministe, ULTRA PERF » est LIVRÉ,
+PROUVÉ et EN PRODUCTION :
+- **Syntaxe/DX** : variants courts, inférence widgets complète (column/row/button/input/list/when/on),
+  scaffold lamdera-init 100% Protoss/H (Types/Frontend/Backend), scopes { caps } en toute position,
+  suggestions d'erreur (seuil relatif + constructeurs), messages dédupliqués, WEB030 port-occupé.
+- **Backend Lamdera** : app check backend half ; BackendModel = fold event-sourcé du ledger ;
+  sendToBackend TYPÉ compile-time (réponse BackendModel value-JSON) ; broadcast/fromBackend en SSE ;
+  snapshots content-addressed O(1) pur-cache ; interface storage BACKEND (FS verbatim, SQLite séquencé).
+- **Prod** : `protoss deploy` (Hetzner idempotent + build distant + systemd + DNS CF avec token) ;
+  serveur protoss-demo collaboratif vérifié (ledger persistant à travers TOUS les redeploys, SSE).
+- **Garanties** : doctor 26 pass/0 fail (dont lamdera-backend), V1-gate PASS à froid, fuzzer 7 targets
+  × 2000 it. 0 crash (dont les nouveaux nœuds), self-hosted canon parité rétablie, sweeps 0-diff à
+  chaque changement kernel.
+- **Reste post-V1** (séquencé aux docs) : SQLite adapter (après routage complet via BACKEND),
+  bytecode VM pour les nœuds transport, sendToFrontend unicast/sessions, sharding.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
