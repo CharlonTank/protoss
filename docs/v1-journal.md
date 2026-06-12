@@ -325,3 +325,28 @@ PROUVÉ et EN PRODUCTION :
   prouve maintenant welcome==fold (26 pass/0 fail). Vérifié en navigateur : « backend: 2 » affiché au
   chargement (valeur persistée du ledger !), clic → fold + broadcast + welcome curl « Synced 3 » +
   heartbeats visibles au fil SSE. `@fulltest` vert, CLI réinstallée.
+- 2026-06-13 — **Émetteur instantané + SSE basse latence FAIT** (commit 2984423, sur 2e rapport user :
+  « le bouton reste à 0 »). Reproduit sur SON projet (`protoss-tests/protoss`) : les folds marchaient
+  (11 events au ledger) mais l'affichage dépendait de l'écho broadcast, et un wrapper EventSource
+  injecté avant le runtime a montré les trames SSE arrivant avec PLUSIEURS SECONDES de retard
+  (petites trames ~100 o coincées : Nagle + delayed-ACK macOS + buffering avant le parseur). Triple
+  fix : (1) scaffold — la continuation `sendToBackend` utilise LA RÉPONSE du POST (le BackendModel y
+  est déjà !) → l'action de l'émetteur s'affiche en <1 s par le chemin requête/réponse, le broadcast
+  ne sert qu'aux AUTRES clients (modèle Lamdera) ; (2) TCP_NODELAY sur les sockets acceptées ;
+  (3) padding SSE standard 2 Ko après les headers. Vérifié navigateur sur son projet : welcome
+  « backend: 20 » (valeur persistée), clic → 21 en 984 ms, bump d'un autre client → ~1 s.
+- 2026-06-13 — **Time-travel debugger full-stack FAIT** (commit 6125484, demande user explicite
+  « debugger à la Elm mais full-stack »). L'architecture event-sourcée paie : (a) runtime — API
+  `_active.debug` : chaque msg dispatché → `history`, chaque réponse transport → `responses[requestId
+  déterministe]` ; `travelTo(k)` REFOLD le modèle depuis init en résolvant les suspensions depuis les
+  réponses enregistrées (AUCUN transport re-tiré) ; pendant le voyage la page est gelée dans le passé
+  (messages entrants — broadcasts SSE inclus — parqués et rejoués à `travelPresent()`, un process en
+  vol avance le présent silencieusement) ; (b) serveur dev — `GET /__debug/backend` = timeline du
+  ledger backend avec le BackendModel foldé après CHAQUE événement (`Backend.timeline`, une passe
+  incrémentale, read-only) ; (c) devbar injectée par le serveur seulement (bundles byte-identiques) :
+  panneau frontend (historique cliquable, refold au clic, outline orange dans le passé, boutons
+  init/present) + panneau backend (log des événements avec états foldés). Vérifié en live sur une
+  session de 65 messages : travelTo(2) → « local: 0 », travelPresent → « local: 49 » exact. Tests :
+  folds par préfixe + textes des messages de Backend.timeline. `node --check` sur les scripts générés.
+  V2 possibles (au besoin user) : fork du monde backend à un point passé (Ledger.fork existe), diff
+  d'états, lien causal frontend↔backend par requestId.
