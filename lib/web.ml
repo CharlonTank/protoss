@@ -1166,6 +1166,28 @@ let runtime_js =
       catch (_) { return []; }
     }
   };
+  // Default transport for suspended Server.request processes: POST the typed
+  // request to the serving backend (/__server) and resume the process with the
+  // plain-text response. Apps served without a Protoss server (a bare static
+  // bundle) surface the failure in the console; everything else is unaffected
+  // (other capabilities keep their explicit protoss:request handling).
+  window.addEventListener("protoss:request", function (e) {
+    var r = e.detail || {};
+    if (r.requestTag !== "ServerRequest") return;
+    var p = r.payload || {};
+    fetch("/__server", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ route: p.route || "", payload: p.payload || "" })
+    }).then(function (res) {
+      return res.text().then(function (t) {
+        if (!res.ok) throw new Error(t);
+        window.ProtossRuntime.resume(r.requestId, t);
+      });
+    }).catch(function (err) {
+      console.error("protoss: Server.request transport failed", err);
+    });
+  });
 })();
 |}
 
@@ -1454,7 +1476,12 @@ let inject_before_body html =
   | Some i -> String.sub html 0 i ^ livereload_script ^ String.sub html i (sl - i)
   | None -> html ^ livereload_script
 
-let serve ?(port = 8080) project =
+(* [server_request] is the typed transport hook (docs/backend-architecture.md):
+   the browser runtime POSTs every suspended `Server.request` to /__server as
+   {"route":..,"payload":..}; the callback (wired in bin/main.ml, which can see
+   Backend without a module cycle) answers with the response text the process
+   resumes with. [bind_any] listens on 0.0.0.0 for deployment. *)
+let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
   (* Every browser reload drops and reopens its SSE stream, so the next push
      writes to a closed socket. Ignore SIGPIPE so that write raises an EPIPE
      exception the notify loop catches and prunes, instead of killing the
@@ -1486,10 +1513,13 @@ let serve ?(port = 8080) project =
   in
   let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt sock Unix.SO_REUSEADDR true;
-  Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+  Unix.bind sock
+    (Unix.ADDR_INET ((if bind_any then Unix.inet_addr_any else Unix.inet_addr_loopback), port));
   Unix.listen sock 10;
-  Printf.printf "Serving %s on http://127.0.0.1:%d/  (live reload on .protoss save)\n%!"
-    (!output).out_dir port;
+  Printf.printf "Serving %s on http://%s:%d/  (live reload on .protoss save)\n%!"
+    (!output).out_dir
+    (if bind_any then "0.0.0.0" else "127.0.0.1")
+    port;
   (* Open SSE streams. Both channels are retained so the fd isn't GC-closed. *)
   let sse_clients = ref [] in
   let notify_reload () =
@@ -1526,16 +1556,75 @@ let serve ?(port = 8080) project =
      ^ "\r\nConnection: close\r\n\r\n" ^ body);
     flush oc
   in
+  let respond_text oc status body =
+    output_string oc
+      ("HTTP/1.1 " ^ status ^ "\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: "
+     ^ string_of_int (String.length body) ^ "\r\nConnection: close\r\n\r\n" ^ body);
+    flush oc
+  in
+  (* POST /__server: the browser-side transport for suspended Server.request
+     processes. Body: {"route":..,"payload":..}. The handler answers with the
+     plain-text response the process resumes with; handler errors surface as a
+     500 carrying the (located, public-coded) error message. *)
+  let handle_server_post ic oc =
+    let rec content_length acc =
+      match try Some (input_line ic) with End_of_file -> None with
+      | None -> acc
+      | Some line when String.trim line = "" -> acc
+      | Some line -> (
+          match String.index_opt line ':' with
+          | Some i when String.lowercase_ascii (String.sub line 0 i) = "content-length" ->
+              content_length
+                (int_of_string_opt (String.trim (String.sub line (i + 1) (String.length line - i - 1))))
+          | _ -> content_length acc)
+    in
+    match content_length None with
+    | None -> respond_text oc "411 Length Required" "missing content-length\n"
+    | Some len -> (
+        let body = really_input_string ic len in
+        match server_request with
+        | None -> respond_text oc "404 Not Found" "this server has no request handler\n"
+        | Some handler -> (
+            let parsed =
+              try
+                let json = Json.parse body in
+                let text name =
+                  match Json.field name json with
+                  | Some f -> Json.string f
+                  | None -> None
+                in
+                match (text "route", text "payload") with
+                | Some route, Some payload -> Ok (route, payload)
+                | _ -> Error "request body must be {\"route\":..,\"payload\":..}"
+              with Json.Error msg -> Error ("invalid request JSON: " ^ msg)
+            in
+            match parsed with
+            | Error msg -> respond_text oc "400 Bad Request" (msg ^ "\n")
+            | Ok (route, payload) -> (
+                match handler ~checked:(!output).build.Workspace.checked ~route ~payload with
+                | response -> respond_text oc "200 OK" response
+                | exception e ->
+                    let msg =
+                      match e with
+                      | Kernel.Error m | Error m -> m
+                      | e -> Printexc.to_string e
+                    in
+                    respond_text oc "500 Internal Server Error" (msg ^ "\n"))))
+  in
   let handle_connection () =
     let client, _ = Unix.accept sock in
     let ic = Unix.in_channel_of_descr client and oc = Unix.out_channel_of_descr client in
     let line = try input_line ic with End_of_file -> "GET / HTTP/1.1" in
-    let raw_path =
+    let meth, raw_path =
       match String.split_on_char ' ' line with
-      | _ :: raw :: _ -> if raw = "/" then "/index.html" else raw
-      | _ -> "/index.html"
+      | m :: raw :: _ -> (m, if raw = "/" then "/index.html" else raw)
+      | _ -> ("GET", "/index.html")
     in
-    if String.equal raw_path "/livereload" then (
+    if String.equal meth "POST" && String.equal raw_path "/__server" then (
+      handle_server_post ic oc;
+      close_in_noerr ic;
+      close_out_noerr oc)
+    else if String.equal raw_path "/livereload" then (
       (* SSE stream: send headers, keep the connection open, push on rebuild. *)
       output_string oc
         "HTTP/1.1 200 OK\r\n\

@@ -862,6 +862,28 @@ let command_backend = function
       Printf.printf "Cmd %s\n" (Protoss.Runtime.value_to_string cmd)
   | _ -> usage ()
 
+(* Transport for the Lamdera-shaped backend (docs/backend-architecture.md): a
+   frontend `Server.request "__backend" <ToBackend>` suspension is POSTed by
+   the browser runtime to /__server and lands here. The message is typed,
+   appended to the project ledger, and folded (Backend.send); the process
+   resumes with the new BackendModel's text. Uses the CURRENT build's checked
+   program (hot reload keeps the handler in sync). *)
+let live_server_request project ~checked ~route ~payload =
+  if not (String.equal route "__backend") then
+    Protoss.Kernel.fail ("unknown server route: " ^ route)
+  else
+    try
+      let b = Protoss.Backend.contract checked in
+      let root =
+        Filename.concat
+          (Protoss.Workspace.project_root project)
+          (Filename.concat ".protoss" "ledger")
+      in
+      let world = Protoss.Backend.branch_world root in
+      let _, _, model, _cmd = Protoss.Backend.send root checked b world payload in
+      Protoss.Runtime.value_to_string model
+    with Protoss.Backend.Error msg -> Protoss.Kernel.fail msg
+
 let command_web = function
   | "build" :: project :: args ->
       let out = find_flag_value "--out" args in
@@ -874,24 +896,28 @@ let command_web = function
       let port =
         match find_flag_value "--port" args with Some p -> int_of_string p | None -> 8080
       in
-      Protoss.Web.serve ~port project
+      Protoss.Web.serve ~port
+        ~bind_any:(List.mem "--public" args)
+        ~server_request:(live_server_request project) project
   | _ -> usage ()
 
-(* `protoss live [project] [--port N]`: the convenience "run my app" command —
-   build the full-stack bundle and serve it over HTTP (same as `web serve`, but
-   the obvious verb for a freshly `project init`'d app). *)
+(* `protoss live [project] [--port N] [--public]`: the convenience "run my app"
+   command — build the full-stack bundle and serve it over HTTP (same as `web
+   serve`, but the obvious verb for a freshly `project init`'d app). *)
 let command_live args =
   let port =
     match find_flag_value "--port" args with Some p -> int_of_string p | None -> 8080
   in
-  (* drop --port and its value so project_arg sees only the project path *)
+  let public = List.mem "--public" args in
+  (* drop the flags so project_arg sees only the project path *)
   let rec strip = function
     | "--port" :: _ :: rest -> strip rest
+    | "--public" :: rest -> strip rest
     | x :: rest -> x :: strip rest
     | [] -> []
   in
   let project = project_arg (strip args) in
-  Protoss.Web.serve ~port project
+  Protoss.Web.serve ~port ~bind_any:public ~server_request:(live_server_request project) project
 
 let command_runtime = function
   | [ "init"; project ] -> print_string (Protoss.Runtime_store.init project)
