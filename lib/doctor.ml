@@ -702,6 +702,59 @@ let checks : check list =
           all hostile_inputs);
     };
     {
+      id = "lamdera-backend";
+      section = "14";
+      description =
+        "the full Lamdera loop: typed sends fold the ledger, snapshots are a pure cache, \
+         broadcasts derive from the fold";
+      run =
+        (fun () ->
+          let checked =
+            check_source
+              ("(capabilities Server.request)\n\
+                (def initBackend (Record (n Nat)) (record (n 0)))\n\
+                (def updateBackend (-> (Variant (B Unit)) (-> (Record (n Nat)) (Tuple (Record \
+                 (n Nat)) (Cmd (capabilities) (Variant (S Nat)))))) (lambda (m (Variant (B \
+                 Unit))) (lambda (md (Record (n Nat))) (tuple (record (n (succ (get md n)))) \
+                 (broadcast (S (succ (get md n))))))))\n\
+                (def go (Process (Record (n Nat))) (sendToBackend (B unit)))")
+          in
+          let b = Backend.contract checked in
+          let dir =
+            Filename.concat (Filename.get_temp_dir_name ())
+              (Printf.sprintf "protoss-doctor-backend-%d" (Unix.getpid ()))
+          in
+          rm_rf dir;
+          Fun.protect
+            ~finally:(fun () -> rm_rf dir)
+            (fun () ->
+              let world =
+                List.fold_left
+                  (fun world _ ->
+                    let _, next_world, _, _ = Backend.send dir checked b world "(B unit)" in
+                    next_world)
+                  Ledger.initial_world [ (); (); () ]
+              in
+              let model = Backend.state dir checked b world in
+              let canonical = Runtime.value_to_canonical model in
+              if not (contains "3" canonical) then
+                Fail ("backend fold expected n=3, got " ^ Runtime.value_to_string model)
+              else (
+                rm_rf (Filename.concat dir "snapshots");
+                let refolded =
+                  Runtime.value_to_canonical (Backend.state dir checked b world)
+                in
+                if not (String.equal canonical refolded) then
+                  Fail "snapshot and refold disagree (snapshot is not a pure cache)"
+                else
+                  let _, cmd =
+                    Backend.step checked b model (Backend.message_value b "(B unit)")
+                  in
+                  match Backend.broadcast_of_cmd cmd with
+                  | Some _ -> Pass
+                  | None -> Fail "updateBackend's broadcast was not derivable from the fold")));
+    };
+    {
       id = "benchmarks-thresholds";
       section = "20";
       description = "a full-prelude build stays under a generous wall-clock ceiling";

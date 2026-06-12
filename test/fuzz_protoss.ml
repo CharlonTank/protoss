@@ -334,6 +334,9 @@ let seed_sexp =
     "(def r (Record (x Nat) (y Nat)) (record (x 1) (y 2)))";
     "(def f (-> (TVar 0) (TVar 0)) (lambda (x (TVar 0)) x))";
     "(defrec sum (-> Nat Nat) (nat n) (zero 0) (step acc (succ acc)))";
+    (* The full Lamdera loop: drives the sendToBackend/broadcast effect nodes
+       through the checker, evaluator, and canonical-roundtrip targets. *)
+    "(capabilities Server.request) (def initBackend (Record (n Nat)) (record (n 0))) (def updateBackend (-> (Variant (B Unit)) (-> (Record (n Nat)) (Tuple (Record (n Nat)) (Cmd (capabilities) (Variant (S Nat)))))) (lambda (m (Variant (B Unit))) (lambda (md (Record (n Nat))) (tuple (record (n (succ (get md n)))) (broadcast (S (succ (get md n)))))))) (def go (Process (Record (n Nat))) (sendToBackend (B unit)))";
     (* A whole view program: drives the column/input/list/button check_elab paths
        and the input/list handler-lambda inference under the checker target. *)
     "(def w (-> String (View (Variant (Set String) (Clear Unit)))) (lambda (s String) (column (Cons (View (Variant (Set String) (Clear Unit))) (input s (lambda (t String) (variant (Variant (Set String) (Clear Unit)) Set t))) (Cons (View (Variant (Set String) (Clear Unit))) (list (Cons String s (Nil String)) (lambda (i String) (text i))) (Nil (View (Variant (Set String) (Clear Unit)))))))))";
