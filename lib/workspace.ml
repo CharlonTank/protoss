@@ -339,7 +339,11 @@ let frontend_app_source =
       "    case msg of";
       "        Bump _ -> done { model | count = succ model.count }";
       "        BumpShared _ ->";
-      "            bind (sendToBackend (Bump unit)) (\\m -> done model)";
+      "            -- sendToBackend answers with the NEW BackendModel, so the";
+      "            -- sender renders its own action immediately from the reply;";
+      "            -- the broadcast (GotShared) keeps every OTHER client in sync.";
+      "            bind (sendToBackend (Bump unit))";
+      "                (\\m -> done { model | shared = Nat.toString m.count })";
       "        GotShared n -> done { model | shared = Nat.toString n }";
       "";
       "view : Types.FrontendModel -> View Types.FrontendMsg";

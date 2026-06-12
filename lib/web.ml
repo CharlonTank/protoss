@@ -1885,6 +1885,17 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event proj
               false)
         !clients
   in
+  (* Standard SSE anti-buffering padding: a 2KB comment frame sent right after
+     the headers defeats intermediaries (and some client network stacks) that
+     hold small response bodies until a size threshold before handing them to
+     the parser — without it the first real frames can sit buffered for
+     seconds. Comment frames are invisible to EventSource. *)
+  let sse_preamble =
+    "HTTP/1.1 200 OK\r\n\
+     Content-Type: text/event-stream\r\n\
+     Cache-Control: no-cache\r\n\
+     Connection: keep-alive\r\n\r\n: " ^ String.make 2048 ' ' ^ "\nretry: 1000\n\n"
+  in
   let notify_reload () = write_to_clients sse_clients "data: reload\n\n" in
   (* Push one ToFrontend value-JSON line to EVERY subscribed client (the Lamdera
      broadcast). [data] is a single line of value-JSON (no embedded newlines —
@@ -1996,6 +2007,11 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event proj
   in
   let handle_connection () =
     let client, _ = Unix.accept sock in
+    (* SSE frames are tiny (a ping is 8 bytes, a broadcast ~100): without
+       TCP_NODELAY, Nagle holds the second small write until the first is
+       ACKed, and macOS's delayed ACK turns that into visible (hundreds of ms,
+       compounding) push latency. Streams must deliver immediately. *)
+    (try Unix.setsockopt client Unix.TCP_NODELAY true with _ -> ());
     let ic = Unix.in_channel_of_descr client and oc = Unix.out_channel_of_descr client in
     let line = try input_line ic with End_of_file -> "GET / HTTP/1.1" in
     let meth, raw_path =
@@ -2010,11 +2026,7 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event proj
     else if String.equal raw_path "/livereload" then (
       (* SSE stream: send headers, keep the connection open, push on rebuild.
          `retry: 1000` makes EventSource reattempt quickly after a drop. *)
-      output_string oc
-        "HTTP/1.1 200 OK\r\n\
-         Content-Type: text/event-stream\r\n\
-         Cache-Control: no-cache\r\n\
-         Connection: keep-alive\r\n\r\n: connected\nretry: 1000\n\n";
+      output_string oc sse_preamble;
       flush oc;
       sse_clients := (ic, oc) :: !sse_clients)
     else if String.equal raw_path "/__events" then (
@@ -2022,11 +2034,7 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event proj
          `curl -N /__events`) subscribes here; [push_event] fans a broadcast out
          to every open stream. Held open like /livereload but a distinct channel:
          dev reload and app broadcasts never cross. *)
-      output_string oc
-        "HTTP/1.1 200 OK\r\n\
-         Content-Type: text/event-stream\r\n\
-         Cache-Control: no-cache\r\n\
-         Connection: keep-alive\r\n\r\n: connected\nretry: 1000\n\n";
+      output_string oc sse_preamble;
       flush oc;
       event_clients := (ic, oc) :: !event_clients;
       (* onConnect welcome (Lamdera): push the current backend state to the
