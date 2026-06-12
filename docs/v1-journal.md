@@ -115,6 +115,13 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   (fromBackend en `case` idiomatique au lieu de foldVariant — changement de programme assumé, aucun
   hash pinné ; invariant prouvé = convergence des DEUX syntaxes vers p2:4bc24c7e, scaffold généré
   reproduit ce hash). LE SCAFFOLD EST 100% PROTOSS/H. Sweep 105 0-diff, @fulltest vert.
+- **Messages d'erreur dédupliqués FAIT** (85df234) : plus de « expression X, expression X » quand
+  l'expression fautive EST le corps de la def (String.ends_with au wrapper kernel) ; « expected
+  context: expected » → « checked against the expected type: expected ». Error-path pur, @fulltest vert.
+- **Prod redéployée 100% Protoss/H + SSE vérifiée** (count 5→6 en continuité, broadcast Synced 6 reçu).
+- **Agent « storage-adapter » lancé** (brique 3 : interface d'adaptateur store + FS byte-identique +
+  SQLite si voie propre sans dépendance opam obligatoire — contrainte deploy distant). À intégrer avec
+  preuves refaites (sweep worktree parent, équivalence FS/SQLite, @fulltest).
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
