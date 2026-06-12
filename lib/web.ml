@@ -34,6 +34,16 @@ let require_def checked name =
   | Some d -> d
   | None -> fail ("WEB001 missing required definition: " ^ name)
 
+(* Optional Lamdera-shaped backend half of a full-stack app (see
+   docs/backend-architecture.md). Present iff the app defines `updateBackend`. *)
+type backend_contract = {
+  init_backend_def : Kernel.checked_def;
+  update_backend_def : Kernel.checked_def;
+  backend_model_ty : typ;
+  to_backend_ty : typ;
+  to_frontend_ty : typ;
+}
+
 type app_contract = {
   checked : Kernel.checked;
   init_def : Kernel.checked_def;
@@ -42,6 +52,7 @@ type app_contract = {
   model_ty : typ;
   msg_ty : typ;
   architecture : string;
+  backend : backend_contract option;
 }
 
 let record_field name fields =
@@ -59,6 +70,42 @@ let require_cmd_capabilities expected actual context =
     fail
       (context ^ " command capability mismatch: expected " ^ string_of_typ (TCmd (expected, TUnit))
      ^ ", got " ^ string_of_typ (TCmd (actual, TUnit)))
+
+(* Validate the optional backend half. Absent (`None`) iff no `updateBackend`
+   def, so a frontend-only app is unaffected. updateBackend mirrors the cmd
+   update shape, against the backend's own model/messages:
+     initBackend   : BackendModel
+     updateBackend : ToBackend -> BackendModel -> (Tuple BackendModel (Cmd caps ToFrontend)) *)
+let check_backend_contract checked =
+  match def_by_name checked "updateBackend" with
+  | None -> None
+  | Some update_backend_def ->
+      let init_backend_def = require_def checked "initBackend" in
+      let backend_model_ty = init_backend_def.def.typ in
+      let to_backend_ty, to_frontend_ty =
+        match update_backend_def.def.typ with
+        | TFun (to_backend, TFun (backend_model, update_result)) -> (
+            if not (equal_typ backend_model_ty backend_model) then
+              fail
+                ("WEB021 updateBackend model argument mismatch: expected "
+               ^ string_of_typ backend_model_ty ^ ", got " ^ string_of_typ backend_model);
+            match cmd_tuple_shape update_result with
+            | Some (backend_model', _caps, to_frontend) ->
+                if not (equal_typ backend_model_ty backend_model') then
+                  fail
+                    ("WEB022 updateBackend result model mismatch: expected "
+                   ^ string_of_typ backend_model_ty ^ ", got " ^ string_of_typ backend_model');
+                (to_backend, to_frontend)
+            | None ->
+                fail
+                  ("WEB023 updateBackend must return (Tuple BackendModel (Cmd caps ToFrontend)), got "
+                 ^ string_of_typ update_result))
+        | t ->
+            fail
+              ("WEB024 updateBackend must have type ToBackend -> BackendModel -> (Tuple \
+                BackendModel (Cmd caps ToFrontend)), got " ^ string_of_typ t)
+      in
+      Some { init_backend_def; update_backend_def; backend_model_ty; to_backend_ty; to_frontend_ty }
 
 let check_contract checked =
   let init_def = require_def checked "init" in
@@ -137,7 +184,8 @@ let check_contract checked =
           ("WEB007 view message mismatch: expected View " ^ string_of_typ msg_ty ^ ", got View "
          ^ string_of_typ msg)
   | t -> fail ("WEB008 view must have type Model -> View Msg, got " ^ string_of_typ t));
-  { checked; init_def; update_def; view_def; model_ty; msg_ty; architecture }
+  { checked; init_def; update_def; view_def; model_ty; msg_ty; architecture;
+    backend = check_backend_contract checked }
 
 let app_check project =
   let manifest = manifest project in

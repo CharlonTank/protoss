@@ -522,6 +522,46 @@ let () =
     (Runtime.value_to_canonical (fst (Runtime.normalize_def checked "main")))
     (Runtime.value_to_canonical (Bytecode_vm.exec_module m "main"))
 
+(* Optional Lamdera-shaped backend half (docs/backend-architecture.md): app
+   check recognizes and validates updateBackend/initBackend; a frontend-only app
+   keeps backend = None (so its contract/hash is unchanged), and a mistyped
+   backend is rejected. *)
+let () =
+  let fe =
+    "(def init (Process Nat) (done 0))\n\
+     (def update (-> (Variant (Inc Unit)) (-> Nat (Process Nat))) (lambda (m (Variant (Inc \
+      Unit))) (lambda (n Nat) (done n))))\n\
+     (def view (-> Nat (View (Variant (Inc Unit)))) (lambda (n Nat) (column (Nil (View (Variant \
+      (Inc Unit)))))))\n"
+  in
+  assert_true "frontend-only app has no backend contract"
+    ((Web.check_contract (check fe)).Web.backend = None);
+  let backend =
+    "(def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple model unit))))"
+  in
+  (match (Web.check_contract (check (fe ^ backend))).Web.backend with
+  | None -> fail "full-stack app should have a backend contract"
+  | Some b ->
+      assert_equal "backend toBackend type" "(Variant (Bump Unit))"
+        (Ast.string_of_typ b.Web.to_backend_ty);
+      assert_equal "backend toFrontend type" "(Variant (Synced Nat))"
+        (Ast.string_of_typ b.Web.to_frontend_ty);
+      assert_equal "backend model type" "(Record (count Nat))"
+        (Ast.string_of_typ b.Web.backend_model_ty));
+  let mistyped =
+    "(def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> Nat (Tuple (Record (count Nat)) (Cmd \
+      (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) (lambda (n \
+      Nat) (tuple (record (count 0)) unit))))"
+  in
+  try
+    ignore (Web.check_contract (check (fe ^ mistyped)));
+    fail "mistyped backend (model arg) should be rejected"
+  with Web.Error msg -> assert_true "backend model mismatch is WEB021" (contains_substring msg "WEB021")
+
 (* Regression guards for crashes found by the deterministic fuzzer (G3). *)
 let () =
   (* "case ofx": find_sub used to match the space inside "case ", driving

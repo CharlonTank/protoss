@@ -809,7 +809,14 @@ let command_app = function
       Printf.printf "App OK model=%s msg=%s architecture=%s\n"
         (Protoss.Ast.string_of_typ contract.Protoss.Web.model_ty)
         (Protoss.Ast.string_of_typ contract.msg_ty)
-        contract.architecture
+        contract.architecture;
+      (match contract.Protoss.Web.backend with
+      | None -> ()
+      | Some b ->
+          Printf.printf "Backend OK backendModel=%s toBackend=%s toFrontend=%s\n"
+            (Protoss.Ast.string_of_typ b.Protoss.Web.backend_model_ty)
+            (Protoss.Ast.string_of_typ b.Protoss.Web.to_backend_ty)
+            (Protoss.Ast.string_of_typ b.Protoss.Web.to_frontend_ty))
   | _ -> usage ()
 
 let command_web = function
