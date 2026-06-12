@@ -706,7 +706,7 @@ let checks : check list =
       section = "14";
       description =
         "the full Lamdera loop: typed sends fold the ledger, snapshots are a pure cache, \
-         broadcasts derive from the fold";
+         broadcasts and the onConnect welcome derive from the fold";
       run =
         (fun () ->
           let checked =
@@ -717,6 +717,8 @@ let checks : check list =
                  (n Nat)) (Cmd (capabilities) (Variant (S Nat)))))) (lambda (m (Variant (B \
                  Unit))) (lambda (md (Record (n Nat))) (tuple (record (n (succ (get md n)))) \
                  (broadcast (S (succ (get md n))))))))\n\
+                (def onConnect (-> (Record (n Nat)) (Variant (S Nat))) (lambda (md (Record (n \
+                 Nat))) (S (get md n))))\n\
                 (def go (Process (Record (n Nat))) (sendToBackend (B unit)))")
           in
           let b = Backend.contract checked in
@@ -751,8 +753,18 @@ let checks : check list =
                     Backend.step checked b model (Backend.message_value b "(B unit)")
                   in
                   match Backend.broadcast_of_cmd cmd with
-                  | Some _ -> Pass
-                  | None -> Fail "updateBackend's broadcast was not derivable from the fold")));
+                  | None -> Fail "updateBackend's broadcast was not derivable from the fold"
+                  | Some _ -> (
+                      (* onConnect welcome: the connect push is the fold's truth. *)
+                      match Backend.connect_value dir checked b world with
+                      | Some welcome
+                        when contains "3" (Runtime.value_to_canonical welcome) ->
+                          Pass
+                      | Some welcome ->
+                          Fail
+                            ("onConnect welcome expected S 3, got "
+                            ^ Runtime.value_to_string welcome)
+                      | None -> Fail "onConnect welcome was not derivable from the fold"))));
     };
     {
       id = "benchmarks-thresholds";

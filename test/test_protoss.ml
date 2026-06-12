@@ -557,10 +557,30 @@ let () =
       (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) (lambda (n \
       Nat) (tuple (record (count 0)) unit))))"
   in
+  (try
+     ignore (Web.check_contract (check (fe ^ mistyped)));
+     fail "mistyped backend (model arg) should be rejected"
+   with Web.Error msg ->
+     assert_true "backend model mismatch is WEB021" (contains_substring msg "WEB021"));
+  (* Optional onConnect (the Lamdera welcome): absent => None; well-typed
+     (BackendModel -> ToFrontend) => carried by the contract; mistyped => WEB042. *)
+  (match (Web.check_contract (check (fe ^ backend))).Web.backend with
+  | Some b -> assert_true "backend without onConnect has none" (b.Web.on_connect_def = None)
+  | None -> fail "full-stack app should have a backend contract");
+  let on_connect =
+    "(def onConnect (-> (Record (count Nat)) (Variant (Synced Nat))) (lambda (model (Record \
+     (count Nat))) (Synced (get model count))))"
+  in
+  (match (Web.check_contract (check (fe ^ backend ^ "\n" ^ on_connect))).Web.backend with
+  | Some b -> assert_true "well-typed onConnect is carried" (b.Web.on_connect_def <> None)
+  | None -> fail "full-stack app with onConnect should have a backend contract");
+  let bad_on_connect =
+    "(def onConnect (-> Nat (Variant (Synced Nat))) (lambda (n Nat) (Synced n)))"
+  in
   try
-    ignore (Web.check_contract (check (fe ^ mistyped)));
-    fail "mistyped backend (model arg) should be rejected"
-  with Web.Error msg -> assert_true "backend model mismatch is WEB021" (contains_substring msg "WEB021")
+    ignore (Web.check_contract (check (fe ^ backend ^ "\n" ^ bad_on_connect)));
+    fail "mistyped onConnect should be rejected"
+  with Web.Error msg -> assert_true "onConnect mismatch is WEB042" (contains_substring msg "WEB042")
 
 (* Brick 2 (docs/backend-architecture.md): the BackendModel is the
    deterministic fold of updateBackend over the ledger's to-backend events.
@@ -634,7 +654,35 @@ let () =
      ignore (Backend.state ledger_a checked b forged_world);
      fail "forged message-ref should fail replay integrity"
    with Backend.Error msg ->
-     assert_true "forged ref is BACKEND005" (contains_substring msg "BACKEND005"))
+     assert_true "forged ref is BACKEND005" (contains_substring msg "BACKEND005"));
+  (* onConnect welcome: absent => no welcome value; present => the welcome is
+     the pure projection of the CURRENT fold (ephemeral, ledger untouched). *)
+  assert_true "connect_value without onConnect is None"
+    (Backend.connect_value ledger_b checked b world_b = None);
+  let with_connect =
+    check
+      (program
+      ^ "\n\
+         (def onConnect (-> (Record (count Nat)) (Variant (Synced Nat))) (lambda (model (Record \
+         (count Nat))) (Synced (get model count))))")
+  in
+  let bc = Backend.contract with_connect in
+  let events_before = Sys.readdir (Filename.concat ledger_b "events") |> Array.length in
+  (match Backend.connect_value ledger_b with_connect bc world_b with
+  | Some welcome ->
+      let expected =
+        fst
+          (Runtime.normalize_def
+             (check "(def expected (Variant (Synced Nat)) (Synced 1))")
+             "expected")
+      in
+      assert_equal "onConnect welcome projects the current fold (count 1)"
+        (Runtime.value_to_canonical expected)
+        (Runtime.value_to_canonical welcome)
+  | None -> fail "connect_value with onConnect should produce a welcome");
+  assert_equal "onConnect welcome left the ledger untouched (ephemeral output)"
+    (string_of_int events_before)
+    (string_of_int (Sys.readdir (Filename.concat ledger_b "events") |> Array.length))
 
 (* Typed full-stack transport (sendToBackend): a NEW effect node, typed
    end-to-end against the program's ToBackend/BackendModel (read from
@@ -6601,7 +6649,10 @@ let () =
           "updateBackend : Types.ToBackend -> Types.BackendModel -> Tuple Types.BackendModel"
      && contains_substring backend_src "Cmd {} Types.ToFrontend"
      && contains_substring backend_src "(broadcast (Synced"
-     && contains_substring backend_src "fromBackend : Types.ToFrontend -> Types.FrontendMsg"));
+     && contains_substring backend_src "fromBackend : Types.ToFrontend -> Types.FrontendMsg");
+   assert_true "init --app backend declares the onConnect welcome"
+     (contains_substring backend_src "onConnect : Types.BackendModel -> Types.ToFrontend"
+     && contains_substring backend_src "Synced model.count"));
   let init_manifest = Workspace.parse_manifest project_init_root in
   Workspace.check_project init_manifest;
   let init_build = Workspace.build init_manifest in
@@ -8042,7 +8093,9 @@ let () =
   (match scaffold_contract.Web.backend with
    | Some bc ->
        assert_equal "scaffold ToFrontend is (Variant (Synced Nat))"
-         "(Variant (Synced Nat))" (Ast.string_of_typ bc.Web.to_frontend_ty)
+         "(Variant (Synced Nat))" (Ast.string_of_typ bc.Web.to_frontend_ty);
+       assert_true "scaffold carries a validated onConnect welcome"
+         (bc.Web.on_connect_def <> None)
    | None -> fail "scaffold should have a backend contract");
   assert_true "scaffold defines a validated fromBackend"
     (scaffold_contract.Web.from_backend_def <> None);

@@ -936,6 +936,27 @@ let live_server_request project ~checked ~route ~payload ~backend_send =
           (Protoss.Runtime.value_to_string model, broadcast_json cmd)
     with Protoss.Backend.Error msg -> Protoss.Kernel.fail msg
 
+(* onConnect welcome hook for the dev server: when a client subscribes to
+   /__events and the app defines [onConnect : BackendModel -> ToFrontend],
+   evaluate it against the current fold and hand back the ToFrontend value-JSON
+   to push to that client. Apps without a backend half (or without onConnect)
+   yield None — no welcome frame. *)
+let live_connect_event project ~checked =
+  match
+    try Some (Protoss.Backend.contract checked) with Protoss.Backend.Error _ -> None
+  with
+  | None -> None
+  | Some b -> (
+      let root =
+        Filename.concat
+          (Protoss.Workspace.project_root project)
+          (Filename.concat ".protoss" "ledger")
+      in
+      let world = Protoss.Backend.branch_world root in
+      match Protoss.Backend.connect_value root checked b world with
+      | Some v -> Some (Protoss.Web.value_to_json v)
+      | None -> None)
+
 let command_web = function
   | "build" :: project :: args ->
       let out = find_flag_value "--out" args in
@@ -950,7 +971,8 @@ let command_web = function
       in
       Protoss.Web.serve ~port
         ~bind_any:(List.mem "--public" args)
-        ~server_request:(live_server_request project) project
+        ~server_request:(live_server_request project)
+        ~connect_event:(live_connect_event project) project
   | _ -> usage ()
 
 (* `protoss live [project] [--port N] [--public]`: the convenience "run my app"
@@ -969,7 +991,9 @@ let command_live args =
     | [] -> []
   in
   let project = project_arg (strip args) in
-  Protoss.Web.serve ~port ~bind_any:public ~server_request:(live_server_request project) project
+  Protoss.Web.serve ~port ~bind_any:public
+    ~server_request:(live_server_request project)
+    ~connect_event:(live_connect_event project) project
 
 let command_runtime = function
   | [ "init"; project ] -> print_string (Protoss.Runtime_store.init project)

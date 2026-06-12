@@ -220,6 +220,20 @@ let branch_world root =
   let path = Ledger.branch_path root backend_branch in
   if Sys.file_exists path then String.trim (Ledger.read_file path) else Ledger.initial_world
 
+(* Welcome push (Lamdera onConnect): if the app defines
+   [onConnect : BackendModel -> ToFrontend] (validated by the backend contract,
+   WEB042), evaluate it against the world's current folded model. The dev
+   server pushes the result to each client right when it subscribes to
+   /__events, so every (re)connection resynchronizes the page from the fold.
+   Like broadcasts this is an ephemeral OUTPUT effect — never recorded in the
+   ledger; it re-derives from the deterministic fold. *)
+let connect_value root checked (b : Web.backend_contract) world =
+  match b.Web.on_connect_def with
+  | None -> None
+  | Some d ->
+      let f = fst (Runtime.normalize_def checked d.Kernel.def.Ast.name) in
+      Some (Runtime.apply checked f (state root checked b world))
+
 (* Type-check the message, fold it on top of the world's current model, and
    only then append the event and advance the `backend` branch. Returns
    (event, next_world, model', cmd). *)

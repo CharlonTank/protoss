@@ -42,6 +42,13 @@ type backend_contract = {
   backend_model_ty : typ;
   to_backend_ty : typ;
   to_frontend_ty : typ;
+  (* Optional server-side connect convention (docs/backend-architecture.md):
+     [onConnect : BackendModel -> ToFrontend] runs on the server each time a
+     client subscribes to /__events; the resulting ToFrontend is pushed to THAT
+     client only, so a (re)connecting page renders the current backend state
+     immediately instead of waiting for the next broadcast. Ephemeral OUTPUT
+     effect derived from the fold — never recorded in the ledger. *)
+  on_connect_def : Kernel.checked_def option;
 }
 
 type app_contract = {
@@ -112,7 +119,29 @@ let check_backend_contract checked =
               ("WEB024 updateBackend must have type ToBackend -> BackendModel -> (Tuple \
                 BackendModel (Cmd caps ToFrontend)), got " ^ string_of_typ t)
       in
-      Some { init_backend_def; update_backend_def; backend_model_ty; to_backend_ty; to_frontend_ty }
+      let on_connect_def =
+        match def_by_name checked "onConnect" with
+        | None -> None
+        | Some d -> (
+            match d.Kernel.def.Ast.typ with
+            | TFun (dom, cod) when equal_typ dom backend_model_ty && equal_typ cod to_frontend_ty
+              ->
+                Some d
+            | t ->
+                fail
+                  ("WEB042 onConnect must have type BackendModel -> ToFrontend ("
+                  ^ string_of_typ (TFun (backend_model_ty, to_frontend_ty))
+                  ^ "), got " ^ string_of_typ t))
+      in
+      Some
+        {
+          init_backend_def;
+          update_backend_def;
+          backend_model_ty;
+          to_backend_ty;
+          to_frontend_ty;
+          on_connect_def;
+        }
 
 let check_contract checked =
   let init_def = require_def checked "init" in
@@ -1696,12 +1725,19 @@ let content_type path =
    user instead of leaving a silently frozen page. EventSource auto-reconnects;
    when the server comes back the page reloads to resynchronize. *)
 let livereload_script =
+  (* hasConnected gates both the banner and the reconnect-reload: during the
+     page-load burst the FIRST /livereload attempt can fail transiently (the
+     dev server is single-threaded), and treating that as a downtime caused a
+     parasitic immediate location.reload() on every load — doubling the page's
+     SSE connections and starving /__events behind Chrome's 6-per-host cap. *)
   "<script>\n\
   \  (function () {\n\
   \    var es = new EventSource('/livereload');\n\
+  \    var hasConnected = false;\n\
   \    var wasDown = false;\n\
   \    es.onmessage = function () { location.reload(); };\n\
   \    es.onerror = function () {\n\
+  \      if (!hasConnected) return;\n\
   \      wasDown = true;\n\
   \      if (document.getElementById('protoss-disconnected')) return;\n\
   \      var b = document.createElement('div');\n\
@@ -1712,7 +1748,7 @@ let livereload_script =
   \        'padding:10px 16px;text-align:center;';\n\
   \      (document.body || document.documentElement).appendChild(b);\n\
   \    };\n\
-  \    es.onopen = function () { if (wasDown) location.reload(); };\n\
+  \    es.onopen = function () { hasConnected = true; if (wasDown) location.reload(); };\n\
   \  })();\n\
    </script>\n"
 
@@ -1737,8 +1773,12 @@ let inject_before_body html =
    for sendToBackend); [broadcast] is [Some toFrontendValueJson] when
    updateBackend's command slot was a [broadcast tf] — pushed to every /__events
    subscriber (server->client fan-out, Lamdera-style), or [None] for Cmd.none.
+   [connect_event] (also wired in bin/main.ml) is the onConnect welcome hook:
+   called once per new /__events subscriber with the current checked program,
+   it returns [Some toFrontendValueJson] to push to THAT client immediately —
+   the Lamdera "send the connecting client the current state" move.
    [bind_any] listens on 0.0.0.0 for deployment. *)
-let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
+let serve ?(port = 8080) ?(bind_any = false) ?server_request ?connect_event project =
   (* Every browser reload drops and reopens its SSE stream, so the next push
      writes to a closed socket. Ignore SIGPIPE so that write raises an EPIPE
      exception the notify loop catches and prunes, instead of killing the
@@ -1829,32 +1869,37 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
      reload never looks like an application broadcast and vice versa. *)
   let sse_clients = ref [] in
   let event_clients = ref [] in
-  let notify_reload () =
-    sse_clients :=
+  (* Write one SSE frame to every client in [clients], pruning the sockets
+     whose write fails (a closed browser raises EPIPE — possibly only on the
+     SECOND write after the peer went away, because the first one may land in
+     the TCP send buffer before the RST arrives; the periodic [heartbeat]
+     bounds that staleness to one tick). *)
+  let write_to_clients clients payload =
+    clients :=
       List.filter
         (fun (_ic, oc) ->
-          match (try output_string oc "data: reload\n\n"; flush oc; true with _ -> false) with
+          match (try output_string oc payload; flush oc; true with _ -> false) with
           | true -> true
           | false ->
               (try close_out_noerr oc with _ -> ());
               false)
-        !sse_clients
+        !clients
   in
+  let notify_reload () = write_to_clients sse_clients "data: reload\n\n" in
   (* Push one ToFrontend value-JSON line to EVERY subscribed client (the Lamdera
      broadcast). [data] is a single line of value-JSON (no embedded newlines —
      [value_to_json] emits compact one-line JSON), so one [data:] frame per
-     event. Dead sockets (a closed browser) raise EPIPE and are pruned, exactly
-     like [notify_reload]. A broadcast with no subscribers is a silent no-op. *)
-  let push_event data =
-    event_clients :=
-      List.filter
-        (fun (_ic, oc) ->
-          match (try output_string oc ("data: " ^ data ^ "\n\n"); flush oc; true with _ -> false) with
-          | true -> true
-          | false ->
-              (try close_out_noerr oc with _ -> ());
-              false)
-        !event_clients
+     event. A broadcast with no subscribers is a silent no-op. *)
+  let push_event data = write_to_clients event_clients ("data: " ^ data ^ "\n\n") in
+  (* Periodic SSE comment frame on both channels (EventSource ignores `:`
+     lines). This is load-bearing, not cosmetic: it prunes zombie connections
+     from page reloads within ~one tick — Chrome caps HTTP/1.1 connections per
+     host at 6, and undetected zombies on the server side keep those browser
+     slots occupied, which can park a fresh page's /__events subscription in
+     the connection queue (the page then misses broadcasts entirely). *)
+  let heartbeat () =
+    write_to_clients sse_clients ": ping\n\n";
+    write_to_clients event_clients ": ping\n\n"
   in
   let serve_file oc raw_path =
     let path = Filename.basename raw_path in
@@ -1963,12 +2008,13 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
       close_in_noerr ic;
       close_out_noerr oc)
     else if String.equal raw_path "/livereload" then (
-      (* SSE stream: send headers, keep the connection open, push on rebuild. *)
+      (* SSE stream: send headers, keep the connection open, push on rebuild.
+         `retry: 1000` makes EventSource reattempt quickly after a drop. *)
       output_string oc
         "HTTP/1.1 200 OK\r\n\
          Content-Type: text/event-stream\r\n\
          Cache-Control: no-cache\r\n\
-         Connection: keep-alive\r\n\r\n: connected\n\n";
+         Connection: keep-alive\r\n\r\n: connected\nretry: 1000\n\n";
       flush oc;
       sse_clients := (ic, oc) :: !sse_clients)
     else if String.equal raw_path "/__events" then (
@@ -1980,21 +2026,43 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
         "HTTP/1.1 200 OK\r\n\
          Content-Type: text/event-stream\r\n\
          Cache-Control: no-cache\r\n\
-         Connection: keep-alive\r\n\r\n: connected\n\n";
+         Connection: keep-alive\r\n\r\n: connected\nretry: 1000\n\n";
       flush oc;
-      event_clients := (ic, oc) :: !event_clients)
+      event_clients := (ic, oc) :: !event_clients;
+      (* onConnect welcome (Lamdera): push the current backend state to the
+         subscribing client only, so a (re)connecting page renders the fold's
+         truth immediately. Failures surface on stderr (dev server) and never
+         take the stream down. *)
+      match connect_event with
+      | None -> ()
+      | Some ce -> (
+          match
+            try ce ~checked:(!output).build.Workspace.checked
+            with e ->
+              Printf.eprintf "protoss live: onConnect failed: %s\n%!"
+                (match e with Kernel.Error m | Error m -> m | e -> Printexc.to_string e);
+              None
+          with
+          | Some data -> (
+              try
+                output_string oc ("data: " ^ data ^ "\n\n");
+                flush oc
+              with _ -> ())
+          | None -> ()))
     else (
       serve_file oc raw_path;
       close_in_noerr ic;
       close_out_noerr oc)
   in
   (* Multiplex: wait up to 200ms for a connection; on timeout, check the sources
-     and push a reload to open SSE streams if anything changed. The visible part
-     (the browser) never polls — it just holds an SSE stream. *)
-  let rec loop () =
+     and push a reload to open SSE streams if anything changed, and heartbeat
+     both SSE channels every ~2s (10 idle ticks) to prune zombies promptly. The
+     visible part (the browser) never polls — it just holds an SSE stream. *)
+  let rec loop ticks =
     let ready = try let r, _, _ = Unix.select [ sock ] [] [] 0.2 in r with _ -> [] in
-    if ready = [] then (if sources_changed () then (rebuild (); notify_reload ()))
-    else handle_connection ();
-    loop ()
+    if ready = [] then (
+      if sources_changed () then (rebuild (); notify_reload ());
+      if ticks >= 10 then (heartbeat (); loop 0) else loop (ticks + 1))
+    else (handle_connection (); loop ticks)
   in
-  loop ()
+  loop 0

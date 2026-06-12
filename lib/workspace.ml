@@ -330,7 +330,9 @@ let frontend_app_source =
       "";
       "init : Process Types.FrontendModel";
       "init =";
-      "    done { count = 0, shared = \"(click Bump shared)\" }";
+      "    -- \"...\" is visible only for an instant: the server pushes the real";
+      "    -- backend count (Backend.onConnect) as soon as the page connects.";
+      "    done { count = 0, shared = \"...\" }";
       "";
       "update : Types.FrontendMsg -> Types.FrontendModel -> Process Types.FrontendModel";
       "update msg model =";
@@ -376,6 +378,14 @@ let backend_app_source =
       "fromBackend tf =";
       "    case tf of";
       "        Synced n -> GotShared n";
+      "";
+      "-- onConnect runs on the server each time a client (re)connects: the";
+      "-- ToFrontend it returns is pushed to that client only, so a fresh page";
+      "-- renders the current backend count immediately instead of waiting for";
+      "-- the next broadcast.";
+      "onConnect : Types.BackendModel -> Types.ToFrontend";
+      "onConnect model =";
+      "    Synced model.count";
       "";
     ]
 
