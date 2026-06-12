@@ -254,34 +254,48 @@ let project_root path =
    init/update/view, the architecture `protoss app check` and `web build`/`serve`
    expect. It uses the prelude (Nat.toString, String.concat), so the generated
    manifest points `stdlib` at the resolved prelude path. *)
-(* The scaffold is a FULL-STACK app, Lamdera-shaped: src/app.protoss is the
-   frontend in Protoss/H (the Elm-like surface — transparent type aliases, list
-   literals, short variant constructors, bare lambdas) with a local counter AND
-   a shared counter that round-trips through the backend via the TYPED transport
-   `bind (sendToBackend (Bump unit)) (\m -> ...)` — `sendToBackend` is typed
-   end-to-end against the program's ToBackend/BackendModel (read from
-   updateBackend by the kernel), the browser runtime POSTs the ToBackend value
-   to /__server, and the process resumes with the BackendModel `m` (so
-   `Nat.toString m.count` reads a typed field, not a stringly reply).
-   src/backend.protoss holds the backend half (initBackend/updateBackend over
-   the ledger-backed BackendModel, docs/backend-architecture.md); it stays in
-   S-expression form until the Elm-like surface can spell a nested
-   `Cmd { caps }` scope. *)
-let counter_app_source =
+(* The scaffold is a FULL-STACK app structured like `lamdera init`:
+   src/Types.protoss is the one source of truth for the shared contract
+   (FrontendModel/FrontendMsg/BackendModel/ToBackend/ToFrontend, exposed by the
+   Types module and referenced qualified -- aliases are transparent, so
+   qualification never reaches the canonical graph); src/Frontend.protoss is
+   the Protoss/H frontend (local counter + a shared counter that round-trips
+   through the TYPED transport `bind (sendToBackend (Bump unit)) (\m -> ...)`);
+   src/Backend.protoss holds initBackend/updateBackend over the ledger-backed
+   BackendModel (S-expression form until the Elm-like surface can spell a
+   nested `Cmd { caps }` scope). *)
+let types_app_source =
   String.concat "\n"
-    [ "capabilities Server.request";
+    [ "module Types exposing (FrontendModel, FrontendMsg, BackendModel, ToBackend, ToFrontend)";
       "";
-      "type alias Msg =";
-      "    Variant (Bump Unit) (BumpShared Unit)";
-      "";
-      "type alias Model =";
+      "type alias FrontendModel =";
       "    { count : Nat, shared : String }";
       "";
-      "init : Process Model";
+      "type alias FrontendMsg =";
+      "    Variant (Bump Unit) (BumpShared Unit)";
+      "";
+      "type alias BackendModel =";
+      "    { count : Nat }";
+      "";
+      "type alias ToBackend =";
+      "    Variant (Bump Unit)";
+      "";
+      "type alias ToFrontend =";
+      "    Variant (Synced Nat)";
+      "";
+    ]
+
+let frontend_app_source =
+  String.concat "\n"
+    [ "import \"Types.protoss\" exposing (FrontendModel, FrontendMsg)";
+      "";
+      "capabilities Server.request";
+      "";
+      "init : Process Types.FrontendModel";
       "init =";
       "    done { count = 0, shared = \"(click Bump shared)\" }";
       "";
-      "update : Msg -> Model -> Process Model";
+      "update : Types.FrontendMsg -> Types.FrontendModel -> Process Types.FrontendModel";
       "update msg model =";
       "    case msg of";
       "        Bump _ -> done { model | count = succ model.count }";
@@ -289,7 +303,7 @@ let counter_app_source =
       "            bind (sendToBackend (Bump unit)) (\\m -> done { model | shared = \
        Nat.toString m.count })";
       "";
-      "view : Model -> View Msg";
+      "view : Types.FrontendModel -> View Types.FrontendMsg";
       "view model =";
       "    column";
       "        [ text \"Protoss full-stack counter\"";
@@ -303,14 +317,16 @@ let counter_app_source =
 
 let backend_app_source =
   String.concat "\n"
-    [ "(def initBackend (Record (count Nat)) (record (count 0)))";
+    [ "(import \"Types.protoss\")";
+      "";
+      "(def initBackend Types.BackendModel (record (count 0)))";
       "";
       "(def updateBackend";
-      "  (-> (Variant (Bump Unit))";
-      "      (-> (Record (count Nat))";
-      "          (Tuple (Record (count Nat)) (Cmd (capabilities) (Variant (Synced Nat))))))";
-      "  (lambda (msg (Variant (Bump Unit)))";
-      "    (lambda (model (Record (count Nat)))";
+      "  (-> Types.ToBackend";
+      "      (-> Types.BackendModel";
+      "          (Tuple Types.BackendModel (Cmd (capabilities) Types.ToFrontend))))";
+      "  (lambda (msg Types.ToBackend)";
+      "    (lambda (model Types.BackendModel)";
       "      (tuple (record (count (succ (get model count)))) unit))))";
       "";
     ]
@@ -351,17 +367,19 @@ let init ?(force = false) ?(app = false) ?stdlib root =
   let manifest = manifest_path root in
   if Sys.file_exists manifest && not force then fail ("manifest already exists: " ^ manifest);
   let stdlib_line = match stdlib with Some p -> p | None -> "none" in
-  let entrypoint = if app then "src/app.protoss" else "src/main.protoss" in
+  let entrypoint = if app then "src/Frontend.protoss" else "src/main.protoss" in
   write_file manifest
     (manifest_source
        ~capabilities:(if app then [ "Server.request" ] else [])
        ~entrypoint ~stdlib:stdlib_line ());
-  let source_file = Filename.concat src (if app then "app.protoss" else "main.protoss") in
-  if not (Sys.file_exists source_file) then
-    write_file source_file (if app then counter_app_source else "(def main Nat 0)\n");
-  (if app then
-     let backend_file = Filename.concat src "backend.protoss" in
-     if not (Sys.file_exists backend_file) then write_file backend_file backend_app_source);
+  let write_if_absent path content =
+    if not (Sys.file_exists path) then write_file path content
+  in
+  if app then (
+    write_if_absent (Filename.concat src "Types.protoss") types_app_source;
+    write_if_absent (Filename.concat src "Frontend.protoss") frontend_app_source;
+    write_if_absent (Filename.concat src "Backend.protoss") backend_app_source)
+  else write_if_absent (Filename.concat src "main.protoss") "(def main Nat 0)\n";
   manifest
 
 let source_extensions = [ ".protoss"; ".pt" ]

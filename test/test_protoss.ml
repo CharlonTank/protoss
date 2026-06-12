@@ -6309,31 +6309,40 @@ let () =
   let project_init_root = temp_dir "project-init" in
   ignore (Workspace.init project_init_root);
   (* init ~app generates the runnable FULL-STACK skeleton: a Protoss/H frontend
-     (app.protoss, init/update/view + a TYPED sendToBackend round-trip to the
-     backend) and the backend half (backend.protoss, initBackend/updateBackend),
-     with the Server.request capability declared in the manifest. *)
+     lamdera-init style: Types.protoss (the shared contract, one source of
+     truth), Frontend.protoss (init/update/view + a TYPED sendToBackend
+     round-trip), Backend.protoss (initBackend/updateBackend), with the
+     Server.request capability declared in the manifest. *)
   (let app_init_root = temp_dir "project-init-app" in
    ignore (Workspace.init ~app:true ~stdlib:"/p/prelude.protoss" app_init_root);
    let toml = Store.read_file (Filename.concat app_init_root "protoss.toml") in
-   let app_src = Store.read_file (Filename.concat app_init_root "src/app.protoss") in
-   let backend_src = Store.read_file (Filename.concat app_init_root "src/backend.protoss") in
-   assert_true "init --app points the entrypoint at app.protoss"
-     (contains_substring toml "src/app.protoss");
+   let types_src = Store.read_file (Filename.concat app_init_root "src/Types.protoss") in
+   let app_src = Store.read_file (Filename.concat app_init_root "src/Frontend.protoss") in
+   let backend_src = Store.read_file (Filename.concat app_init_root "src/Backend.protoss") in
+   assert_true "init --app points the entrypoint at Frontend.protoss"
+     (contains_substring toml "src/Frontend.protoss");
    assert_true "init --app records the prelude path in stdlib"
      (contains_substring toml "/p/prelude.protoss");
    assert_true "init --app declares the Server.request capability"
      (contains_substring toml "capabilities = [\"Server.request\"]");
+   assert_true "init --app writes the shared Types module"
+     (contains_substring types_src "module Types exposing"
+     && contains_substring types_src "type alias BackendModel"
+     && contains_substring types_src "type alias ToBackend"
+     && contains_substring types_src "type alias ToFrontend");
    assert_true "init --app writes a Protoss/H init/update/view skeleton"
-     (contains_substring app_src "init : Process Model"
-     && contains_substring app_src "update : Msg -> Model -> Process Model"
-     && contains_substring app_src "view : Model -> View Msg");
+     (contains_substring app_src "init : Process Types.FrontendModel"
+     && contains_substring app_src
+          "update : Types.FrontendMsg -> Types.FrontendModel -> Process Types.FrontendModel"
+     && contains_substring app_src "view : Types.FrontendModel -> View Types.FrontendMsg");
    assert_true "init --app frontend round-trips through the backend via typed sendToBackend"
      (contains_substring app_src "sendToBackend (Bump unit)"
      && contains_substring app_src "Nat.toString m.count"
      && contains_substring app_src "button \"Bump local\" (Bump unit)");
-   assert_true "init --app writes the backend half"
-     (contains_substring backend_src "def initBackend"
-     && contains_substring backend_src "def updateBackend"));
+   assert_true "init --app writes the backend half against the shared types"
+     (contains_substring backend_src "def initBackend Types.BackendModel"
+     && contains_substring backend_src "def updateBackend"
+     && contains_substring backend_src "Types.ToBackend"));
   let init_manifest = Workspace.parse_manifest project_init_root in
   Workspace.check_project init_manifest;
   let init_build = Workspace.build init_manifest in
