@@ -7,7 +7,18 @@ chaque chose finie ; changements kernel/risqués via agent isolé en worktree av
 déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégration.
 
 ## En cours
-- (rien — prochain item à décider au réveil)
+- **NOUVELLE DIRECTION (priorité, demandée par le user) : backend full-stack façon Lamdera, ULTRA PERF.**
+  Design directeur dans `docs/backend-architecture.md` (commit d887049). Le user veut l'ergonomie Lamdera
+  (BackendModel + updateBackend, infra abstraite/modulaire) mais ULTRA PERF. Choix tranché : event-sourcing
+  sur le ledger existant (BackendModel = fold déterministe, pas blob RAM), stockage = adaptateur content-
+  addressed interchangeable (FS/SQLite/PG), perf = backend COMPILÉ (bytecode/natif, pas Node) + cache
+  déterministe parfait + snapshots incrémentaux + sharding. Plan en 5 briques (voir le doc).
+  Prochaine action : **brique ① — socle des types** `BackendModel`/`ToBackend`/`ToFrontend`/`updateBackend`
+  reconnus par `app check` (à côté de l'archi Process/Cmd). Changement kernel/workspace → agent worktree
+  avec preuves. D'abord investiguer comment l'archi d'app (Process/Cmd) est reconnue pour bien spécifier.
+- Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
+  « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
+  require_type_expr 1987/2003). Edit prêt, non appliqué.
 
 ## Note opérationnelle
 - 2026-06-12 — L'agent worktree `ac3e66` (todo Protoss/H) a échoué à REPRENDRE via SendMessage :
