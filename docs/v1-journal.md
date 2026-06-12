@@ -102,6 +102,12 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   traversé TOUS les redeploys : 2→3→4→5) ; client SSE /__events en prod reçoit `data: {Synced 5}`
   instantanément. Le cycle Lamdera complet (init layout, sendToBackend typé, fold ledger, broadcast,
   fromBackend) tourne sur Hetzner.
+- **Snapshots du fold FAIT** (commit 59c5ee4, backend.ml seul — 1ʳᵉ brique ULTRA PERF du design) :
+  chaque send snapshotte le BackendModel par world ref (`ledger/snapshots/<world>` : source
+  re-parseable + hash canonical) ; `state` sert le hit en O(1), refold+re-snapshot sur miss. Cache
+  PUR prouvé : state avec / sans (rm) / corrompu → même BackendModelRef (ledger 40 events). Lecture
+  jamais aveugle : re-typage contre le type ACTUEL du modèle + re-vérif du hash ; tout échec →
+  refold silencieux. Tests de régression ajoutés. @fulltest vert.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
