@@ -155,6 +155,9 @@ PROUVÉ et EN PRODUCTION :
   chaque changement kernel.
 - **Reste post-V1** (séquencé aux docs) : SQLite adapter (après routage complet via BACKEND),
   bytecode VM pour les nœuds transport, sendToFrontend unicast/sessions, sharding.
+- **Redeploy final vérifié** (prélude self-canon inclus) : POST typé → count 7 (ledger en continuité
+  depuis le tout premier deploy), SSE broadcast actif. 1 seul serveur Hetzner actif (protoss-demo,
+  cpx11/ash, ~4,35€/mois). Boucle passée en tour de garde.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
