@@ -83,6 +83,16 @@ type expr =
      the elaborator from updateBackend before canonicalization, which lowers it
      to [Kernel.CBackendSend]. *)
   | ESendToBackend of typ * expr
+  (* Typed server->client push (docs/backend-architecture.md), the symmetric of
+     [ESendToBackend]: the payload is a ToFrontend value; the result is a
+     [Cmd caps ToFrontend] returned by [updateBackend] in its command slot. The
+     dev server pushes the value to every subscribed client over SSE (route
+     /__events) — a Lamdera-style broadcast. The carried [typ] is the ToFrontend
+     type (the Cmd message): an inert [TUnit] placeholder in surface text (the
+     parser fills it, [string_of_expr] ignores it), filled by the elaborator from
+     updateBackend's ToFrontend before canonicalization, which lowers it to
+     [Kernel.CBroadcast]. *)
+  | EBroadcast of typ * expr
   | EBind of expr * string * typ * expr
   | EBindInfer of expr * string * expr
 
@@ -372,6 +382,7 @@ let rec string_of_expr_with_params params = function
   | EDone e -> "(done " ^ string_of_expr_with_params params e ^ ")"
   | ERequest req -> string_of_req req
   | ESendToBackend (_, e) -> "(sendToBackend " ^ string_of_expr_with_params params e ^ ")"
+  | EBroadcast (_, e) -> "(broadcast " ^ string_of_expr_with_params params e ^ ")"
   | EBind (p, x, t, body) ->
       "(bind " ^ string_of_expr_with_params params p ^ " (lambda (" ^ x ^ " "
       ^ string_of_typ_with_params params t ^ ") " ^ string_of_expr_with_params params body ^ "))"

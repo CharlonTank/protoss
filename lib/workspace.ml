@@ -254,16 +254,22 @@ let project_root path =
    init/update/view, the architecture `protoss app check` and `web build`/`serve`
    expect. It uses the prelude (Nat.toString, String.concat), so the generated
    manifest points `stdlib` at the resolved prelude path. *)
-(* The scaffold is a FULL-STACK app structured like `lamdera init`:
-   src/Types.protoss is the one source of truth for the shared contract
-   (FrontendModel/FrontendMsg/BackendModel/ToBackend/ToFrontend, exposed by the
-   Types module and referenced qualified -- aliases are transparent, so
-   qualification never reaches the canonical graph); src/Frontend.protoss is
-   the Protoss/H frontend (local counter + a shared counter that round-trips
-   through the TYPED transport `bind (sendToBackend (Bump unit)) (\m -> ...)`);
-   src/Backend.protoss holds initBackend/updateBackend over the ledger-backed
-   BackendModel (S-expression form until the Elm-like surface can spell a
-   nested `Cmd { caps }` scope). *)
+(* The scaffold is a FULL-STACK app structured like `lamdera init`, demonstrating
+   BOTH typed transports: src/Types.protoss is the one source of truth for the
+   shared contract (FrontendModel/FrontendMsg/BackendModel/ToBackend/ToFrontend,
+   exposed by the Types module and referenced qualified -- aliases are
+   transparent, so qualification never reaches the canonical graph);
+   src/Frontend.protoss is the Protoss/H frontend whose `BumpShared` fires
+   `sendToBackend (Bump unit)` (client->server) and whose `GotShared` receives a
+   pushed update; src/Backend.protoss holds initBackend/updateBackend (which
+   `broadcast`s the new shared count to EVERY connected client over /__events,
+   server->client) plus `fromBackend` (maps a received ToFrontend `(Synced n)` to
+   the frontend `(GotShared n)` Msg). So a click in one browser updates the shared
+   counter in every open browser -- the Lamdera push. The backend half is
+   S-expression form until the Elm-like surface can spell a nested `Cmd { caps }`
+   scope and a function over the contract ToFrontend. The broadcast is an
+   ephemeral OUTPUT effect: it is NOT in the ledger, so the BackendModel fold
+   stays reconstructible from to-backend events alone. *)
 let types_app_source =
   String.concat "\n"
     [ "module Types exposing (FrontendModel, FrontendMsg, BackendModel, ToBackend, ToFrontend)";
@@ -272,7 +278,7 @@ let types_app_source =
       "    { count : Nat, shared : String }";
       "";
       "type alias FrontendMsg =";
-      "    Variant (Bump Unit) (BumpShared Unit)";
+      "    Variant (Bump Unit) (BumpShared Unit) (GotShared Nat)";
       "";
       "type alias BackendModel =";
       "    { count : Nat }";
@@ -300,8 +306,8 @@ let frontend_app_source =
       "    case msg of";
       "        Bump _ -> done { model | count = succ model.count }";
       "        BumpShared _ ->";
-      "            bind (sendToBackend (Bump unit)) (\\m -> done { model | shared = \
-       Nat.toString m.count })";
+      "            bind (sendToBackend (Bump unit)) (\\m -> done model)";
+      "        GotShared n -> done { model | shared = Nat.toString n }";
       "";
       "view : Types.FrontendModel -> View Types.FrontendMsg";
       "view model =";
@@ -321,13 +327,29 @@ let backend_app_source =
       "";
       "(def initBackend Types.BackendModel (record (count 0)))";
       "";
+      "; updateBackend folds a ToBackend (Bump) into the BackendModel AND, in its";
+      "; command slot, broadcasts the new shared count to every connected client as";
+      "; a ToFrontend (Synced n). The broadcast is an ephemeral OUTPUT effect: it is";
+      "; NOT recorded in the ledger (only the to-backend Bump event is), so the fold";
+      "; stays reconstructible from to-backend events alone and broadcasts re-derive.";
       "(def updateBackend";
       "  (-> Types.ToBackend";
       "      (-> Types.BackendModel";
       "          (Tuple Types.BackendModel (Cmd (capabilities) Types.ToFrontend))))";
       "  (lambda (msg Types.ToBackend)";
       "    (lambda (model Types.BackendModel)";
-      "      (tuple (record (count (succ (get model count)))) unit))))";
+      "      (tuple (record (count (succ (get model count))))";
+      "             (broadcast (Synced (succ (get model count))))))))";
+      "";
+      "; fromBackend maps an incoming broadcast (ToFrontend) to a frontend Msg. It is";
+      "; written in S-expression form because the Elm-like surface cannot yet spell a";
+      "; function whose domain is the contract's ToFrontend variant. The runtime";
+      "; subscribes to /__events iff this def is present.";
+      "(def fromBackend";
+      "  (-> Types.ToFrontend Types.FrontendMsg)";
+      "  (lambda (tf Types.ToFrontend)";
+      "    (foldVariant Types.ToFrontend Types.FrontendMsg tf";
+      "                 (Synced n (GotShared n)))))";
       "";
     ]
 
@@ -603,6 +625,7 @@ let rec expr_type_refs = function
   | ENode (tag, attrs, children) ->
       expr_type_refs tag @ expr_type_refs attrs @ expr_type_refs children
   | ESendToBackend (t, payload) -> type_refs t @ expr_type_refs payload
+  | EBroadcast (t, payload) -> type_refs t @ expr_type_refs payload
   | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
   | EBindInfer (p, _, body) -> expr_type_refs p @ expr_type_refs body
 

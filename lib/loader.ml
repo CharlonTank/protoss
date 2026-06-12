@@ -659,6 +659,7 @@ let rec expr_type_refs = function
   | ENode (tag, attrs, children) ->
       expr_type_refs tag @ expr_type_refs attrs @ expr_type_refs children
   | ESendToBackend (t, payload) -> type_refs t @ expr_type_refs payload
+  | EBroadcast (t, payload) -> type_refs t @ expr_type_refs payload
   | EBind (p, _, t, body) -> expr_type_refs p @ type_refs t @ expr_type_refs body
   | EBindInfer (p, _, body) -> expr_type_refs p @ expr_type_refs body
 

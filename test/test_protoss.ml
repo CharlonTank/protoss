@@ -743,6 +743,201 @@ let () =
     (Runtime.value_to_canonical
        (Web.value_of_json b.Web.backend_model_ty (Json.parse model_json)))
 
+(* Typed server->client push (broadcast / ToFrontend, docs/backend-architecture.md):
+   the symmetric of sendToBackend. A NEW canonical effect node CBroadcast, typed
+   against the program's ToFrontend (read from updateBackend's Cmd slot). Covers:
+   elaboration + result Cmd type, the exact canonical form `(broadcast ...)`,
+   short-ctor==explicit-variant hash, graph round-trip, mistyped/out-of-context/
+   no-backend rejection (BACKEND010/013), the runtime VBroadcast value +
+   Backend.broadcast_of_cmd extraction, and that the broadcast does NOT add an
+   event kind to the ledger (the fold is unchanged). *)
+let () =
+  let backend_defs caps =
+    "(capabilities Server.request)\n\
+     (def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd " ^ caps ^ " (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple (record (count (succ (get model count)))) \
+      (broadcast (Synced (succ (get model count))))))))\n"
+  in
+  let checked = check (backend_defs "(capabilities)") in
+  (* The broadcast lands in updateBackend's command slot: it elaborates to the
+     dedicated (broadcast payload ToFrontend) canonical node, the short ctor
+     (Synced ..) lowered to the full variant, carried type = ToFrontend. *)
+  let ub = List.find (fun (d : Kernel.checked_def) -> d.def.name = "updateBackend") checked.Kernel.defs in
+  assert_true "broadcast canonical node"
+    (contains_substring ub.Kernel.canonical
+       "(broadcast (variant (Variant (Synced Nat)) Synced (app (builtin succ) (field #0 count))) \
+        (Variant (Synced Nat)))");
+  (* updateBackend's declared result Cmd type still checks (the broadcast is a
+     valid Cmd caps ToFrontend value). *)
+  assert_equal "updateBackend with broadcast still has its declared type"
+    "(-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Record (_1 (Record (count Nat))) (_2 \
+     (Cmd (capabilities) (Variant (Synced Nat)))))))"
+    (Ast.string_of_typ ub.def.typ);
+  (* Payload-sugar convergence: short ToFrontend ctor (Synced ..) == explicit
+     (variant ...) form inside broadcast (same central same-hash invariant). *)
+  let explicit =
+    "(capabilities Server.request)\n\
+     (def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple (record (count (succ (get model count)))) \
+      (broadcast (variant (Variant (Synced Nat)) Synced (succ (get model count))))))))\n"
+  in
+  assert_equal "broadcast short-ctor == explicit-variant hash" (Kernel.hash_program checked)
+    (Kernel.hash_program (check explicit));
+  (* Graph round-trip: the Broadcast graph node and its parser are inverse. *)
+  let graph_json = Kernel.checked_to_graph_json checked in
+  let graph_checked = Canonical_ir.checked_of_graph graph_json in
+  assert_equal "broadcast graph round-trip hash" (Kernel.hash_program checked)
+    (Kernel.hash_program graph_checked);
+  assert_equal "broadcast graph round-trip serialization"
+    (Kernel.serialize_checked_program checked)
+    (Kernel.serialize_checked_program graph_checked);
+  (* Static typing PROVEN: a non-existent ToFrontend constructor is rejected. *)
+  (try
+     ignore
+       (check
+          ("(capabilities Server.request)\n\
+            (def initBackend (Record (count Nat)) (record (count 0)))\n\
+            (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record \
+            (count Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant \
+            (Bump Unit))) (lambda (model (Record (count Nat))) (tuple (record (count (get model \
+            count))) (broadcast (Typo unit))))))\n"));
+     fail "broadcast with unknown ToFrontend constructor should be rejected"
+   with Kernel.Error msg ->
+     assert_true "bad broadcast ctor rejected naming Typo" (contains_substring msg "Typo"));
+  (* broadcast without a backend half: shared BACKEND010 (no updateBackend). *)
+  (try
+     ignore
+       (check
+          "(def main (Cmd (capabilities) (Variant (Synced Nat))) (broadcast (Synced 0)))\n");
+     fail "broadcast with no backend half should be rejected"
+   with Kernel.Error msg ->
+     assert_true "broadcast no backend half is BACKEND010" (contains_substring msg "BACKEND010"));
+  (* broadcast used where the surrounding Cmd message is NOT the contract
+     ToFrontend: dedicated BACKEND013 (continues the BACKEND01x series). *)
+  (try
+     ignore
+       (check
+          ("(def initBackend (Record (count Nat)) (record (count 0)))\n\
+            (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record \
+            (count Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant \
+            (Bump Unit))) (lambda (model (Record (count Nat))) (tuple (record (count (get model \
+            count))) unit))))\n\
+            (def wrong (Cmd (capabilities) (Variant (Other Nat))) (broadcast (Synced 0)))\n"));
+     fail "broadcast in a non-ToFrontend Cmd should be rejected"
+   with Kernel.Error msg ->
+     assert_true "broadcast wrong context is BACKEND013" (contains_substring msg "BACKEND013"));
+  (* Runtime: updateBackend's cmd slot evaluates to a VBroadcast carrying the
+     ToFrontend value, which Backend.broadcast_of_cmd extracts; Cmd.none (unit)
+     extracts to None. *)
+  let b = Backend.contract checked in
+  let _, _, _, cmd = Backend.send (temp_dir "broadcast-cmd") checked b Ledger.initial_world "(Bump unit)" in
+  (match Backend.broadcast_of_cmd cmd with
+   | Some tf ->
+       assert_equal "broadcast cmd carries the ToFrontend (Synced 1)"
+         "(Variant (Variant (Synced Nat)) Synced (Nat 1))"
+         (Runtime.value_to_canonical tf)
+   | None -> fail "updateBackend with broadcast should yield a broadcast cmd");
+  let checked_none =
+    "(capabilities Server.request)\n\
+     (def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple (record (count (succ (get model count)))) \
+      unit))))\n"
+  in
+  let b_none = Backend.contract (check checked_none) in
+  let _, _, _, cmd_none =
+    Backend.send (temp_dir "broadcast-none") (check checked_none) b_none Ledger.initial_world "(Bump unit)"
+  in
+  assert_true "Cmd.none yields no broadcast" (Backend.broadcast_of_cmd cmd_none = None);
+  (* Ledger integrity: a broadcast adds NO event kind. After a Bump send, the
+     world's only event is the to-backend Bump; the model is the plain fold,
+     identical whether or not updateBackend broadcasts. *)
+  let ledger_bcast = temp_dir "broadcast-ledger" in
+  let _, world_b, model_b, _ = Backend.send ledger_bcast checked b Ledger.initial_world "(Bump unit)" in
+  let events = Ledger.replay_events ledger_bcast world_b in
+  let kinds =
+    List.filter_map (fun e -> Ledger.field "kind" (Ledger.event_fields ledger_bcast e)) events
+  in
+  assert_true "broadcast adds no new ledger event kind (only to-backend)"
+    (List.for_all (fun k -> k = "to-backend") kinds);
+  assert_equal "broadcast program folds to the same model as a Cmd.none program"
+    (Runtime.value_to_canonical model_b)
+    (let ln = temp_dir "broadcast-ledger-none" in
+     let _, _, m, _ = Backend.send ln (check checked_none) b_none Ledger.initial_world "(Bump unit)" in
+     Runtime.value_to_canonical m)
+
+(* Optional fromBackend : ToFrontend -> Msg convention (docs/backend-architecture.md):
+   the receive half of broadcast, validated by app check against the contract's
+   ToFrontend (domain) and the frontend Msg (codomain). Present iff defined; a
+   bad type is a dedicated WEB02x; the def-id is emitted only when present. *)
+let () =
+  let fe =
+    "(capabilities Server.request)\n\
+     (def init (Process (Record (count Nat) (shared String))) (done (record (count 0) (shared \
+      \"\"))))\n\
+     (def update (-> (Variant (Bump Unit) (Got Nat)) (-> (Record (count Nat) (shared String)) \
+      (Process (Record (count Nat) (shared String))))) (lambda (m (Variant (Bump Unit) (Got \
+      Nat))) (lambda (model (Record (count Nat) (shared String))) (done model))))\n\
+     (def view (-> (Record (count Nat) (shared String)) (View (Variant (Bump Unit) (Got Nat)))) \
+      (lambda (model (Record (count Nat) (shared String))) (column (Nil (View (Variant (Bump \
+      Unit) (Got Nat)))))))\n"
+  in
+  let backend =
+    "(def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple model unit))))\n"
+  in
+  (* A valid fromBackend : ToFrontend -> Msg is accepted and recorded. *)
+  let good =
+    fe ^ backend
+    ^ "(def fromBackend (-> (Variant (Synced Nat)) (Variant (Bump Unit) (Got Nat))) (lambda (tf \
+       (Variant (Synced Nat))) (foldVariant (Variant (Synced Nat)) (Variant (Bump Unit) (Got \
+       Nat)) tf (Synced n (Got n)))))\n"
+  in
+  (match (Web.check_contract (check good)).Web.from_backend_def with
+   | Some d -> assert_true "fromBackend def recorded" (String.length d.Kernel.def_id > 0)
+   | None -> fail "valid fromBackend should be recorded in the contract");
+  (* No fromBackend => contract carries None (frontend unaffected). *)
+  assert_true "absent fromBackend is None"
+    ((Web.check_contract (check (fe ^ backend))).Web.from_backend_def = None);
+  (* fromBackend argument must be the contract ToFrontend: WEB026. *)
+  (try
+     ignore
+       (Web.check_contract
+          (check
+             (fe ^ backend
+             ^ "(def fromBackend (-> Nat (Variant (Bump Unit) (Got Nat))) (lambda (n Nat) (Got \
+                n)))\n")));
+     fail "fromBackend with wrong argument type should be rejected"
+   with Web.Error msg -> assert_true "fromBackend arg mismatch is WEB026" (contains_substring msg "WEB026"));
+  (* fromBackend result must be the frontend Msg: WEB027. *)
+  (try
+     ignore
+       (Web.check_contract
+          (check
+             (fe ^ backend
+             ^ "(def fromBackend (-> (Variant (Synced Nat)) Nat) (lambda (tf (Variant (Synced \
+                Nat))) (foldVariant (Variant (Synced Nat)) Nat tf (Synced n n))))\n")));
+     fail "fromBackend with wrong result type should be rejected"
+   with Web.Error msg -> assert_true "fromBackend result mismatch is WEB027" (contains_substring msg "WEB027"));
+  (* fromBackend without a backend half (no updateBackend): WEB025. *)
+  (try
+     ignore
+       (Web.check_contract
+          (check
+             (fe
+             ^ "(def fromBackend (-> (Variant (Synced Nat)) (Variant (Bump Unit) (Got Nat))) \
+                (lambda (tf (Variant (Synced Nat))) (foldVariant (Variant (Synced Nat)) (Variant \
+                (Bump Unit) (Got Nat)) tf (Synced n (Got n)))))\n")));
+     fail "fromBackend without a backend half should be rejected"
+   with Web.Error msg -> assert_true "fromBackend without backend is WEB025" (contains_substring msg "WEB025"))
+
 (* Regression guards for crashes found by the deterministic fuzzer (G3). *)
 let () =
   (* "case ofx": find_sub used to match the space inside "case ", driving
@@ -6335,13 +6530,18 @@ let () =
      && contains_substring app_src
           "update : Types.FrontendMsg -> Types.FrontendModel -> Process Types.FrontendModel"
      && contains_substring app_src "view : Types.FrontendModel -> View Types.FrontendMsg");
-   assert_true "init --app frontend round-trips through the backend via typed sendToBackend"
+   assert_true "init --app frontend sends to the backend AND receives broadcasts"
      (contains_substring app_src "sendToBackend (Bump unit)"
-     && contains_substring app_src "Nat.toString m.count"
+     && contains_substring app_src "GotShared n -> done { model | shared = Nat.toString n }"
      && contains_substring app_src "button \"Bump local\" (Bump unit)");
-   assert_true "init --app writes the backend half against the shared types"
+   assert_true "init --app Types module exposes ToFrontend with GotShared in FrontendMsg"
+     (contains_substring types_src "type alias ToFrontend ="
+     && contains_substring types_src "Variant (Bump Unit) (BumpShared Unit) (GotShared Nat)");
+   assert_true "init --app backend half broadcasts and maps via fromBackend"
      (contains_substring backend_src "def initBackend Types.BackendModel"
      && contains_substring backend_src "def updateBackend"
+     && contains_substring backend_src "(broadcast (Synced"
+     && contains_substring backend_src "def fromBackend"
      && contains_substring backend_src "Types.ToBackend"));
   let init_manifest = Workspace.parse_manifest project_init_root in
   Workspace.check_project init_manifest;
@@ -7769,6 +7969,32 @@ let () =
   let cmd_contract = Web.app_check cmd_app in
   assert_equal "web app cmd architecture" "cmd" cmd_contract.Web.architecture;
   assert_equal "web app cmd model" "Nat" (Ast.string_of_typ cmd_contract.Web.model_ty);
+  (* Full-stack scaffold (broadcast / fromBackend) end-to-end against the real
+     prelude: the generated counter app-checks, its ToFrontend is read from
+     updateBackend, fromBackend is validated, and the emitted bundle carries the
+     fromBackend def-id so the runtime subscribes to /__events. This is the
+     full-prelude regression for the server->client push wiring. *)
+  let scaffold_app = temp_dir "web-scaffold-fullstack" in
+  ignore (Workspace.init ~app:true ~stdlib:stdlib_path scaffold_app);
+  let scaffold_contract = Web.app_check scaffold_app in
+  assert_equal "scaffold msg gains GotShared"
+    "(Variant (Bump Unit) (BumpShared Unit) (GotShared Nat))"
+    (Ast.string_of_typ scaffold_contract.Web.msg_ty);
+  (match scaffold_contract.Web.backend with
+   | Some bc ->
+       assert_equal "scaffold ToFrontend is (Variant (Synced Nat))"
+         "(Variant (Synced Nat))" (Ast.string_of_typ bc.Web.to_frontend_ty)
+   | None -> fail "scaffold should have a backend contract");
+  assert_true "scaffold defines a validated fromBackend"
+    (scaffold_contract.Web.from_backend_def <> None);
+  let scaffold_dist = temp_dir "web-scaffold-dist" in
+  ignore (Web.build ~out:scaffold_dist scaffold_app);
+  let scaffold_app_json = Json.parse (Store.read_file (Filename.concat scaffold_dist "protoss-app.json")) in
+  assert_true "scaffold bundle carries the fromBackend def-id (runtime subscribes to /__events)"
+    (match Json.field "fromBackend" scaffold_app_json with Some _ -> true | None -> false);
+  assert_equal "scaffold bundle fromBackend def-id matches the contract"
+    (match scaffold_contract.Web.from_backend_def with Some d -> d.Kernel.def_id | None -> "")
+    (json_string_field "fromBackend" scaffold_app_json);
   let cmd_dist = temp_dir "web-cmd-dist" in
   ignore (Web.build ~out:cmd_dist cmd_app);
   let cmd_app_json = Json.parse (Store.read_file (Filename.concat cmd_dist "protoss-app.json")) in

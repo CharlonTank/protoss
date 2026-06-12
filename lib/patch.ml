@@ -772,6 +772,8 @@ let rec rewrite_name_expr source replacement bound = function
   | EDone expr -> EDone (rewrite_name_expr source replacement bound expr)
   | ESendToBackend (typ, payload) ->
       ESendToBackend (typ, rewrite_name_expr source replacement bound payload)
+  | EBroadcast (typ, payload) ->
+      EBroadcast (typ, rewrite_name_expr source replacement bound payload)
   | EBind (process, name, typ, body) ->
       EBind
         ( rewrite_name_expr source replacement bound process,
@@ -1013,6 +1015,9 @@ let rec replace_first_expr target replacement expr =
     | ESendToBackend (typ, payload) ->
         let payload, changed = replace_first_expr target replacement payload in
         (ESendToBackend (typ, payload), changed)
+    | EBroadcast (typ, payload) ->
+        let payload, changed = replace_first_expr target replacement payload in
+        (EBroadcast (typ, payload), changed)
     | EBind (process, name, typ, body) ->
         let process, changed = replace_first_expr target replacement process in
         if changed then (EBind (process, name, typ, body), true)

@@ -101,6 +101,23 @@ let step checked (b : Web.backend_contract) model msg =
            ^ Runtime.value_to_string result))
   | v -> fail ("BACKEND003 updateBackend returned a non-tuple value: " ^ Runtime.value_to_string v)
 
+(* Extract the ToFrontend value to broadcast from a [Cmd cmd_caps ToFrontend]
+   value returned by [updateBackend], if any. [Cmd.none] is [VUnit] => no push;
+   [broadcast tf] is [VBroadcast (toFrontendTy, tf)] => push [tf]. This is the
+   ONLY place the transport reads the cmd slot; the broadcast is an ephemeral
+   OUTPUT effect — it is deliberately NOT recorded in the ledger (see
+   docs/backend-architecture.md / [send] below), so the fold stays
+   reconstructible from to-backend events alone and the broadcasts re-derive
+   from the fold. *)
+let broadcast_of_cmd (cmd : Runtime.value) : Runtime.value option =
+  match Runtime.force_value cmd with
+  | Runtime.VBroadcast (_, payload) -> Some payload
+  | Runtime.VUnit -> None
+  | other ->
+      fail
+        ("BACKEND007 updateBackend command slot must be Cmd.none (unit) or (broadcast tf), got "
+       ^ Runtime.value_to_string other)
+
 (* The to-backend events of a world, oldest first, with replay-time integrity:
    each stored message must re-type to the canonical value hash recorded at
    append time. *)

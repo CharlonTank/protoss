@@ -53,6 +53,13 @@ type app_contract = {
   msg_ty : typ;
   architecture : string;
   backend : backend_contract option;
+  (* Optional server->client receive convention (docs/backend-architecture.md):
+     [fromBackend : ToFrontend -> Msg] maps a broadcast ToFrontend value to a
+     frontend message. Present iff the app defines `fromBackend`; validated
+     against the backend contract's ToFrontend (domain) and the frontend Msg
+     (codomain). Absent => the bundle does not subscribe to /__events (a
+     broadcast with no subscribers is a silent no-op). *)
+  from_backend_def : Kernel.checked_def option;
 }
 
 let record_field name fields =
@@ -184,8 +191,41 @@ let check_contract checked =
           ("WEB007 view message mismatch: expected View " ^ string_of_typ msg_ty ^ ", got View "
          ^ string_of_typ msg)
   | t -> fail ("WEB008 view must have type Model -> View Msg, got " ^ string_of_typ t));
-  { checked; init_def; update_def; view_def; model_ty; msg_ty; architecture;
-    backend = check_backend_contract checked }
+  let backend = check_backend_contract checked in
+  (* Optional fromBackend : ToFrontend -> Msg. Validated only when present; a
+     frontend-only app (no fromBackend) is unaffected. Receiving a broadcast
+     needs a backend half (where ToFrontend is declared), and the mapping must
+     land exactly on the frontend Msg. *)
+  let from_backend_def =
+    match def_by_name checked "fromBackend" with
+    | None -> None
+    | Some from_backend_def ->
+        let to_frontend_ty =
+          match backend with
+          | Some b -> b.to_frontend_ty
+          | None ->
+              fail
+                "WEB025 fromBackend requires a backend half: define updateBackend (its \
+                 result Cmd's ToFrontend is fromBackend's argument) -- see \
+                 docs/backend-architecture.md"
+        in
+        (match from_backend_def.def.typ with
+        | TFun (arg, result) ->
+            if not (equal_typ to_frontend_ty arg) then
+              fail
+                ("WEB026 fromBackend argument mismatch: expected the contract ToFrontend "
+               ^ string_of_typ to_frontend_ty ^ ", got " ^ string_of_typ arg);
+            if not (equal_typ msg_ty result) then
+              fail
+                ("WEB027 fromBackend result mismatch: expected the frontend Msg "
+               ^ string_of_typ msg_ty ^ ", got " ^ string_of_typ result)
+        | t ->
+            fail
+              ("WEB027 fromBackend must have type ToFrontend -> Msg, got " ^ string_of_typ t));
+        Some from_backend_def
+  in
+  { checked; init_def; update_def; view_def; model_ty; msg_ty; architecture; backend;
+    from_backend_def }
 
 let app_check project =
   let manifest = manifest project in
@@ -250,6 +290,13 @@ let rec value_to_json = function
           json_field "tag" (json_string "BackendSend");
           json_field "payload" (value_to_json s.Runtime.bs_payload);
           json_field "responseType" (type_to_json s.Runtime.bs_response_ty);
+        ]
+  | Runtime.VBroadcast (ty, payload) ->
+      json_obj
+        [
+          json_field "tag" (json_string "Broadcast");
+          json_field "payload" (value_to_json payload);
+          json_field "messageType" (type_to_json ty);
         ]
 
 and message_to_json = function
@@ -1283,6 +1330,28 @@ let runtime_js =
         model: function () { return modelValue; },
         world: function () { return worldRef; }
       };
+      // Server->client receive (docs/backend-architecture.md): iff the app
+      // declares `fromBackend : ToFrontend -> Msg`, subscribe to the broadcast
+      // stream /__events. Each event's `data` is a ToFrontend value-JSON (the
+      // same tagged shape this runtime uses as values), so we apply fromBackend
+      // to it and dispatch the resulting Msg through the normal update/render
+      // path — a pushed message is indistinguishable from a local one downstream.
+      // No fromBackend => no subscription (a broadcast with no subscribers is a
+      // silent no-op). EventSource auto-reconnects, so a dev rebuild that drops
+      // the stream is transparently re-established.
+      if (app.fromBackend && typeof EventSource !== "undefined") {
+        var fromBackendFn = machine.def(app.fromBackend);
+        var events = new EventSource("/__events");
+        events.onmessage = function (ev) {
+          if (!ev || !ev.data) return;
+          var toFrontend;
+          try { toFrontend = JSON.parse(ev.data); }
+          catch (_) { console.error("protoss: malformed ToFrontend broadcast", ev.data); return; }
+          try { dispatch(machine.apply(fromBackendFn, toFrontend)); }
+          catch (err) { console.error("protoss: fromBackend dispatch failed", err); }
+        };
+        events.onerror = function () { /* EventSource retries on its own */ };
+      }
     },
     resume: function (requestId, response) {
       if (!window.ProtossRuntime._active) throw new Error("Protoss runtime is not started");
@@ -1552,9 +1621,17 @@ let build ?(prerender = true) ?out project =
       ~target:compiled_artifact.compiled_target
       ~optimization_policy:compiled_artifact.compiled_optimization_policy
   in
+  (* [fromBackend] def-id only when the app defines it: the runtime JS subscribes
+     to /__events and routes each broadcast through this def iff the field is
+     present. A frontend-only or send-only app omits it and never subscribes. *)
+  let from_backend_fields =
+    match contract.from_backend_def with
+    | Some d -> [ json_field "fromBackend" (json_string d.def_id) ]
+    | None -> []
+  in
   let app_json =
     json_obj
-      [
+      ([
         json_field "package" (json_string manifest.name);
         json_field "version" (json_string manifest.version);
         json_field "build" (json_string build.build_id);
@@ -1565,12 +1642,15 @@ let build ?(prerender = true) ?out project =
         json_field "init" (json_string contract.init_def.def_id);
         json_field "update" (json_string contract.update_def.def_id);
         json_field "view" (json_string contract.view_def.def_id);
+      ]
+      @ from_backend_fields
+      @ [
         json_field "program" canonical_graph_json;
         json_field "hostContract" host_contract_json;
         json_field "worldRef" (json_string Ledger.initial_world);
         json_field "initialModel" initial_model_json;
         json_field "initialView" initial_view_json;
-      ]
+      ])
     ^ "\n"
   in
   write_file (Filename.concat out_dir "index.html") index_html;
@@ -1635,9 +1715,12 @@ let inject_before_body html =
    strings, [backend_send=None]) and the typed `sendToBackend`
    ({route:"__backend", backendSend:<value-JSON>}, [backend_send=Some json]).
    The callback (wired in bin/main.ml, which can see Backend without a module
-   cycle) answers with the response body the process resumes with: display text
-   for Server.request, BackendModel value-JSON for sendToBackend. [bind_any]
-   listens on 0.0.0.0 for deployment. *)
+   cycle) returns [(response, broadcast)]: [response] is the body the POSTing
+   process resumes with (display text for Server.request, BackendModel value-JSON
+   for sendToBackend); [broadcast] is [Some toFrontendValueJson] when
+   updateBackend's command slot was a [broadcast tf] — pushed to every /__events
+   subscriber (server->client fan-out, Lamdera-style), or [None] for Cmd.none.
+   [bind_any] listens on 0.0.0.0 for deployment. *)
 let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
   (* Every browser reload drops and reopens its SSE stream, so the next push
      writes to a closed socket. Ignore SIGPIPE so that write raises an EPIPE
@@ -1723,8 +1806,12 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
     (!output).out_dir
     (if bind_any then "0.0.0.0" else "127.0.0.1")
     port;
-  (* Open SSE streams. Both channels are retained so the fd isn't GC-closed. *)
+  (* Open SSE streams. Both channels are retained so the fd isn't GC-closed.
+     [sse_clients] is the dev-reload stream (/livereload); [event_clients] is the
+     app's ToFrontend push stream (/__events) — a distinct channel so a code
+     reload never looks like an application broadcast and vice versa. *)
   let sse_clients = ref [] in
+  let event_clients = ref [] in
   let notify_reload () =
     sse_clients :=
       List.filter
@@ -1735,6 +1822,22 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
               (try close_out_noerr oc with _ -> ());
               false)
         !sse_clients
+  in
+  (* Push one ToFrontend value-JSON line to EVERY subscribed client (the Lamdera
+     broadcast). [data] is a single line of value-JSON (no embedded newlines —
+     [value_to_json] emits compact one-line JSON), so one [data:] frame per
+     event. Dead sockets (a closed browser) raise EPIPE and are pruned, exactly
+     like [notify_reload]. A broadcast with no subscribers is a silent no-op. *)
+  let push_event data =
+    event_clients :=
+      List.filter
+        (fun (_ic, oc) ->
+          match (try output_string oc ("data: " ^ data ^ "\n\n"); flush oc; true with _ -> false) with
+          | true -> true
+          | false ->
+              (try close_out_noerr oc with _ -> ());
+              false)
+        !event_clients
   in
   let serve_file oc raw_path =
     let path = Filename.basename raw_path in
@@ -1813,7 +1916,14 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
                 match
                   handler ~checked:(!output).build.Workspace.checked ~route ~payload ~backend_send
                 with
-                | response -> respond_text oc "200 OK" response
+                | response, broadcast ->
+                    (* If updateBackend's command slot produced a [broadcast tf],
+                       the handler hands back the ToFrontend value-JSON to push
+                       to EVERY /__events subscriber (the Lamdera server->client
+                       fan-out). The POSTing client gets its own response on the
+                       same channel as before; the push is a separate effect. *)
+                    (match broadcast with Some data -> push_event data | None -> ());
+                    respond_text oc "200 OK" response
                 | exception e ->
                     let msg =
                       match e with
@@ -1844,6 +1954,18 @@ let serve ?(port = 8080) ?(bind_any = false) ?server_request project =
          Connection: keep-alive\r\n\r\n: connected\n\n";
       flush oc;
       sse_clients := (ic, oc) :: !sse_clients)
+    else if String.equal raw_path "/__events" then (
+      (* Application ToFrontend push stream (Lamdera broadcast): the bundle (and
+         `curl -N /__events`) subscribes here; [push_event] fans a broadcast out
+         to every open stream. Held open like /livereload but a distinct channel:
+         dev reload and app broadcasts never cross. *)
+      output_string oc
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/event-stream\r\n\
+         Cache-Control: no-cache\r\n\
+         Connection: keep-alive\r\n\r\n: connected\n\n";
+      flush oc;
+      event_clients := (ic, oc) :: !event_clients)
     else (
       serve_file oc raw_path;
       close_in_noerr ic;

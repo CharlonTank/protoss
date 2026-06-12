@@ -556,6 +556,10 @@ let rec expand_expr_types recursive_names aliases vars = function
       ESendToBackend
         ( expand_type recursive_names aliases vars [] t,
           expand_expr_types recursive_names aliases vars payload )
+  | EBroadcast (t, payload) ->
+      EBroadcast
+        ( expand_type recursive_names aliases vars [] t,
+          expand_expr_types recursive_names aliases vars payload )
   | EBind (p, x, t, body) ->
       EBind
         ( expand_expr_types recursive_names aliases vars p,
@@ -673,6 +677,7 @@ let collect_deps defs =
         expr bound (expr bound (expr bound acc tag) attrs) children
     | EDone e -> expr bound acc e
     | ESendToBackend (_, payload) -> expr bound acc payload
+    | EBroadcast (_, payload) -> expr bound acc payload
     | EBind (p, x, _, body) | EBindInfer (p, x, body) ->
         expr (x :: bound) (expr bound acc p) body
   in
@@ -806,6 +811,7 @@ let rec expr_names = function
       expr_names a @ expr_names b
   | ENode (tag, attrs, children) -> expr_names tag @ expr_names attrs @ expr_names children
   | ESendToBackend (_, payload) -> expr_names payload
+  | EBroadcast (_, payload) -> expr_names payload
   | EBind (p, x, _, body) | EBindInfer (p, x, body) -> expr_names p @ (x :: expr_names body)
 
 and branch_names_in_expr = function
@@ -1111,33 +1117,36 @@ let has_capability ctx cap = List.exists (String.equal cap) ctx.capabilities
 let backend_send_capability = "Server.request"
 
 (* Read the program's backend contract types out of [updateBackend]'s declared
-   type, for elaborating [sendToBackend]. The shape mirrors
+   type, for elaborating the typed full-stack transports [sendToBackend]
+   (client->server) and [broadcast] (server->client). The shape mirrors
    [Web.check_backend_contract] (kept in sync), but lives here because the
-   kernel elaborates [sendToBackend] and must not depend on web.ml. Returns the
-   [(ToBackend, BackendModel)] types exactly as written in updateBackend (named
-   aliases preserved). The lookup is traced via [lookup_global], so a per-def
-   check cache entry built here is invalidated if updateBackend's type changes.
-   [BACKEND010] is the stable "no backend half" error. *)
+   kernel elaborates these effects and must not depend on web.ml. Returns the
+   [(ToBackend, BackendModel, ToFrontend, cmd_caps)] tuple exactly as written in
+   updateBackend (named aliases preserved): ToBackend/BackendModel for
+   [sendToBackend], ToFrontend (the Cmd message) and [cmd_caps] (the Cmd
+   capability scope) for [broadcast]. The lookup is traced via [lookup_global],
+   so a per-def check cache entry built here is invalidated if updateBackend's
+   type changes. [BACKEND010] is the stable "no backend half" error. *)
 let backend_contract_types ctx =
   match lookup_global ctx "updateBackend" with
   | None ->
       fail
-        "BACKEND010 sendToBackend requires a backend half: define updateBackend (and \
+        "BACKEND010 typed transport requires a backend half: define updateBackend (and \
          initBackend) -- see docs/backend-architecture.md"
   | Some { global_type_params = _ :: _; _ } ->
-      fail "BACKEND011 sendToBackend backend half must be monomorphic: updateBackend is polymorphic"
+      fail "BACKEND011 typed transport backend half must be monomorphic: updateBackend is polymorphic"
   | Some { global_type_params = []; global_typ } -> (
       match global_typ with
       | TFun (to_backend, TFun (backend_model, update_result)) -> (
           match unfold_type ctx update_result with
           | TRecord fields -> (
               match (assoc_opt "_1" fields, assoc_opt "_2" fields) with
-              | Some result_model, Some (TCmd _) ->
+              | Some result_model, Some (TCmd (cmd_caps, to_frontend)) ->
                   if not (equal_typ backend_model result_model) then
                     fail
                       ("BACKEND012 updateBackend result model mismatch: expected "
                      ^ string_of_typ backend_model ^ ", got " ^ string_of_typ result_model);
-                  (to_backend, backend_model)
+                  (to_backend, backend_model, to_frontend, cmd_caps)
               | _ ->
                   fail
                     ("BACKEND012 updateBackend must return (Tuple BackendModel (Cmd caps \
@@ -1450,9 +1459,13 @@ let rec infer ctx = function
   | ESendToBackend (_, payload) ->
       if not (has_capability ctx backend_send_capability) then
         fail ("missing capability: " ^ backend_send_capability);
-      let to_backend_ty, backend_model_ty = backend_contract_types ctx in
+      let to_backend_ty, backend_model_ty, _, _ = backend_contract_types ctx in
       require_type to_backend_ty (infer ctx payload) "sendToBackend payload";
       TProcess (Some [ backend_send_capability ], backend_model_ty)
+  | EBroadcast (_, payload) ->
+      let _, _, to_frontend_ty, cmd_caps = backend_contract_types ctx in
+      require_type to_frontend_ty (infer ctx payload) "broadcast payload";
+      TCmd (cmd_caps, to_frontend_ty)
   | EBind (p, x, annotation, body) -> (
       match infer ctx p with
       | TProcess (process_caps, a) ->
@@ -1796,10 +1809,18 @@ let rec infer_elab ctx expr =
   | ESendToBackend (_, payload) ->
       if not (has_capability ctx backend_send_capability) then
         fail ("missing capability: " ^ backend_send_capability);
-      let to_backend_ty, backend_model_ty = backend_contract_types ctx in
+      let to_backend_ty, backend_model_ty, _, _ = backend_contract_types ctx in
       let _, payload = check_elab ctx to_backend_ty payload in
       ( TProcess (Some [ backend_send_capability ], backend_model_ty),
         ESendToBackend (backend_model_ty, payload) )
+  | EBroadcast (_, payload) ->
+      (* Server->client push: ToFrontend in, [Cmd cmd_caps ToFrontend] out (the
+         updateBackend command slot). The carried type recorded in the canonical
+         node is ToFrontend (the Cmd message), symmetric to [ESendToBackend]
+         carrying BackendModel. *)
+      let _, _, to_frontend_ty, cmd_caps = backend_contract_types ctx in
+      let _, payload = check_elab ctx to_frontend_ty payload in
+      (TCmd (cmd_caps, to_frontend_ty), EBroadcast (to_frontend_ty, payload))
   | EBind (p, x, annotation, body) ->
       let p_ty, p = infer_elab ctx p in
       (match p_ty with
@@ -1913,6 +1934,21 @@ and check_elab ctx expected expr =
       let _, e = check_elab ctx expected_value e in
       (expected, EDone e)
   | TCmd _, EUnit -> (expected, EUnit)
+  | TCmd (expected_caps, expected_msg), EBroadcast (_, payload) ->
+      (* Top-down: the updateBackend command slot is checked against its declared
+         [Cmd cmd_caps ToFrontend], so [broadcast e] lands here with [expected_msg
+         = ToFrontend]. Still consult the contract to require a backend half
+         (BACKEND013 otherwise) and to confirm the surrounding Cmd type matches
+         updateBackend's. *)
+      let _, _, to_frontend_ty, cmd_caps = backend_contract_types ctx in
+      if not (equal_typ to_frontend_ty expected_msg) then
+        fail
+          ("BACKEND013 broadcast payload must be the contract ToFrontend "
+         ^ string_of_typ to_frontend_ty ^ ", used where " ^ string_of_typ expected_msg
+         ^ " is expected");
+      require_process_capabilities expected_caps cmd_caps "broadcast command";
+      let _, payload = check_elab ctx to_frontend_ty payload in
+      (expected, EBroadcast (to_frontend_ty, payload))
   | TView msg_ty, ENode (tag, attrs, children) ->
       let _, tag = check_elab ctx TString tag in
       let _, attrs = check_elab ctx (TList (TAttr msg_ty)) attrs in
@@ -2349,6 +2385,13 @@ type cterm =
      updateBackend. Goes under the Server.request capability, same channel as
      ServerRequest. *)
   | CBackendSend of cterm * typ
+  (* Typed server->client push: [CBroadcast (payload, to_frontend_ty)] is the
+     value of a [Cmd cmd_caps ToFrontend] returned by updateBackend; it requests
+     that [payload] (a ToFrontend value) be pushed to every subscribed client.
+     The carried type is ToFrontend (the Cmd message), recorded so the runtime
+     and host know the broadcast type without re-reading updateBackend.
+     Symmetric to [CBackendSend]. *)
+  | CBroadcast of cterm * typ
   | CBind of cterm * typ * cterm
 
 and cbranch =
@@ -2428,6 +2471,8 @@ let rec canonical_expr env = function
   | ERequest req -> CRequest req
   | ESendToBackend (backend_model_ty, payload) ->
       CBackendSend (canonical_expr env payload, backend_model_ty)
+  | EBroadcast (to_frontend_ty, payload) ->
+      CBroadcast (canonical_expr env payload, to_frontend_ty)
   | EBind (p, x, t, body) -> CBind (canonical_expr env p, t, canonical_expr (x :: env) body)
   | EBindInfer _ -> fail "unelaborated unannotated bind in canonicalization"
 
@@ -2451,6 +2496,10 @@ and canonical_branches env branches =
 let rec cterm_direct_capabilities = function
   | CRequest req -> [ req_capability req ]
   | CBackendSend (payload, _) -> backend_send_capability :: cterm_direct_capabilities payload
+  (* broadcast adds no direct capability: a Cmd's capability scope is the
+     declared [cmd_caps] on its type (read from updateBackend), not a fixed
+     capability the form contributes. The push is a server-side output effect. *)
+  | CBroadcast (payload, _) -> cterm_direct_capabilities payload
   | CUnit | CBool _ | CNat _ | CString _ | CVar _ | CGlobal _ | CInst _ | CNil _ -> []
   | CLambda (_, body) -> cterm_direct_capabilities body
   | CStrict e -> cterm_direct_capabilities e
@@ -2514,6 +2563,7 @@ let rec cterm_global_refs = function
       cterm_global_refs scrut @ List.concat_map cbranch_global_refs branches
   | CCons (_, head, tail) -> cterm_global_refs head @ cterm_global_refs tail
   | CBackendSend (payload, _) -> cterm_global_refs payload
+  | CBroadcast (payload, _) -> cterm_global_refs payload
   | CBind (p, _, body) -> cterm_global_refs p @ cterm_global_refs body
 
 and cbranch_global_refs = function
@@ -2598,6 +2648,8 @@ let rec cterm_to_string = function
   | CRequest req -> req_to_canonical req
   | CBackendSend (payload, backend_model_ty) ->
       "(backendSend " ^ cterm_to_string payload ^ " " ^ type_to_canonical backend_model_ty ^ ")"
+  | CBroadcast (payload, to_frontend_ty) ->
+      "(broadcast " ^ cterm_to_string payload ^ " " ^ type_to_canonical to_frontend_ty ^ ")"
   | CBind (p, t, body) ->
       "(bind " ^ cterm_to_string p ^ " " ^ type_to_canonical t ^ " " ^ cterm_to_string body
       ^ ")"
@@ -2641,7 +2693,7 @@ let executable_grammar_text =
       "expr ::= (column expr) | (row expr) | (list expr expr) | (when expr expr)";
       "expr ::= (node expr expr expr) | (attr expr expr) | (on expr expr)";
       "expr ::= (done expr) | (request request) | (bind expr binder expr)";
-      "expr ::= (backendSend expr type)";
+      "expr ::= (backendSend expr type) | (broadcast expr type)";
       "request ::= (AskHuman String) | (HttpGet String) | ReadClock";
       "request ::= (SaveLocal String String) | (LoadLocal String)";
       "request ::= (ServerRequest String String)";
@@ -2766,6 +2818,9 @@ let rec cterm_to_canonical_v2 def_id_of = function
   | CBackendSend (payload, backend_model_ty) ->
       "(backendSend " ^ cterm_to_canonical_v2 def_id_of payload ^ " "
       ^ type_to_canonical backend_model_ty ^ ")"
+  | CBroadcast (payload, to_frontend_ty) ->
+      "(broadcast " ^ cterm_to_canonical_v2 def_id_of payload ^ " "
+      ^ type_to_canonical to_frontend_ty ^ ")"
   | CBind (p, t, body) ->
       "(bind " ^ cterm_to_canonical_v2 def_id_of p ^ " " ^ type_to_canonical t ^ " "
       ^ cterm_to_canonical_v2 def_id_of body ^ ")"
@@ -3277,6 +3332,17 @@ let rec cterm_to_graph_json_via recurse def_id_of = function
           json_field "payload" (recurse payload);
           json_field "responseType" (type_to_graph_json backend_model_ty);
         ]
+  | CBroadcast (payload, to_frontend_ty) ->
+      (* No capability/capabilityRef: broadcast's capability scope is the
+         declared Cmd caps on its type, not a fixed capability the node carries
+         (unlike BackendSend's Server.request). [messageType] is the ToFrontend
+         type pushed to clients. *)
+      json_obj
+        [
+          json_field "tag" (json_string "Broadcast");
+          json_field "payload" (recurse payload);
+          json_field "messageType" (type_to_graph_json to_frontend_ty);
+        ]
   | CBind (p, typ, body) ->
       json_obj
         [
@@ -3369,6 +3435,7 @@ let cterm_node_tag = function
   | CDone _ -> "Done"
   | CRequest _ -> "Request"
   | CBackendSend _ -> "BackendSend"
+  | CBroadcast _ -> "Broadcast"
   | CBind _ -> "Bind"
 
 (* Edge builders are parameterized over the node-id functions so graph
@@ -3425,6 +3492,7 @@ let cterm_node_edges_via ~term_id ~type_id = function
       [ term_id src; term_id alt ]
   | CNode (tag, attrs, children) -> [ term_id tag; term_id attrs; term_id children ]
   | CBackendSend (payload, backend_model_ty) -> [ term_id payload; type_id backend_model_ty ]
+  | CBroadcast (payload, to_frontend_ty) -> [ term_id payload; type_id to_frontend_ty ]
   | CBind (process, typ, body) -> [ term_id process; type_id typ; term_id body ]
 
 let cbranch_body_edges def_id_of = cbranch_body_edges_via (term_node_id def_id_of)
@@ -3598,6 +3666,9 @@ let canonical_node_graph_json_uncached program_hash def_id_of defs =
     | CBackendSend (payload, backend_model_ty) ->
         add_term payload;
         add_type backend_model_ty
+    | CBroadcast (payload, to_frontend_ty) ->
+        add_term payload;
+        add_type to_frontend_ty
     | CBind (process, typ, body) ->
         add_term process;
         add_type typ;
@@ -3865,6 +3936,8 @@ let rec cterm_of_canonical_sexp = function
       CRequest (req_of_canonical_sexp req)
   | Sexp.List [ Sexp.Atom "backendSend"; payload; backend_model_ty ] ->
       CBackendSend (cterm_of_canonical_sexp payload, type_of_canonical_sexp backend_model_ty)
+  | Sexp.List [ Sexp.Atom "broadcast"; payload; to_frontend_ty ] ->
+      CBroadcast (cterm_of_canonical_sexp payload, type_of_canonical_sexp to_frontend_ty)
   | Sexp.List [ Sexp.Atom "bind"; p; typ; body ] ->
       CBind (cterm_of_canonical_sexp p, type_of_canonical_sexp typ, cterm_of_canonical_sexp body)
   | x -> fail ("invalid canonical term: " ^ Sexp.to_string x)
@@ -4049,6 +4122,8 @@ let canonical_surface_expr defs term =
     | CRequest req -> ERequest req
     | CBackendSend (payload, backend_model_ty) ->
         ESendToBackend (backend_model_ty, expr depth env payload)
+    | CBroadcast (payload, to_frontend_ty) ->
+        EBroadcast (to_frontend_ty, expr depth env payload)
     | CBind (process, typ, body) ->
         let x = "__bind" ^ string_of_int depth in
         EBind (expr depth env process, x, typ, expr (depth + 1) (x :: env) body)
@@ -4709,6 +4784,7 @@ let rec termination_counts_term = function
       termination_counts_term body
   | CRecur body -> termination_inc_recur (termination_counts_term body)
   | CBackendSend (payload, _) -> termination_counts_term payload
+  | CBroadcast (payload, _) -> termination_counts_term payload
   | CApp (a, b) | CLet (a, b) | CCons (_, a, b) | CImage (a, b) | CButton (a, b)
   | CInput (a, b) | CListView (a, b) | CWhenView (a, b) | CAttr (a, b) | COn (a, b)
   | CBind (a, _, b) ->
@@ -4893,6 +4969,7 @@ let rec shift amount cutoff = function
   | CDone e -> CDone (shift amount cutoff e)
   | CRequest req -> CRequest req
   | CBackendSend (payload, ty) -> CBackendSend (shift amount cutoff payload, ty)
+  | CBroadcast (payload, ty) -> CBroadcast (shift amount cutoff payload, ty)
   | CBind (p, t, body) -> CBind (shift amount cutoff p, t, shift amount (cutoff + 1) body)
 
 and shift_branch amount cutoff = function
@@ -4966,6 +5043,7 @@ let rec subst index replacement = function
   | CDone e -> CDone (subst index replacement e)
   | CRequest req -> CRequest req
   | CBackendSend (payload, ty) -> CBackendSend (subst index replacement payload, ty)
+  | CBroadcast (payload, ty) -> CBroadcast (subst index replacement payload, ty)
   | CBind (p, t, body) -> CBind (subst index replacement p, t, subst (index + 1) (shift 1 0 replacement) body)
 
 and subst_branch index replacement = function
@@ -5051,6 +5129,8 @@ let rec subst_type_in_cterm args = function
   | CRequest req -> CRequest req
   | CBackendSend (payload, ty) ->
       CBackendSend (subst_type_in_cterm args payload, subst_type args ty)
+  | CBroadcast (payload, ty) ->
+      CBroadcast (subst_type_in_cterm args payload, subst_type args ty)
   | CBind (p, t, body) ->
       CBind (subst_type_in_cterm args p, subst_type args t, subst_type_in_cterm args body)
 
@@ -5193,6 +5273,7 @@ let rec normalize_cterm checked = function
         | CDone e -> CDone (rewrite_recur e)
         | CRequest req -> CRequest req
         | CBackendSend (payload, ty) -> CBackendSend (rewrite_recur payload, ty)
+        | CBroadcast (payload, ty) -> CBroadcast (rewrite_recur payload, ty)
         | CBind (p, t, body) -> CBind (rewrite_recur p, t, rewrite_recur body)
       and rewrite_recur_branch = function
         | CBBool (b, e) -> CBBool (b, rewrite_recur e)
@@ -5311,6 +5392,7 @@ let rec normalize_cterm checked = function
   | COn (event, msg) -> COn (normalize_cterm checked event, normalize_cterm checked msg)
   | CDone e -> CDone (normalize_cterm checked e)
   | CBackendSend (payload, ty) -> CBackendSend (normalize_cterm checked payload, ty)
+  | CBroadcast (payload, ty) -> CBroadcast (normalize_cterm checked payload, ty)
   | CBind (p, t, body) -> (
       match normalize_cterm checked p with
       | CDone v -> normalize_cterm checked (subst_top v body)

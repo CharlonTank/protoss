@@ -45,6 +45,13 @@ type value =
      [VProcessRequest]/[req] because the payload is a value and the response type
      is program-dependent; the [continuation] machinery (resume) is shared. *)
   | VBackendSend of backend_suspended
+  (* Typed server->client push (docs/backend-architecture.md): the value of a
+     [broadcast tf] expression, i.e. a [Cmd cmd_caps ToFrontend] value carrying
+     the ToFrontend value [tf] (and its type, so the server can value-JSON it).
+     Unlike [VBackendSend] this is NOT a suspension — it is an inert command
+     value [Backend.step] returns in the cmd slot and the dev server inspects to
+     decide what to push. [Cmd.none] stays [VUnit]; a [broadcast] is [VBroadcast]. *)
+  | VBroadcast of typ * value
   | VThunk of thunk
 
 and thunk = {
@@ -147,6 +154,7 @@ let rec value_to_string = function
   | VProcessDone v -> "Done " ^ value_to_string v
   | VProcessRequest s -> "Request " ^ Kernel.req_to_canonical s.req
   | VBackendSend s -> "BackendSend " ^ value_to_string s.bs_payload
+  | VBroadcast (_, payload) -> "Broadcast " ^ value_to_string payload
 
 and view_to_string = function
   | VText s -> "(text " ^ Ast.quote s ^ ")"
@@ -204,6 +212,8 @@ let rec value_to_cache_key = function
   | VProcessDone value -> "(Done " ^ value_to_cache_key value ^ ")"
   | VProcessRequest suspended -> "(Suspended " ^ suspended_to_cache_key suspended ^ ")"
   | VBackendSend s -> "(BackendSuspended " ^ backend_suspended_to_cache_key s ^ ")"
+  | VBroadcast (ty, payload) ->
+      "(Broadcast " ^ Kernel.type_to_canonical ty ^ " " ^ value_to_cache_key payload ^ ")"
 
 and view_to_cache_key = function
   | VText s -> "(Text " ^ Ast.quote s ^ ")"
@@ -269,7 +279,7 @@ let rec consume_cterm budget term =
         Some budget
     | CLambda (_, body) | CStrict body | CField (body, _) | CVariant (_, _, body)
     | CRecur body | CText body | CColumn body | CRow body | CDone body
-    | CBackendSend (body, _) ->
+    | CBackendSend (body, _) | CBroadcast (body, _) ->
         consume_cterm budget body
     | CApp (a, b) | CLet (a, b) | CImage (a, b) | CButton (a, b) | CInput (a, b)
     | CListView (a, b) | CWhenView (a, b) | CAttr (a, b) | COn (a, b)
@@ -320,6 +330,7 @@ let rec consume_cache_value budget value =
     | VBackendSend s ->
         Option.bind (consume_cache_value budget s.bs_payload) (fun budget ->
             consume_cache_continuation budget s.bs_cont)
+    | VBroadcast (_, payload) -> consume_cache_value budget payload
 
 and consume_cache_view budget = function
   | _ when budget <= 0 -> None
@@ -412,7 +423,7 @@ let rec cache_value_to_canonical = function
   | VView _ -> None
   | VAttribute _ -> None
   | VClosure _ | VStream _ | VAutomaton _ | VBuiltinSucc | VProcessDone _ | VProcessRequest _
-  | VBackendSend _ ->
+  | VBackendSend _ | VBroadcast _ ->
       None
 
 and cache_values_to_canonical = function
@@ -875,6 +886,11 @@ let rec eval_cterm st env = function
           bs_cont = KDone;
           bs_cap_scope = st.cap_scope;
         }
+  | Kernel.CBroadcast (payload, to_frontend_ty) ->
+      (* An inert command value: evaluate the ToFrontend payload now and hold it
+         (with its type) so [Backend.step] can hand it to the dev server for the
+         SSE push. No suspension, no continuation — a Cmd is not a Process. *)
+      VBroadcast (to_frontend_ty, force_value (eval_cterm st env payload))
   | Kernel.CBind (p, _, body) -> (
       match eval_cterm st env p with
       | VProcessDone v -> eval_cterm st (v :: env) body
@@ -1264,6 +1280,8 @@ let rec value_to_canonical = function
   | VProcessDone v -> "(Done " ^ value_to_canonical v ^ ")"
   | VProcessRequest s -> "(Suspended " ^ suspended_payload_to_canonical s ^ ")"
   | VBackendSend s -> "(BackendSuspended " ^ backend_suspended_payload_to_canonical s ^ ")"
+  | VBroadcast (ty, payload) ->
+      "(Broadcast " ^ Kernel.type_to_canonical ty ^ " " ^ value_to_canonical payload ^ ")"
 
 and view_to_canonical = function
   | VText s -> "(Text " ^ Ast.quote s ^ ")"

@@ -101,10 +101,32 @@ To build (ordered bricks, each shippable and proven):
      `Runtime.value` (`Web.value_of_json`, the inverse of `value_to_json`), folds
      it via `Backend.send_value` (which writes the SAME `to-backend` ledger event
      as the stringly text path — transport-agnostic replay), and answers the new
-     `BackendModel` as value-JSON, which the process resumes with directly. The
-     scaffold (`protoss project init`) uses
-     `bind (sendToBackend (Bump unit)) (\m -> done { model | shared = Nat.toString m.count })`.
-     Still to wire: `sendToFrontend` (server → client push) and the shared-list demo.
+     `BackendModel` as value-JSON, which the process resumes with directly.
+   - **`broadcast` landed (the server → client push).** `broadcast e :
+     Cmd caps ToFrontend` is the symmetric typed transport: the value
+     `updateBackend` returns in its command slot (`Cmd.none` stays `unit`).
+     `Ast.EBroadcast → Kernel.CBroadcast` carries the `ToFrontend` type (read
+     from `updateBackend`, like `CBackendSend` carries `BackendModel`); the node
+     adds no fixed capability (its scope is the declared `Cmd` caps). It is
+     rejected with `BACKEND010` (no backend half) or `BACKEND013` (used where the
+     surrounding `Cmd`'s message is not the contract `ToFrontend`). At runtime the
+     cmd evaluates to a `Runtime.VBroadcast (toFrontendTy, value)`;
+     `Backend.broadcast_of_cmd` extracts the `ToFrontend` value (`Cmd.none` →
+     `None`). The dev server holds a second SSE channel `GET /__events` (distinct
+     from `/livereload`); when a fold's command slot is a `broadcast`, it pushes
+     the `ToFrontend` value-JSON to **every** subscribed client. The optional
+     convention `fromBackend : ToFrontend -> Msg` (validated by `app check` —
+     `WEB025`/`WEB026`/`WEB027`) is the receive half: when present, the emitted
+     bundle carries its def-id and the runtime subscribes to `/__events`, mapping
+     each pushed `ToFrontend` to a `Msg` and dispatching it. **The broadcast is an
+     ephemeral OUTPUT effect: it is NOT recorded in the ledger** — only the
+     `to-backend` event is appended, so the `BackendModel` fold stays
+     reconstructible from `to-backend` events alone and broadcasts re-derive from
+     the fold (no new event kind). The scaffold (`protoss project init`) demos the
+     full loop: `updateBackend` returns `(tuple model' (broadcast (Synced ...)))`,
+     `fromBackend` maps `(Synced n) → (GotShared n)`, and a click in one browser
+     updates the shared counter in every open browser.
+     Still to wire: the shared-list demo and bytecode lowering of both transports.
 
 Each brick is built in isolation (kernel changes via worktree agents with
 determinism proofs), `@fulltest` green before commit, hashes proven stable.

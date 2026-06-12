@@ -83,3 +83,10 @@ ServerRequest : String -> String -> Process String
 -- typé contre ToBackend, le résultat est le BackendModel du programme (tous deux
 -- lus depuis updateBackend). Exige la capability Server.request.
 sendToBackend : ToBackend -> Process BackendModel
+
+-- Push serveur->clients typé, le symétrique (docs/backend-architecture.md) : la
+-- valeur du Cmd renvoyé par updateBackend. L'argument est typé contre ToFrontend
+-- (lu depuis updateBackend) ; le serveur pousse la valeur à tous les clients
+-- abonnés à /__events. fromBackend mappe un ToFrontend reçu vers un Msg.
+broadcast : ToFrontend -> Cmd caps ToFrontend
+fromBackend : ToFrontend -> Msg

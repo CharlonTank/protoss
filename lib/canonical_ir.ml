@@ -297,6 +297,13 @@ let rec term_of_graph_json obj =
       Kernel.CBackendSend
         ( term_of_graph_json (json_field "payload" obj),
           type_of_graph_json (json_field "responseType" obj) )
+  | "Broadcast" ->
+      (* No capability/capabilityRef: broadcast carries no fixed capability (its
+         scope is the declared Cmd caps on its type). [messageType] is the
+         ToFrontend type, mirroring [Kernel.cterm_to_graph_json_via]. *)
+      Kernel.CBroadcast
+        ( term_of_graph_json (json_field "payload" obj),
+          type_of_graph_json (json_field "messageType" obj) )
   | "Bind" ->
       Kernel.CBind
         ( term_of_graph_json (json_field "process" obj),

@@ -891,10 +891,16 @@ let command_deploy args =
     ?location:(flag "--location") project
 
 (* Transport for the Lamdera-shaped backend (docs/backend-architecture.md): a
-   frontend `Server.request "__backend" <ToBackend>` suspension is POSTed by
-   the browser runtime to /__server and lands here. The message is typed,
-   appended to the project ledger, and folded (Backend.send); the process
-   resumes with the new BackendModel's text. Uses the CURRENT build's checked
+   frontend `sendToBackend <ToBackend>` (or legacy `Server.request "__backend"`)
+   suspension is POSTed by the browser runtime to /__server and lands here. The
+   message is typed, appended to the project ledger, and folded (Backend.send);
+   the process resumes with the new BackendModel. Returns [(response, broadcast)]:
+   [response] is what the POSTing process resumes with; [broadcast] is
+   [Some toFrontendValueJson] when updateBackend's command slot was a
+   `broadcast tf` — the dev server pushes it to every /__events subscriber
+   (server->client fan-out). The broadcast is an ephemeral OUTPUT effect and is
+   NOT recorded in the ledger (Backend.send appends only the to-backend event);
+   it re-derives from the deterministic fold. Uses the CURRENT build's checked
    program (hot reload keeps the handler in sync). *)
 let live_server_request project ~checked ~route ~payload ~backend_send =
   if not (String.equal route "__backend") then
@@ -908,6 +914,13 @@ let live_server_request project ~checked ~route ~payload ~backend_send =
           (Filename.concat ".protoss" "ledger")
       in
       let world = Protoss.Backend.branch_world root in
+      (* The ToFrontend value to broadcast (if updateBackend's cmd was
+         `broadcast tf`), encoded as value-JSON for the /__events push. *)
+      let broadcast_json cmd =
+        match Protoss.Backend.broadcast_of_cmd cmd with
+        | Some tf -> Some (Protoss.Web.value_to_json tf)
+        | None -> None
+      in
       match backend_send with
       | Some payload_json ->
           (* Typed transport (sendToBackend): decode the ToBackend value-JSON
@@ -915,12 +928,12 @@ let live_server_request project ~checked ~route ~payload ~backend_send =
              BackendModel as value-JSON — the format the browser runtime resumes
              with directly (a structured value, not display text). *)
           let value = Protoss.Web.value_of_json b.Protoss.Web.to_backend_ty payload_json in
-          let _, _, model, _cmd = Protoss.Backend.send_value root checked b world value in
-          Protoss.Web.value_to_json model
+          let _, _, model, cmd = Protoss.Backend.send_value root checked b world value in
+          (Protoss.Web.value_to_json model, broadcast_json cmd)
       | None ->
           (* Legacy stringly Server.request path: text in, display text out. *)
-          let _, _, model, _cmd = Protoss.Backend.send root checked b world payload in
-          Protoss.Runtime.value_to_string model
+          let _, _, model, cmd = Protoss.Backend.send root checked b world payload in
+          (Protoss.Runtime.value_to_string model, broadcast_json cmd)
     with Protoss.Backend.Error msg -> Protoss.Kernel.fail msg
 
 let command_web = function

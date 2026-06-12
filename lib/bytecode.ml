@@ -330,10 +330,11 @@ let rec compile_term (t : Kernel.cterm) : instruction list =
   (* Process nodes. *)
   | Kernel.CDone e -> compile_term e @ [ ProcDone ]
   | Kernel.CRequest req -> [ ProcRequest req ]
-  (* The typed full-stack transport ([sendToBackend]) is not yet lowered to the
-     bytecode VM; it runs through the interpreter + web transport. Reject it
-     explicitly rather than mis-compile. *)
+  (* The typed full-stack transports ([sendToBackend], [broadcast]) are not yet
+     lowered to the bytecode VM; they run through the interpreter + web
+     transport. Reject them explicitly rather than mis-compile. *)
   | Kernel.CBackendSend _ -> unsupported "sendToBackend (backend transport)"
+  | Kernel.CBroadcast _ -> unsupported "broadcast (backend transport)"
   | Kernel.CBind (p, awaited_ty, body) ->
       compile_term p @ [ ProcBind (awaited_ty, compile_block body) ]
 

@@ -211,6 +211,7 @@ type cterm =
   | CDone of cterm
   | CRequest of Ast.req
   | CBackendSend of cterm * Ast.typ
+  | CBroadcast of cterm * Ast.typ
   | CBind of cterm * Ast.typ * cterm
 and cbranch = CBBool of bool * cterm | CBVariant of string * cterm
 val index_of : string -> string list -> int -> int option

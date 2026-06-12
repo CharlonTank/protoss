@@ -37,7 +37,7 @@ expr ::= (variant type Constructor expr) | (inst Name type*)
 expr ::= (case expr branch*) | (foldNat ...) | (foldList ...) | (foldVariant ...)
 expr ::= (Nil type) | (Cons type expr expr) | (caseList expr expr Name Name expr)
 expr ::= (done expr) | (request request) | (bind expr binder expr)
-expr ::= (sendToBackend expr)
+expr ::= (sendToBackend expr) | (broadcast expr)
 request ::= (AskHuman String) | (HttpGet String) | ReadClock | (SaveLocal ...) | ...
 branch ::= (true expr) | (false expr) | (Constructor binder? expr) | (_ expr)
 binder ::= Name | (Name type)
@@ -210,6 +210,17 @@ result is the program's `BackendModel`, both read by the kernel from
 `updateBackend`. It requires the `Server.request` capability and is rejected with
 `BACKEND010` when the program has no backend half. See
 [backend-architecture.md](backend-architecture.md).
+
+`(broadcast e)` is the symmetric server→client push: the value of a
+`(Cmd caps ToFrontend)` returned in `updateBackend`'s command slot (`Cmd.none`
+stays `unit`). `e` is checked against the program's `ToFrontend` type (read from
+`updateBackend`); the canonical node carries no fixed capability (its scope is
+the declared `Cmd` caps). It is rejected with `BACKEND010` when there is no
+backend half, and `BACKEND013` when used where the surrounding `Cmd`'s message is
+not the contract `ToFrontend`. The dev server pushes the value to every client
+subscribed to `GET /__events`; the broadcast is an ephemeral output effect and is
+not recorded in the ledger. The optional `(def fromBackend (-> ToFrontend Msg) ...)`
+receives broadcasts. See [backend-architecture.md](backend-architecture.md).
 
 ## Sugar that does not change the hash
 

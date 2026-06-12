@@ -119,11 +119,19 @@ canonical node as the S-expression surface (no special Protoss/H rule):
 update msg model =
     case msg of
         BumpShared _ ->
-            bind (sendToBackend (Bump unit)) (\m -> done { model | shared = Nat.toString m.count })
+            bind (sendToBackend (Bump unit)) (\m -> done model)
+        GotShared n -> done { model | shared = Nat.toString n }
 ```
 
 `sendToBackend e : Process BackendModel` is typed against the program's
-`ToBackend`/`BackendModel` (read from `updateBackend`); see
+`ToBackend`/`BackendModel` (read from `updateBackend`). The symmetric
+`broadcast e` (which lowers to `(broadcast e)`) is the server→client push:
+`updateBackend` returns it in its command slot to fan a typed `ToFrontend` value
+out to every connected client over `GET /__events`, and the optional
+`fromBackend : ToFrontend -> Msg` maps a received broadcast to a frontend `Msg`
+(so the `GotShared` case above runs when another client bumps the shared
+counter). `broadcast` and `fromBackend` live in the S-expression backend half
+(the Protoss/H surface cannot yet spell a nested `Cmd { caps }` type). See
 [backend-architecture.md](backend-architecture.md).
 
 ## Why the hashes match
