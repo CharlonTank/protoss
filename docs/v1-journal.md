@@ -84,6 +84,20 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   LE LEDGER A SURVÉCU AU REDEPLOY (count 2→3→4 en continuité), chemins typé+texte interopèrent sur le
   même ledger. Agent « to-frontend » (broadcast/fromBackend, push SSE typé serveur→clients) en cours
   en worktree isolé.
+- **broadcast/fromBackend FAIT — LE MODÈLE LAMDERA EST COMPLET** (commit 932c3e9, agent worktree
+  a11e0c7b ~49 min/373k tokens, 3-way propre sur le scaffold lamdera-init, preuves REFAITES : sweep 105
+  fichiers 0-diff via worktree parent dédié — méthode fiabilisée après un stash-dance douteux —, typo
+  compile-time, 2 clients SSE curl reçoivent chacun (Synced 1)→(Synced 2), @fulltest vert).
+  `broadcast e : Cmd caps ToFrontend` (EBroadcast/CBroadcast, BACKEND013, type lu d'updateBackend) ;
+  SSE `GET /__events` (distinct de /livereload) ; convention `fromBackend : ToFrontend -> Msg`
+  (WEB025-027) → le runtime s'abonne et dispatch ; broadcasts = effets de SORTIE éphémères, JAMAIS
+  dans le ledger (fold reconstructible des seuls to-backend). Scaffold collaboratif out of the box
+  (GotShared + broadcast (Synced count)). kernel.mli : +CBroadcast (exigé). Lamdera-parité atteinte :
+  init layout ✓, sendToBackend typé ✓, updateFromBackend (fromBackend) ✓, broadcast ✓.
+- **Scaffold lamdera-init FAIT** (commit b93c315, demande user « comme lamdera init ») :
+  Types.protoss (source de vérité : FrontendModel/FrontendMsg/BackendModel/ToBackend/ToFrontend,
+  module exposé, usage qualifié Types.X — alias transparents donc zéro impact graphe canonique) +
+  Frontend.protoss + Backend.protoss. Redeploy prod broadcast EN COURS (background).
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
