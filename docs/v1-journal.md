@@ -129,6 +129,10 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   séquençage recommandé documenté au design doc au lieu d'un adaptateur truqué. Preuves : projet complet
   Build/UniverseRoot/BackendModelRef identiques avant/après (refait sur main) ; sweep agent 103 fixtures
   + arbre 6344 fichiers byte-identique + inodes partagés ; @fulltest vert.
+- **Doctor + fuzz pour le cycle Lamdera FAIT** (4ba31a6) : check d'acceptance `lamdera-backend` au
+  doctor --v1 (fold 3 sends → n=3, snapshot pur-cache par rm+refold identique, broadcast dérivé du
+  fold) → 26 pass / 0 fail ; seed full-loop au fuzzer (7 targets mutent sendToBackend/broadcast,
+  0 crash). Piège noté : `Doctor.contains` prend le NEEDLE en premier.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
