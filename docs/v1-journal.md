@@ -302,3 +302,26 @@ PROUVÉ et EN PRODUCTION :
   pur (`bytecode run <src>` pour les defs à effets qui ont besoin des capabilities déclarées). Vérifié :
   `main` d'un module buildé exec → 3 == run depuis source. Test de parité ajouté, README/usage à jour,
   `@fulltest` vert. Le backend bytecode est désormais le 1er backend complet (compile + exécute).
+- 2026-06-12 — **Broadcasts perdus au chargement + welcome onConnect FAIT** (commit a824b15, sur
+  rapport user : « Bump shared n'affiche rien » + « on devrait voir la valeur, pas le placeholder »).
+  Diagnostic en navigateur réel (Chrome MCP, scaffold exact du user) : le serveur foldait et
+  broadcastait correctement (prouvé curl/ledger) mais la page ratait les pushes. Cause composée :
+  (1) le bandeau de déconnexion (1709188) armait `wasDown` dès le premier `onerror` — or la
+  connexion `/livereload` peut rater son premier essai pendant la rafale de chargement (serveur
+  mono-thread) → `location.reload()` parasite à CHAQUE chargement (salves doublées au log serveur) ;
+  (2) connexions SSE zombies non détectées (le 1er write vers une socket morte « réussit » dans le
+  buffer TCP, EPIPE n'arrive qu'au write suivant) + salves doublées → plafond Chrome de 6
+  connexions/host atteint → le `GET /__events` de la page visible reste en file (un 503 synthétique
+  Chrome capturé au réseau) → la page n'est pas abonnée au moment du clic, le broadcast part dans le
+  vide. Fix : bandeau armé seulement après une 1re connexion réussie (`hasConnected`) ; préambule SSE
+  `retry: 1000` sur les deux canaux ; heartbeat `: ping` ~2 s dans la boucle select qui prune les
+  zombies en un tick (libère les slots navigateur). Et la vraie réponse Lamdera (validée contre
+  `~/dev/projects/lamdera-compiler` : leur `onJoined` renvoie un message d'init poussé au client qui
+  rejoint) : **`onConnect : BackendModel -> ToFrontend`** optionnel, validé par le contrat backend
+  (WEB042), évalué par le serveur sur le fold courant et poussé à CHAQUE client qui s'abonne à
+  `/__events` — l'état initial s'affiche dès la connexion (« backend: 0 ») et toute (re)connexion
+  resynchronise. Éphémère comme les broadcasts : JAMAIS au ledger (test : welcome n'ajoute aucun
+  event). Scaffold : Backend déclare onConnect, placeholder frontend → "...". Doctor lamdera-backend
+  prouve maintenant welcome==fold (26 pass/0 fail). Vérifié en navigateur : « backend: 2 » affiché au
+  chargement (valeur persistée du ledger !), clic → fold + broadcast + welcome curl « Synced 3 » +
+  heartbeats visibles au fil SSE. `@fulltest` vert, CLI réinstallée.
