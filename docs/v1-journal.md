@@ -13,9 +13,15 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   sur le ledger existant (BackendModel = fold déterministe, pas blob RAM), stockage = adaptateur content-
   addressed interchangeable (FS/SQLite/PG), perf = backend COMPILÉ (bytecode/natif, pas Node) + cache
   déterministe parfait + snapshots incrémentaux + sharding. Plan en 5 briques (voir le doc).
-  Prochaine action : **brique ① — socle des types** `BackendModel`/`ToBackend`/`ToFrontend`/`updateBackend`
-  reconnus par `app check` (à côté de l'archi Process/Cmd). Changement kernel/workspace → agent worktree
-  avec preuves. D'abord investiguer comment l'archi d'app (Process/Cmd) est reconnue pour bien spécifier.
+  **Brique ① FAITE** (commit ac687a8) : `app check` reconnaît la moitié backend optionnelle —
+  `initBackend : BackendModel` + `updateBackend : ToBackend -> BackendModel -> (Tuple BackendModel
+  (Cmd caps ToFrontend))` (miroir de la forme cmd), rapporte `Backend OK backendModel=… toBackend=…
+  toFrontend=…`. Additif : app frontend-only → `backend = None`, host contract intact, hash compteur
+  inchangé `b96036…`. Non-laxité : WEB021 (model mismatch), WEB001 (initBackend manquant). Pas eu besoin
+  d'agent worktree : le changement est dans web.ml (pas le kernel), additif, prouvé par hash + @fulltest.
+  Prochaine action : **brique ② — BackendModel adossé au ledger** (ToBackend = événement ledger,
+  BackendModel = fold déterministe `updateBackend` depuis `initBackend`, rejouable ; CLI backend
+  state/send pour le démontrer).
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
