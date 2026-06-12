@@ -43,8 +43,19 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   sinon imprime le record exact. Domaine défaut charlon.dev. DEPLOY001-005 au catalogue.
   **Déploiement réel de /tmp/demo (--name demo) EN COURS en background** (compteur partagé S-exp,
   Backend OK). Vérifier au réveil : health check IP, rapport au user (coût cx22, destruction).
-- Découvert : pas de syntaxe Elm-like pour le scope `Cmd` (`Cmd (capabilities) A` est S-exp seulement ;
-  `Cmd {}` parse en Record vide). Item syntaxe à traiter (cf. `Process { Human.ask } String` qui existe).
+- Découvert + qualifié : `elm_syntax.ml:310` parse `Process|Cmd { caps }` mais SEULEMENT en tête de
+  signature — pas imbriqué dans un type composé (ex. `Tuple Model (Cmd {} Msg)`, la forme exacte
+  d'updateBackend). `{}` imbriqué tombe dans le parseur de record → `(Cmd (Record ) …)` → erreur.
+  Item syntaxe : gérer le scope `{caps}` dans le parseur de type imbriqué (fix ciblé, hash-preserving
+  à prouver vs la forme S-exp). En attendant, les apps backend s'écrivent en S-exp.
+- **DÉPLOIEMENT RÉEL RÉUSSI** (2026-06-12) : cax11 ARM épuisé dans les 3 DC EU → cpx11/ash (x86 US,
+  ~4.35€/mois). Serveur `protoss-demo` = 178.156.212.59. Pipeline complet OK : create → provision
+  opam/ocaml-system (build OCaml 4.14 distant passe) → rsync sources + build → sync app → systemd :80.
+  VÉRIFIÉ EN PROD : frontend HTTP 200 ; backend event-sourcé `POST /__server (Bump unit)` → {count = 1}
+  → {count = 2} (ledger de prod persiste et fold) ; mal typé → 500 propre. DNS : pas de
+  CLOUDFLARE_API_TOKEN en env → record à créer par le user : `A demo.charlon.dev → 178.156.212.59
+  (proxied)` ; avec le token exporté, le prochain `protoss deploy` le fera seul. Destruction :
+  `hcloud server delete protoss-demo`.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
