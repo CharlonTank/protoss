@@ -64,6 +64,21 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   APRÈS une flèche a le même bug de parsing que Cmd imbriqué (« expected :, got } ») ; et un scope
   exact déclaré exige les capabilities exactes sur done (CAP001) → le scaffold utilise la forme
   unconstrained `Process Model`.
+- **sendToBackend TYPÉ FAIT** (commit dec8114, agent worktree a5f5bce ~50 min/400k tokens, diff 21
+  fichiers relu + preuves REFAITES indépendamment sur main). Feedback user « pas typesafe » traité :
+  nouveau nœud d'effet de première classe `ESendToBackend`/`CBackendSend` (pair de CRequest — payload
+  valeur + type de réponse dépendant du programme, inexprimable dans le req stringly fermé), capability
+  Server.request, types lus d'updateBackend par le kernel (lookup tracé → cache incrémental correct,
+  testé), erreurs stables BACKEND010-012. Suspension parallèle VBackendSend (ledger record_request et
+  bytecode intacts ; bytecode rejette proprement « unsupported »). Navigateur : payload en value-JSON,
+  réponse BackendModel en value-JSON résumée directement (`Web.value_of_json` = inverse type-dirigé de
+  value_to_json). `Backend.send_value` ré-émet la valeur typée en source canonique → événement ledger
+  BYTE-IDENTIQUE au chemin texte (replay transport-agnostique). Scaffold typé. Preuves indépendantes :
+  sweep 105 fichiers 0-diff, `(Typo unit)` rejeté à la COMPILATION, curl round-trip value-JSON count
+  1→2, @fulltest vert. kernel.mli : 2 ajouts exigés par le compilateur. Écarts documentés : self-canon
+  rejette proprement sendToBackend (parité du sous-ensemble intacte) ; fmt --human whole-program avec
+  backend = limitation pré-existante (Cmd scope) ; bytecode VM ne lower pas le transport (hors scope).
+  RESTE pour le Lamdera complet : sendToFrontend (push serveur→clients/broadcast).
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
