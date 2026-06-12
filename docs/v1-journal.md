@@ -79,6 +79,11 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   rejette proprement sendToBackend (parité du sous-ensemble intacte) ; fmt --human whole-program avec
   backend = limitation pré-existante (Cmd scope) ; bytecode VM ne lower pas le transport (hors scope).
   RESTE pour le Lamdera complet : sendToFrontend (push serveur→clients/broadcast).
+- **Prod redéployée avec le typé** (redeploy idempotent : serveur réutilisé, sources resync, rebuild
+  distant, service relancé). VÉRIFIÉ : transport typé en prod (POST value-JSON → BackendModel value-JSON),
+  LE LEDGER A SURVÉCU AU REDEPLOY (count 2→3→4 en continuité), chemins typé+texte interopèrent sur le
+  même ledger. Agent « to-frontend » (broadcast/fromBackend, push SSE typé serveur→clients) en cours
+  en worktree isolé.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
