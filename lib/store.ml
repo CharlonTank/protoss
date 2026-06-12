@@ -111,38 +111,142 @@ let ensure_store root =
 
 let object_path root hash = Filename.concat (objects_dir root) hash
 
-let same_file_path a b =
-  try
-    let a = Unix.realpath a and b = Unix.realpath b in
-    String.equal a b
-  with Unix.Unix_error _ -> String.equal a b
-
-let write_global_object hash payload =
-  match global_store_root () with
-  | None -> None
-  | Some root ->
-      ensure_store root;
-      let path = object_path root hash in
-      if not (Sys.file_exists path) then write_file_atomic path payload;
-      Some path
-
 let graph_path root graph_hash =
   Filename.concat (graphs_dir root) (sanitize_name graph_hash ^ ".graph.json")
 
+(* ------------------------------------------------------------------------
+   Storage backend interface (docs/backend-architecture.md, brick 3).
+
+   The content-addressed object/graph layer of the project store is the only
+   genuinely *swappable* surface: every datum is keyed by its own content hash
+   (objects) or by the hash of its canonical bytes (graphs), so the physical
+   arrangement — files today, a SQLite table tomorrow — is an implementation
+   detail of which adapter is mounted. The interface is deliberately narrow:
+   it covers exactly what the store performs (idempotent put-if-absent, read,
+   exists, list of objects; idempotent put of a canonical graph), NOT generic
+   filesystem I/O. Source reading, lockfiles, reports, the ledger event log
+   and the runtime world store all go through the plain [read_file] /
+   [write_file_atomic] helpers above and are out of this layer's scope.
+
+   The public [put_object]/[get_object]/[list_objects]/[write_graph] functions
+   keep their exact historical signatures and delegate to the mounted backend,
+   so every call site (and the on-disk byte layout the FS adapter produces) is
+   unchanged. [object_path]/[graph_path]/[graphs_dir] remain top-level: they
+   describe the FS-layout contract that direct readers across the codebase
+   depend on, and the FS adapter is bound to honour exactly that layout. *)
+module type BACKEND = sig
+  val name : string
+
+  (* Store [payload] under content key [hash] if absent. Idempotent: a present
+     object is never rewritten (content-addressing makes the bytes immutable). *)
+  val put_object_payload : root:string -> hash:string -> payload:string -> unit
+
+  (* Read the bytes stored under content key [hash]. Raises [Error] if absent. *)
+  val read_object : root:string -> hash:string -> string
+
+  (* Whether an object with content key [hash] is present. *)
+  val object_exists : root:string -> hash:string -> bool
+
+  (* All object content keys present, sorted. *)
+  val list_objects : root:string -> string list
+
+  (* Store a canonical graph JSON under its content key [graph_hash] if its
+     bytes differ from what is already stored. Deterministic JSON ⇒ identical
+     rewrites are skipped. *)
+  val put_graph : root:string -> graph_hash:string -> json:string -> unit
+end
+
+(* The filesystem adapter: the historical behaviour verbatim. Objects live one
+   file per hash under [objects/]; graphs one file per hash under [graphs/].
+   [put_object_payload] interns through the user-level global store and
+   hardlinks the project object to the shared payload when possible (a
+   cross-project, FS-specific dedup that an alternative backend would not
+   share). *)
+module Fs_backend : BACKEND = struct
+  let name = "fs"
+
+  let same_file_path a b =
+    try
+      let a = Unix.realpath a and b = Unix.realpath b in
+      String.equal a b
+    with Unix.Unix_error _ -> String.equal a b
+
+  let write_global_object hash payload =
+    match global_store_root () with
+    | None -> None
+    | Some root ->
+        ensure_store root;
+        let path = object_path root hash in
+        if not (Sys.file_exists path) then write_file_atomic path payload;
+        Some path
+
+  let put_object_payload ~root ~hash ~payload =
+    ensure_store root;
+    let path = object_path root hash in
+    if not (Sys.file_exists path) then
+      match write_global_object hash payload with
+      | Some global_path when not (same_file_path global_path path) -> (
+          try Unix.link global_path path with Unix.Unix_error _ -> write_file_atomic path payload)
+      | _ -> write_file_atomic path payload
+
+  let read_object ~root ~hash =
+    let path = object_path root hash in
+    if not (Sys.file_exists path) then fail ("object not found: " ^ hash);
+    read_file path
+
+  let object_exists ~root ~hash = Sys.file_exists (object_path root hash)
+
+  let list_objects ~root =
+    let dir = objects_dir root in
+    if not (Sys.file_exists dir) then []
+    else Sys.readdir dir |> Array.to_list |> List.sort String.compare
+
+  let put_graph ~root ~graph_hash ~json =
+    ensure_store root;
+    write_file_atomic_if_changed (graph_path root graph_hash) json
+end
+
+(* Mounted backend. Selected once per process from [PROTOSS_STORE_BACKEND]
+   (and, where a manifest is in play, from its [store_backend] field — see
+   [Workspace.store_backend], which validates and exports the same value). Only
+   "fs" is implemented today; any other value fails loudly rather than silently
+   falling back, so a misconfigured backend can never write a divergent store.
+   A future "sqlite" adapter is mounted here (see docs/backend-architecture.md
+   for the recommended path). *)
+let backend_of_name = function
+  | "" | "fs" -> (module Fs_backend : BACKEND)
+  | other ->
+      fail
+        ("unsupported store backend: " ^ other
+       ^ " (supported: fs). See docs/backend-architecture.md for the SQLite path.")
+
+(* Resolved lazily on first store use, NOT at module-load time: an invalid
+   [PROTOSS_STORE_BACKEND] must surface as a normal [Error] from the operation
+   that needs the store (caught by the CLI's store-error handler → STORE001),
+   never crash unrelated commands like [protoss --help] at startup. Memoized
+   so the env is read once per process. *)
+let active_backend_lazy =
+  lazy
+    (backend_of_name
+       (match Sys.getenv_opt "PROTOSS_STORE_BACKEND" with
+       | Some v -> String.trim v
+       | None -> ""))
+
+let active_backend () = Lazy.force active_backend_lazy
+
+let backend_name () =
+  let (module B : BACKEND) = active_backend () in
+  B.name
+
 let write_graph root graph_hash graph_json =
-  ensure_store root;
-  write_file_atomic_if_changed (graph_path root graph_hash) graph_json
+  let (module B : BACKEND) = active_backend () in
+  B.put_graph ~root ~graph_hash ~json:graph_json
 
 let put_object root kind content =
-  ensure_store root;
   let payload = "kind=" ^ kind ^ "\n" ^ content in
   let hash = Hashcons.hash payload in
-  let path = object_path root hash in
-  if not (Sys.file_exists path) then (
-    match write_global_object hash payload with
-    | Some global_path when not (same_file_path global_path path) -> (
-        try Unix.link global_path path with Unix.Unix_error _ -> write_file_atomic path payload)
-    | _ -> write_file_atomic path payload);
+  let (module B : BACKEND) = active_backend () in
+  B.put_object_payload ~root ~hash ~payload;
   hash
 
 let def_path root name = Filename.concat (defs_dir root) (sanitize_name name ^ ".protoss")
@@ -214,9 +318,8 @@ let load_program root =
     { imports = []; capabilities; module_name = None; exports = None; type_aliases; defs }
 
 let list_objects root =
-  let dir = objects_dir root in
-  if not (Sys.file_exists dir) then []
-  else Sys.readdir dir |> Array.to_list |> List.sort String.compare
+  let (module B : BACKEND) = active_backend () in
+  B.list_objects ~root
 
 type gc_result = {
   objects : int;
@@ -267,9 +370,8 @@ let gc_report result =
   String.concat "\n" (lines @ unreachable) ^ "\n"
 
 let get_object root hash =
-  let path = object_path root hash in
-  if not (Sys.file_exists path) then fail ("object not found: " ^ hash);
-  read_file path
+  let (module B : BACKEND) = active_backend () in
+  B.read_object ~root ~hash
 
 let count_files dir suffix =
   if not (Sys.file_exists dir) then 0

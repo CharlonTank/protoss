@@ -100,6 +100,13 @@ type manifest = {
   source_dirs : string list;
   store_dir : string;
   cache_dir : string;
+  (* Which storage adapter backs the content-addressed store
+     (docs/backend-architecture.md, brick 3). Like [store_dir], this is a
+     physical/deploy-time choice and is deliberately NOT part of the
+     content-addressed identity (it never enters UniverseRoot). Defaults to
+     "fs"; only backends [Store] knows about are accepted, validated at parse
+     time. *)
+  store_backend : string;
   capabilities : string list;
   policies : string list;
   package_aliases : (string * string) list;
@@ -215,6 +222,14 @@ let parse_manifest root =
     source_dirs = array_field "source_dirs" [ "src" ];
     store_dir = string_field "store_dir" ".protoss/store";
     cache_dir = string_field "cache_dir" ".protoss/cache";
+    (* Validate the declared backend name up front so a typo (or an
+       unimplemented backend like "sqlite" today) fails loudly at manifest
+       parse, not deep inside a store write. [Store.backend_of_name] is the
+       single source of truth for which adapters exist. *)
+    store_backend =
+      (let b = string_field "store_backend" "fs" in
+       ignore (Store.backend_of_name b);
+       b);
     capabilities = array_field "capabilities" [];
     policies = array_field "policies" [];
     package_aliases = array_field "package_aliases" [] |> List.map parse_package_alias;
@@ -244,6 +259,22 @@ let path_in_project manifest path = normalize_path manifest.root path
 let store_root manifest = path_in_project manifest manifest.store_dir
 
 let cache_root manifest = path_in_project manifest manifest.cache_dir
+
+(* The storage adapter this project's store is mounted on. The manifest field
+   is the declared contract; the process mounts exactly one backend (a process
+   serves one store), selected from [PROTOSS_STORE_BACKEND]. We require the two
+   to agree so a build can never write through one adapter while the manifest
+   claims another. Both default to "fs", so the common case is silent. *)
+let store_backend manifest = manifest.store_backend
+
+let check_store_backend manifest =
+  let declared = manifest.store_backend in
+  let mounted = Store.backend_name () in
+  if not (String.equal declared mounted) then
+    fail
+      ("store backend mismatch: manifest declares store_backend=\"" ^ declared
+     ^ "\" but the process is running the \"" ^ mounted
+     ^ "\" backend (set PROTOSS_STORE_BACKEND=" ^ declared ^ " to match)")
 
 let project_root path =
   let path = if path = "" then "." else path in
@@ -1084,6 +1115,7 @@ let enforce_capability_policies (manifest : manifest) checked =
   enforce_capability_policy manifest checked "NoNetworkExceptDeclared" is_network_capability
 
 let prepare_build manifest =
+  check_store_backend manifest;
   let stats = empty_stats () in
   let store = store_root manifest in
   let units = load_units manifest store stats in

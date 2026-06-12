@@ -6465,6 +6465,25 @@ let () =
         (string_of_int global_stat.Unix.st_ino)
         (string_of_int stat_b.Unix.st_ino));
 
+  (* Storage adapter (docs/backend-architecture.md, brick 3). The FS backend is
+     the default mounted adapter; [backend_of_name] is the single source of
+     truth for which adapters exist and rejects anything else loudly. *)
+  assert_equal "store backend default name" "fs" (Store.backend_name ());
+  ignore (Store.backend_of_name "fs");
+  ignore (Store.backend_of_name "");
+  assert_true "unknown store backend rejected"
+    (try
+       ignore (Store.backend_of_name "sqlite");
+       false
+     with Store.Error msg -> contains_substring msg "unsupported store backend");
+  (* The FS adapter behind the interface round-trips an object by content key. *)
+  let backend_store = temp_dir "store-backend" in
+  let backend_hash = Store.put_object backend_store "test" "backend-roundtrip" in
+  assert_equal "backend object read matches put"
+    ("kind=test\nbackend-roundtrip")
+    (Store.get_object backend_store backend_hash);
+  assert_true "backend object listed" (List.mem backend_hash (Store.list_objects backend_store));
+
   if integration_part "workspace" then (
   trace_test "integration:start";
   (* The workspace slices exercise store/package/audit *mechanics*, which are
