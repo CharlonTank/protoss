@@ -28,9 +28,23 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   bump → {count = 1} ; state (replay pur) == dernier send (même BackendModelRef p2:970a41…) ; 2 ledgers
   indépendants, même séquence → world ET model refs byte-identiques ; `ledger replay` natif valide les
   événements. `@fulltest` vert.
-  Prochaine brique : au choix — **transport** (câbler `Server.request "__backend"` du frontend live →
-  `Backend.send` dans le serveur dev, boucle full-stack réelle dans le navigateur) ou **snapshots**
-  (cache content-addressed du fold, brique perf). Trancher au prochain tour.
+  **Brique transport FAITE** (commit 57247a3) : le runtime web POSTe toute suspension `Server.request`
+  vers `/__server` ({"route","payload"}) et résume le process avec la réponse texte. `Web.serve` prend le
+  handler en callback (`?server_request`, câblé dans bin/main.ml → pas de cycle de modules) : route
+  `__backend` → `Backend.send` (type, append ledger, fold) → répond le nouveau BackendModel. Erreurs
+  handler → HTTP 500 avec code public. `?bind_any` (`--public`) pour écouter 0.0.0.0. Prouvé par curl :
+  POST (Bump unit) → {count = 1} → {count = 2} inter-requêtes, mal typé → 500 BACKEND002, et
+  `backend state` (CLI) lit le même {count = 2} — serveur et CLI partagent l'état event-sourcé.
+- **`protoss deploy` FAIT** (commit 8abcf47, demande explicite du user) : valide l'app AVANT l'infra,
+  serveur Hetzner par app `protoss-<name>` idempotent (hcloud), provision opam/ocaml-system, rsync des
+  sources protoss + build distant, sync app en PRÉSERVANT le `.protoss` serveur (le ledger de prod
+  survit aux redeploys), réécrit le chemin stdlib du manifest, systemd `protoss live --port 80 --public`,
+  DNS Cloudflare : upsert A record PROXIED `<name>.<domain>` (TLS via CF) si CLOUDFLARE_API_TOKEN,
+  sinon imprime le record exact. Domaine défaut charlon.dev. DEPLOY001-005 au catalogue.
+  **Déploiement réel de /tmp/demo (--name demo) EN COURS en background** (compteur partagé S-exp,
+  Backend OK). Vérifier au réveil : health check IP, rapport au user (coût cx22, destruction).
+- Découvert : pas de syntaxe Elm-like pour le scope `Cmd` (`Cmd (capabilities) A` est S-exp seulement ;
+  `Cmd {}` parse en Record vide). Item syntaxe à traiter (cf. `Process { Human.ask } String` qui existe).
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.

@@ -244,7 +244,7 @@ let dns_upsert ~domain ~name ~ip =
 
 (* --- The deploy ----------------------------------------------------------- *)
 
-let deploy ?name:name_flag ?(domain = "charlon.dev") ?(server_type = "cx22")
+let deploy ?name:name_flag ?(domain = "charlon.dev") ?(server_type = "cax11")
     ?(location = "nbg1") project =
   if not (hcloud_available ()) then
     fail "DEPLOY001 hcloud CLI not found: install and configure it (hcloud context create ...)";
