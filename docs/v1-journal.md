@@ -98,6 +98,10 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   Types.protoss (source de vérité : FrontendModel/FrontendMsg/BackendModel/ToBackend/ToFrontend,
   module exposé, usage qualifié Types.X — alias transparents donc zéro impact graphe canonique) +
   Frontend.protoss + Backend.protoss. Redeploy prod broadcast EN COURS (background).
+- **Prod collaborative VÉRIFIÉE** : redeploy broadcast OK ; POST typé → {count:5} (le ledger a
+  traversé TOUS les redeploys : 2→3→4→5) ; client SSE /__events en prod reçoit `data: {Synced 5}`
+  instantanément. Le cycle Lamdera complet (init layout, sendToBackend typé, fold ledger, broadcast,
+  fromBackend) tourne sur Hetzner.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
