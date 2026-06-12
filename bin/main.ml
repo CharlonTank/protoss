@@ -27,6 +27,7 @@ let usage () =
      \       protoss world init [<ledger-root>]\n\
      \       protoss ledger event|world|inspect|replay|diff|export|import|fork|simulate|compare-branches|merge|branches|reject [args]\n\
      \       protoss app check <project>\n\
+     \       protoss backend state|send <project> [<toBackendMsg>] [--ledger <root>] [--world <w>]\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss live [project] [--port <n>]   (build + serve the full-stack app)\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
@@ -113,6 +114,7 @@ let protect f =
   | Protoss.Store.Error msg -> print_error "store error" msg
   | Protoss.Workspace.Error msg -> print_error "workspace error" msg
   | Protoss.Web.Error msg -> print_error "web error" msg
+  | Protoss.Backend.Error msg -> print_error "backend error" msg
   | Protoss.Runtime_store.Error msg -> print_error "runtime error" msg
   | Unix.Unix_error (err, fn, arg) ->
       print_error "system error" (fn ^ "(" ^ arg ^ "): " ^ Unix.error_message err)
@@ -817,6 +819,47 @@ let command_app = function
             (Protoss.Ast.string_of_typ b.Protoss.Web.backend_model_ty)
             (Protoss.Ast.string_of_typ b.Protoss.Web.to_backend_ty)
             (Protoss.Ast.string_of_typ b.Protoss.Web.to_frontend_ty))
+  | _ -> usage ()
+
+(* Ledger-backed BackendModel (docs/backend-architecture.md, brick 2): the
+   model is the deterministic fold of updateBackend over the project ledger's
+   to-backend events. The ledger lives under <project>/.protoss/ledger by
+   default; the `backend` branch tracks the latest world. *)
+let command_backend = function
+  | "state" :: project :: args ->
+      let contract = Protoss.Web.app_check project in
+      let b = Protoss.Backend.contract contract.Protoss.Web.checked in
+      let root =
+        Option.value (find_arg "--ledger" args)
+          ~default:(Filename.concat project (Filename.concat ".protoss" "ledger"))
+      in
+      let world =
+        Option.value (find_arg "--world" args) ~default:(Protoss.Backend.branch_world root)
+      in
+      let model = Protoss.Backend.state root contract.Protoss.Web.checked b world in
+      Printf.printf "World %s\n" world;
+      Printf.printf "BackendModel %s\n" (Protoss.Runtime.value_to_string model);
+      Printf.printf "BackendModelRef %s\n"
+        (Protoss.Hashcons.hash (Protoss.Runtime.value_to_canonical model))
+  | "send" :: project :: message :: args ->
+      let contract = Protoss.Web.app_check project in
+      let b = Protoss.Backend.contract contract.Protoss.Web.checked in
+      let root =
+        Option.value (find_arg "--ledger" args)
+          ~default:(Filename.concat project (Filename.concat ".protoss" "ledger"))
+      in
+      let world =
+        Option.value (find_arg "--world" args) ~default:(Protoss.Backend.branch_world root)
+      in
+      let event, next_world, model, cmd =
+        Protoss.Backend.send root contract.Protoss.Web.checked b world message
+      in
+      Printf.printf "Event %s\n" event;
+      Printf.printf "NextWorldRef %s\n" next_world;
+      Printf.printf "BackendModel %s\n" (Protoss.Runtime.value_to_string model);
+      Printf.printf "BackendModelRef %s\n"
+        (Protoss.Hashcons.hash (Protoss.Runtime.value_to_canonical model));
+      Printf.printf "Cmd %s\n" (Protoss.Runtime.value_to_string cmd)
   | _ -> usage ()
 
 let command_web = function
@@ -1753,6 +1796,7 @@ let () =
       | "world" :: args -> command_world args
       | "ledger" :: args -> command_ledger args
       | "app" :: args -> command_app args
+      | "backend" :: args -> command_backend args
       | "web" :: args -> command_web args
       | "live" :: args -> command_live args
       | "runtime" :: args -> command_runtime args

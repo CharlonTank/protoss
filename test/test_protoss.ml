@@ -562,6 +562,66 @@ let () =
     fail "mistyped backend (model arg) should be rejected"
   with Web.Error msg -> assert_true "backend model mismatch is WEB021" (contains_substring msg "WEB021")
 
+(* Brick 2 (docs/backend-architecture.md): the BackendModel is the
+   deterministic fold of updateBackend over the ledger's to-backend events.
+   Covers: the fold itself, replayed state == sent state (same canonical),
+   independent ledgers converging to identical world/model refs, maltyped
+   messages rejected BEFORE append, and replay-time message integrity. *)
+let () =
+  let program =
+    "(def init (Process Nat) (done 0))\n\
+     (def update (-> (Variant (Inc Unit)) (-> Nat (Process Nat))) (lambda (m (Variant (Inc \
+      Unit))) (lambda (n Nat) (done n))))\n\
+     (def view (-> Nat (View (Variant (Inc Unit)))) (lambda (n Nat) (column (Nil (View (Variant \
+      (Inc Unit)))))))\n\
+     (def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit) (Reset Unit)) (-> (Record (count Nat)) (Tuple \
+      (Record (count Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant \
+      (Bump Unit) (Reset Unit))) (lambda (model (Record (count Nat))) (case msg (Bump _ (tuple \
+      (record (count (succ (get model count)))) unit)) (Reset _ (tuple (record (count 0)) \
+      unit))))))"
+  in
+  let checked = check program in
+  let b = Backend.contract checked in
+  let send_sequence root =
+    List.fold_left
+      (fun world text ->
+        let _, next_world, _, _ = Backend.send root checked b world text in
+        next_world)
+      Ledger.initial_world
+      [ "(Bump unit)"; "(Bump unit)"; "(Reset unit)"; "(Bump unit)" ]
+  in
+  let ledger_a = temp_dir "backend-ledger-a" in
+  let world_a = send_sequence ledger_a in
+  let model_a = Backend.state ledger_a checked b world_a in
+  assert_equal "backend fold: bump bump reset bump = count 1" "{count = 1}"
+    (Runtime.value_to_string model_a);
+  assert_equal "backend branch tracks the latest world" world_a (Backend.branch_world ledger_a);
+  let ledger_b = temp_dir "backend-ledger-b" in
+  let world_b = send_sequence ledger_b in
+  assert_equal "independent ledgers converge to the same world ref" world_a world_b;
+  assert_equal "independent ledgers converge to the same model canonical"
+    (Runtime.value_to_canonical model_a)
+    (Runtime.value_to_canonical (Backend.state ledger_b checked b world_b));
+  (try
+     ignore (Backend.send ledger_a checked b world_a "(Nope unit)");
+     fail "maltyped ToBackend message should be rejected"
+   with Backend.Error msg ->
+     assert_true "maltyped message is BACKEND002" (contains_substring msg "BACKEND002"));
+  assert_equal "rejected message did not advance the backend branch" world_a
+    (Backend.branch_world ledger_a);
+  (* A forged event whose message-ref does not match the re-typed canonical
+     value is caught at replay time. *)
+  let _, forged_world =
+    Ledger.record_to_backend ledger_a world_a ~message:"(Bump unit)"
+      ~message_type:(Ast.string_of_typ b.Web.to_backend_ty) ~message_ref:"p2:forged"
+  in
+  (try
+     ignore (Backend.state ledger_a checked b forged_world);
+     fail "forged message-ref should fail replay integrity"
+   with Backend.Error msg ->
+     assert_true "forged ref is BACKEND005" (contains_substring msg "BACKEND005"))
+
 (* Regression guards for crashes found by the deterministic fuzzer (G3). *)
 let () =
   (* "case ofx": find_sub used to match the space inside "case ", driving

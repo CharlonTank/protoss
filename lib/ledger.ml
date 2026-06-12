@@ -401,6 +401,19 @@ let record_resume root world event response result =
    ^ "\nresponse-codec-ref=" ^ codec_ref ^ "\nresponse="
    ^ String.escaped response ^ "\nresult=" ^ String.escaped result)
 
+(* Backend input events (docs/backend-architecture.md, brick 2): a typed
+   ToBackend message appended as a content-addressed application event. The
+   payload keeps the source-syntax value text; [message_ref] is the hash of the
+   kernel-typed message's *canonical value*, so replay can verify integrity
+   independently of the source spelling. The fold itself (BackendModel =
+   updateBackend over the replayed log) lives in Backend, which holds the
+   checked program; the ledger validates structure only. *)
+let record_to_backend root world ~message ~message_type ~message_ref =
+  ignore (init root);
+  add_event root world
+    ("kind=to-backend\nto-backend=" ^ String.escaped message ^ "\nto-backend-type="
+   ^ message_type ^ "\nmessage-ref=" ^ message_ref)
+
 let record_external_error root world event code message =
   let response_type, signature_ref, codec_ref, _ =
     validate_response_target root "<new>" event
@@ -594,6 +607,8 @@ let validate_event root event content =
          ^ event_world ^ ", got " ^ base);
       if not (Sys.file_exists (world_path root base)) then
         failwith ("maltyped event " ^ event ^ ": simulation base world not found: " ^ base)
+  | Some "to-backend" ->
+      List.iter need [ "to-backend"; "to-backend-type"; "message-ref" ]
   | Some k -> failwith ("maltyped event " ^ event ^ ": unknown kind " ^ k)
   | None -> assert false);
   fields

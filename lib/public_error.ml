@@ -112,6 +112,34 @@ let catalog =
       description = "view returns a View whose message type does not match update.";
     };
     {
+      code = "BACKEND001";
+      name = "BackendMissing";
+      description =
+        "The app defines no backend half (updateBackend/initBackend) for a backend operation.";
+    };
+    {
+      code = "BACKEND002";
+      name = "BackendMessageInvalid";
+      description =
+        "A ToBackend message failed to parse or type-check against the app's ToBackend type.";
+    };
+    {
+      code = "BACKEND003";
+      name = "BackendUpdateShape";
+      description = "updateBackend returned a value that is not a (Tuple BackendModel (Cmd ...)).";
+    };
+    {
+      code = "BACKEND004";
+      name = "BackendEventMalformed";
+      description = "A ledger to-backend event is missing its payload or message-ref field.";
+    };
+    {
+      code = "BACKEND005";
+      name = "BackendEventIntegrity";
+      description =
+        "A replayed to-backend event's message does not re-type to its recorded canonical ref.";
+    };
+    {
       code = "RUNTIME001";
       name = "RuntimeFailure";
       description = "A runtime store, world, or suspended-process operation failed.";
@@ -290,6 +318,7 @@ let code_for_cli_kind kind msg =
       | "workspace error" ->
           if contains msg "policy" then "POLICY001" else "WORKSPACE001"
       | "web error" -> "WEB001"
+      | "backend error" -> "BACKEND001"
       | "runtime error" -> "RUNTIME001"
       | "self fmt error" -> "SELF_FMT001"
       | "self canon error" -> "SELF_CANON001"
