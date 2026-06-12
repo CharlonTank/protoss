@@ -140,6 +140,31 @@ let catalog =
         "A replayed to-backend event's message does not re-type to its recorded canonical ref.";
     };
     {
+      code = "DEPLOY001";
+      name = "DeployToolingMissing";
+      description = "A required deployment tool (hcloud) is not installed or configured.";
+    };
+    {
+      code = "DEPLOY002";
+      name = "DeployCommandFailed";
+      description = "A deployment step (hcloud/ssh/rsync/curl) exited non-zero.";
+    };
+    {
+      code = "DEPLOY003";
+      name = "DeployNoSshKey";
+      description = "No SSH key is registered in the hcloud project.";
+    };
+    {
+      code = "DEPLOY004";
+      name = "DeployServerUnreachable";
+      description = "The provisioned server did not become reachable over SSH.";
+    };
+    {
+      code = "DEPLOY005";
+      name = "DeployDnsFailed";
+      description = "The Cloudflare zone or DNS record could not be read or written.";
+    };
+    {
       code = "RUNTIME001";
       name = "RuntimeFailure";
       description = "A runtime store, world, or suspended-process operation failed.";
@@ -319,6 +344,7 @@ let code_for_cli_kind kind msg =
           if contains msg "policy" then "POLICY001" else "WORKSPACE001"
       | "web error" -> "WEB001"
       | "backend error" -> "BACKEND001"
+      | "deploy error" -> "DEPLOY002"
       | "runtime error" -> "RUNTIME001"
       | "self fmt error" -> "SELF_FMT001"
       | "self canon error" -> "SELF_CANON001"

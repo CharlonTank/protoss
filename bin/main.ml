@@ -28,6 +28,7 @@ let usage () =
      \       protoss ledger event|world|inspect|replay|diff|export|import|fork|simulate|compare-branches|merge|branches|reject [args]\n\
      \       protoss app check <project>\n\
      \       protoss backend state|send <project> [<toBackendMsg>] [--ledger <root>] [--world <w>]\n\
+     \       protoss deploy [project] [--name <app>] [--domain <d>] [--server-type <t>] [--location <l>]\n\
      \       protoss web build|serve|inspect <project> [--out <dir>] [--port <n>]\n\
      \       protoss live [project] [--port <n>]   (build + serve the full-stack app)\n\
      \       protoss runtime init|status|inspect|world|audit <project> | protoss runtime reset <project> --yes\n\
@@ -115,6 +116,7 @@ let protect f =
   | Protoss.Workspace.Error msg -> print_error "workspace error" msg
   | Protoss.Web.Error msg -> print_error "web error" msg
   | Protoss.Backend.Error msg -> print_error "backend error" msg
+  | Protoss.Deploy.Error msg -> print_error "deploy error" msg
   | Protoss.Runtime_store.Error msg -> print_error "runtime error" msg
   | Unix.Unix_error (err, fn, arg) ->
       print_error "system error" (fn ^ "(" ^ arg ^ "): " ^ Unix.error_message err)
@@ -861,6 +863,22 @@ let command_backend = function
         (Protoss.Hashcons.hash (Protoss.Runtime.value_to_canonical model));
       Printf.printf "Cmd %s\n" (Protoss.Runtime.value_to_string cmd)
   | _ -> usage ()
+
+(* `protoss deploy [project] [--name n] [--domain d] [--server-type t]
+   [--location l]`: provision (or reuse) the app's Hetzner server, build and
+   run the app there, and publish <name>.<domain> through Cloudflare. *)
+let command_deploy args =
+  let flag name = find_flag_value name args in
+  let rec strip = function
+    | ("--name" | "--domain" | "--server-type" | "--location") :: _ :: rest -> strip rest
+    | x :: rest -> x :: strip rest
+    | [] -> []
+  in
+  let project = project_arg (strip args) in
+  Protoss.Deploy.deploy ?name:(flag "--name")
+    ?domain:(flag "--domain")
+    ?server_type:(flag "--server-type")
+    ?location:(flag "--location") project
 
 (* Transport for the Lamdera-shaped backend (docs/backend-architecture.md): a
    frontend `Server.request "__backend" <ToBackend>` suspension is POSTed by
@@ -1823,6 +1841,7 @@ let () =
       | "ledger" :: args -> command_ledger args
       | "app" :: args -> command_app args
       | "backend" :: args -> command_backend args
+      | "deploy" :: args -> command_deploy args
       | "web" :: args -> command_web args
       | "live" :: args -> command_live args
       | "runtime" :: args -> command_runtime args
