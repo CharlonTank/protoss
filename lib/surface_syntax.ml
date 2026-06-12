@@ -104,9 +104,9 @@ and render_type_app t =
   | Ast.TAutomaton (s, o) -> "Automaton " ^ render_type_atom s ^ " " ^ render_type_atom o
   | Ast.TProcess (None, t) -> "Process " ^ render_type_atom t
   | Ast.TProcess (Some caps, t) ->
-      "Process " ^ render_capability_args caps ^ " " ^ render_type_atom t
+      "Process " ^ render_capability_scope caps ^ " " ^ render_type_atom t
   | Ast.TCmd (None, t) -> "Cmd " ^ render_type_atom t
-  | Ast.TCmd (Some caps, t) -> "Cmd " ^ render_capability_args caps ^ " " ^ render_type_atom t
+  | Ast.TCmd (Some caps, t) -> "Cmd " ^ render_capability_scope caps ^ " " ^ render_type_atom t
   | Ast.TSecretRef (scope, t) ->
       "SecretRef " ^ check_name "secret scope" scope ^ " " ^ render_type_atom t
   | Ast.TRecord [] -> "{}"
@@ -131,6 +131,12 @@ and render_type_app t =
 
 and render_type_atom t =
   if type_is_atom t then render_type_app t else "(" ^ render_type t ^ ")"
+
+(* Type-position spelling of a capability scope: Process { a, b } T. The
+   expression-position renderer below keeps the parenthesized form. *)
+and render_capability_scope caps =
+  List.iter (fun c -> ignore (check_name "capability" c)) caps;
+  match caps with [] -> "{}" | _ -> "{ " ^ String.concat ", " caps ^ " }"
 
 and render_capability_args caps =
   List.iter (fun c -> ignore (check_name "capability" c)) caps;

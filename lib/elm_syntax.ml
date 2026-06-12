@@ -255,6 +255,15 @@ and parse_fun_type st =
 and parse_app_type st =
   let rec collect acc =
     match peek st with
+    (* Process/Cmd { caps } in ANY type position (nested, after arrows, inside
+       Tuple/...): the brace block is a capability scope, not a record type --
+       same lowering as the head-of-signature form in parse_signature_type_text:
+       (Process (capabilities c1 c2) T). *)
+    | Some LBrace
+      when (match acc with [ Sexp.Atom ("Process" | "Cmd") ] -> true | _ -> false) ->
+        ignore (take st);
+        let head = match acc with [ Sexp.Atom h ] -> h | _ -> assert false in
+        collect (parse_capability_scope st head :: acc)
     | Some (Ident _ | LParen | LBrace) -> collect (parse_type_atom st :: acc)
     | _ -> List.rev acc
   in
@@ -263,6 +272,25 @@ and parse_app_type st =
   | [ one ] -> one
   | Sexp.Atom name :: args -> Sexp.List (Sexp.Atom name :: args)
   | head :: _ -> fail ("invalid type application head: " ^ Sexp.to_string head)
+
+and parse_capability_scope st head =
+  let rec caps acc =
+    match take st with
+    | Some RBrace ->
+        ensure_unique_names (String.lowercase_ascii head ^ " capability") acc;
+        Sexp.List
+          (Sexp.Atom "capabilities"
+          :: List.map (fun c -> Sexp.Atom c) (List.sort String.compare acc))
+    | Some Comma -> caps acc
+    | Some (Ident name) ->
+        if not (is_name name) then
+          fail ("invalid " ^ String.lowercase_ascii head ^ " capability: " ^ name);
+        caps (name :: acc)
+    | Some tok ->
+        fail ("invalid " ^ String.lowercase_ascii head ^ " capability token: " ^ token_name tok)
+    | None -> fail ("unterminated " ^ head ^ " capability set")
+  in
+  caps []
 
 and parse_type_atom st =
   match take st with

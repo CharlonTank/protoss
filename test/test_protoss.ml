@@ -1540,6 +1540,31 @@ let () =
   in
   assert_equal "on short variant constructor == explicit hash"
     (Kernel.hash_program on_explicit) (Kernel.hash_program on_inferred);
+  (* Process/Cmd { caps } capability scopes parse in ANY type position (nested,
+     after arrows), lowering to the same canonical scope as the explicit
+     S-expression form -- previously only the head-of-signature position parsed. *)
+  let nested_scope_elm =
+    check
+      (String.concat "\n"
+         [ "capabilities Human.ask";
+           "upd : Nat -> Tuple Nat (Cmd {} (Variant (S Nat)))";
+           "upd n =";
+           "    tuple n unit";
+           "eff : Nat -> Process { Human.ask } String";
+           "eff n =";
+           "    Human.ask \"name?\"" ])
+  in
+  let nested_scope_sexp =
+    check
+      "(capabilities Human.ask)\n\
+       (def upd (-> Nat (Tuple Nat (Cmd (capabilities) (Variant (S Nat))))) (lambda (n Nat) \
+        (tuple n unit)))\n\
+       (def eff (-> Nat (Process (capabilities Human.ask) String)) (lambda (n Nat) (Human.ask \
+        \"name?\")))"
+  in
+  assert_equal "nested Process/Cmd capability scope == explicit S-expression hash"
+    (Kernel.hash_program nested_scope_sexp)
+    (Kernel.hash_program nested_scope_elm);
   (* The empty list literal also receives its element type from context. *)
   ignore (check "view : Nat -> View (Variant (A Unit) (B Unit))\nview m = column []");
   (* A genuinely ill-typed element under a container keyword stays rejected. *)
@@ -6551,12 +6576,13 @@ let () =
    assert_true "init --app Types module exposes ToFrontend with GotShared in FrontendMsg"
      (contains_substring types_src "type alias ToFrontend ="
      && contains_substring types_src "Variant (Bump Unit) (BumpShared Unit) (GotShared Nat)");
-   assert_true "init --app backend half broadcasts and maps via fromBackend"
-     (contains_substring backend_src "def initBackend Types.BackendModel"
-     && contains_substring backend_src "def updateBackend"
+   assert_true "init --app backend half is Protoss/H, broadcasts, maps via fromBackend"
+     (contains_substring backend_src "initBackend : Types.BackendModel"
+     && contains_substring backend_src
+          "updateBackend : Types.ToBackend -> Types.BackendModel -> Tuple Types.BackendModel"
+     && contains_substring backend_src "Cmd {} Types.ToFrontend"
      && contains_substring backend_src "(broadcast (Synced"
-     && contains_substring backend_src "def fromBackend"
-     && contains_substring backend_src "Types.ToBackend"));
+     && contains_substring backend_src "fromBackend : Types.ToFrontend -> Types.FrontendMsg"));
   let init_manifest = Workspace.parse_manifest project_init_root in
   Workspace.check_project init_manifest;
   let init_build = Workspace.build init_manifest in

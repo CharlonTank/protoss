@@ -323,33 +323,28 @@ let frontend_app_source =
 
 let backend_app_source =
   String.concat "\n"
-    [ "(import \"Types.protoss\")";
+    [ "import \"Types.protoss\" exposing (BackendModel, ToBackend, ToFrontend, FrontendMsg)";
       "";
-      "(def initBackend Types.BackendModel (record (count 0)))";
+      "initBackend : Types.BackendModel";
+      "initBackend =";
+      "    { count = 0 }";
       "";
-      "; updateBackend folds a ToBackend (Bump) into the BackendModel AND, in its";
-      "; command slot, broadcasts the new shared count to every connected client as";
-      "; a ToFrontend (Synced n). The broadcast is an ephemeral OUTPUT effect: it is";
-      "; NOT recorded in the ledger (only the to-backend Bump event is), so the fold";
-      "; stays reconstructible from to-backend events alone and broadcasts re-derive.";
-      "(def updateBackend";
-      "  (-> Types.ToBackend";
-      "      (-> Types.BackendModel";
-      "          (Tuple Types.BackendModel (Cmd (capabilities) Types.ToFrontend))))";
-      "  (lambda (msg Types.ToBackend)";
-      "    (lambda (model Types.BackendModel)";
-      "      (tuple (record (count (succ (get model count))))";
-      "             (broadcast (Synced (succ (get model count))))))))";
+      "-- updateBackend folds a ToBackend (Bump) into the BackendModel AND, in its";
+      "-- command slot, broadcasts the new shared count to every connected client";
+      "-- as a ToFrontend (Synced n). Broadcasts are ephemeral OUTPUT effects: they";
+      "-- are never recorded in the ledger (only the to-backend Bump event is), so";
+      "-- the fold stays reconstructible from to-backend events alone.";
+      "updateBackend : Types.ToBackend -> Types.BackendModel -> Tuple Types.BackendModel (Cmd \
+       {} Types.ToFrontend)";
+      "updateBackend msg model =";
+      "    tuple { count = succ model.count } (broadcast (Synced (succ model.count)))";
       "";
-      "; fromBackend maps an incoming broadcast (ToFrontend) to a frontend Msg. It is";
-      "; written in S-expression form because the Elm-like surface cannot yet spell a";
-      "; function whose domain is the contract's ToFrontend variant. The runtime";
-      "; subscribes to /__events iff this def is present.";
-      "(def fromBackend";
-      "  (-> Types.ToFrontend Types.FrontendMsg)";
-      "  (lambda (tf Types.ToFrontend)";
-      "    (foldVariant Types.ToFrontend Types.FrontendMsg tf";
-      "                 (Synced n (GotShared n)))))";
+      "-- fromBackend maps an incoming broadcast (ToFrontend) to a frontend Msg; the";
+      "-- runtime subscribes to /__events iff this def is present.";
+      "fromBackend : Types.ToFrontend -> Types.FrontendMsg";
+      "fromBackend tf =";
+      "    case tf of";
+      "        Synced n -> GotShared n";
       "";
     ]
 
