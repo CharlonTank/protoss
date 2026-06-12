@@ -108,6 +108,13 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   PUR prouvé : state avec / sans (rm) / corrompu → même BackendModelRef (ledger 40 events). Lecture
   jamais aveugle : re-typage contre le type ACTUEL du modèle + re-vérif du hash ; tout échec →
   refold silencieux. Tests de régression ajoutés. @fulltest vert.
+- **Scope imbriqué + scaffold 100% Protoss/H FAIT** (commit bbe8e52). `Process { caps } T` /
+  `Cmd {} T` parsent en TOUTE position de type (parse_app_type route les braces après un head
+  Process/Cmd vers le scope, plus le record) ; émetteur symétrique en position type (`{ a, b }`),
+  round-trip hash-stable prouvé. Conséquence : Backend.protoss du scaffold passe en Elm-like
+  (fromBackend en `case` idiomatique au lieu de foldVariant — changement de programme assumé, aucun
+  hash pinné ; invariant prouvé = convergence des DEUX syntaxes vers p2:4bc24c7e, scaffold généré
+  reproduit ce hash). LE SCAFFOLD EST 100% PROTOSS/H. Sweep 105 0-diff, @fulltest vert.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
