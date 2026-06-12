@@ -114,6 +114,7 @@
   (PEApply (Record (fn ProtossExpr) (args (List ProtossExpr))))
   (PEBind ProtossBindExpr)
   (PEBool Bool)
+  (PEBroadcast ProtossExpr)
   (PECase ProtossCaseExpr)
   (PECaseList ProtossCaseListExpr)
   (PEDone ProtossExpr)
@@ -129,6 +130,7 @@
   (PERecord (List ProtossRecordFieldExpr))
   (PERecur ProtossExpr)
   (PERequest ProtossRequest)
+  (PESendToBackend ProtossExpr)
   (PEString String)
   (PEUnit Unit)
   (PEVariant ProtossVariantExpr)
@@ -217,6 +219,12 @@
   (PDRecord ProtossRecordDecl)
   (PDType ProtossTypeAlias)
   (PDVariant ProtossVariantDecl))
+(record ProtossTupleFieldAcc
+  (count Nat)
+  (fields (List ProtossType)))
+(record ProtossTupleFieldExprAcc
+  (count Nat)
+  (fields (List ProtossRecordFieldExpr)))
 (record ProtossResolveReport
   (definedTerms (List String))
   (definedTypes (List String))
@@ -300,6 +308,11 @@
 (record CanonOut
   (typ ProtossType)
   (text String))
+(record CanonBackendContract
+  (toBackend ProtossType)
+  (backendModel ProtossType)
+  (toFrontend ProtossType)
+  (cmdCaps ProtossType))
 (record CanonDefSrc
   (name String)
   (typeParams (List String))
@@ -1445,6 +1458,32 @@
   (lambda (message String)
     (variant Err message)))
 
+;; Desugar (Tuple e1 .. en) -> (Record (_1 e1) .. (_n en)), mirroring the kernel
+;; parser (Parser.tuple_fields). Each field is the self-hosted record field form
+;; PTApply{name="_<i>", args=[ei]}. foldList runs right-to-left like
+;; canonTvarBindings, so position p (0-based) is (len - 1 - count) and the field
+;; name is _<position+1>; consing preserves source order.
+(def Protoss.tupleRecordFields (-> (List ProtossType) (List ProtossType))
+  (lambda (elems (List ProtossType))
+    (let (len ((inst List.length ProtossType) elems))
+      (get
+        (foldList elems
+          (record (count 0) (fields (Nil ProtossType)))
+          (lambda (elem ProtossType)
+            (lambda (acc ProtossTupleFieldAcc)
+              (record
+                (count (succ (get acc count)))
+                (fields
+                  (Cons ProtossType
+                    (variant PTApply
+                      (record
+                        (name
+                          ((String.concat "_")
+                            (Nat.toString ((prim.Nat.sub len) (get acc count)))))
+                        (args (Cons ProtossType elem (Nil ProtossType)))))
+                    (get acc fields)))))))
+        fields))))
+
 (defrec Protoss.parseType (-> Sexp (Result String ProtossType))
   (variant value)
   (SAtom name (Protoss.typeOk (variant PTName name)))
@@ -1488,9 +1527,23 @@
                                   (Cons extraHead extraTail
                                     (Protoss.typeErr "too many function type arguments"))))))))
                       (false
-                        (Protoss.typeOk
-                          (variant PTApply
-                            (record (name name) (args parsedArgs)))))))))))
+                        (case ((String.eqString name) "Tuple")
+                          (true
+                            (caseList parsedArgs
+                              (Nil (Protoss.typeErr "Tuple type requires at least two elements"))
+                              (Cons firstElem afterFirst
+                                (caseList afterFirst
+                                  (Nil
+                                    (Protoss.typeErr "Tuple type requires at least two elements"))
+                                  (Cons secondElem afterSecond
+                                    (Protoss.typeOk
+                                      (variant PTApply
+                                        (record (name "Record")
+                                          (args (Protoss.tupleRecordFields parsedArgs))))))))))
+                          (false
+                            (Protoss.typeOk
+                              (variant PTApply
+                                (record (name name) (args parsedArgs)))))))))))))
           (_ (Protoss.typeErr "expected type constructor")))))))
 
 (def Protoss.exprOk (-> ProtossExpr (Result String ProtossExpr))
@@ -1570,6 +1623,7 @@
       (_ (Protoss.typeErr "expected type constructor"))))
   (PEBind value (Protoss.typeErr "expected type"))
   (PEBool value (Protoss.typeErr "expected type"))
+  (PEBroadcast value (Protoss.typeErr "expected type"))
   (PECase value (Protoss.typeErr "expected type"))
   (PECaseList value (Protoss.typeErr "expected type"))
   (PECons value (Protoss.typeErr "expected type"))
@@ -1585,6 +1639,7 @@
   (PERecord value (Protoss.typeErr "expected type"))
   (PERecur value (Protoss.typeErr "expected type"))
   (PERequest value (Protoss.typeErr "expected type"))
+  (PESendToBackend value (Protoss.typeErr "expected type"))
   (PEString value (Protoss.typeErr "expected type"))
   (PEUnit value (Protoss.typeErr "expected type"))
   (PEVariant value (Protoss.typeErr "expected type")))
@@ -2221,6 +2276,26 @@
           (Cons extraHead extraTail
             (Protoss.exprErr "too many done arguments")))))))
 
+(def Protoss.finishSendToBackendExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil (Protoss.exprErr "expected sendToBackend payload"))
+      (Cons payload extra
+        (caseList extra
+          (Nil (Protoss.exprOk (variant PESendToBackend payload)))
+          (Cons extraHead extraTail
+            (Protoss.exprErr "too many sendToBackend arguments")))))))
+
+(def Protoss.finishBroadcastExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil (Protoss.exprErr "expected broadcast payload"))
+      (Cons payload extra
+        (caseList extra
+          (Nil (Protoss.exprOk (variant PEBroadcast payload)))
+          (Cons extraHead extraTail
+            (Protoss.exprErr "too many broadcast arguments")))))))
+
 (def Protoss.finishBindExpr (-> (List ProtossExpr) (Result String ProtossExpr))
   (lambda (args (List ProtossExpr))
     (caseList args
@@ -2348,6 +2423,40 @@
       (Err err (Protoss.exprErr err))
       (Ok fields (Protoss.exprOk (variant PERecord fields))))))
 
+;; Desugar the value-level (tuple e1 .. en) -> (record (_1 e1) .. (_n en)),
+;; mirroring the kernel parser (Parser: ERecord (sort_fields (tuple_fields ..))).
+;; Field name index mirrors Protoss.tupleRecordFields (record arm sorts later).
+(def Protoss.tupleRecordFieldExprs (-> (List ProtossExpr) (List ProtossRecordFieldExpr))
+  (lambda (elems (List ProtossExpr))
+    (let (len ((inst List.length ProtossExpr) elems))
+      (get
+        (foldList elems
+          (record (count 0) (fields (Nil ProtossRecordFieldExpr)))
+          (lambda (elem ProtossExpr)
+            (lambda (acc ProtossTupleFieldExprAcc)
+              (record
+                (count (succ (get acc count)))
+                (fields
+                  (Cons ProtossRecordFieldExpr
+                    (record
+                      (name
+                        ((String.concat "_")
+                          (Nat.toString ((prim.Nat.sub len) (get acc count)))))
+                      (expr elem))
+                    (get acc fields)))))))
+        fields))))
+
+(def Protoss.finishTupleExpr (-> (List ProtossExpr) (Result String ProtossExpr))
+  (lambda (args (List ProtossExpr))
+    (caseList args
+      (Nil (Protoss.exprErr "tuple requires at least two elements"))
+      (Cons firstElem afterFirst
+        (caseList afterFirst
+          (Nil (Protoss.exprErr "tuple requires at least two elements"))
+          (Cons secondElem afterSecond
+            (Protoss.exprOk
+              (variant PERecord (Protoss.tupleRecordFieldExprs args)))))))))
+
 (def Protoss.finishApplyExpr
   (-> ProtossExpr (-> (List ProtossExpr) (Result String ProtossExpr)))
   (lambda (fn ProtossExpr)
@@ -2409,7 +2518,13 @@
                                       (case ((String.eqString name) "bind")
                                         (true (Protoss.finishBindExpr args))
                                         (false
-                                          ((Protoss.finishRequestNamedExpr name) args))))))))))))))))))))))
+                                          (case ((String.eqString name) "sendToBackend")
+                                            (true (Protoss.finishSendToBackendExpr args))
+                                            (false
+                                              (case ((String.eqString name) "broadcast")
+                                                (true (Protoss.finishBroadcastExpr args))
+                                                (false
+                                                  ((Protoss.finishRequestNamedExpr name) args))))))))))))))))))))))))))
 
 (def Protoss.finishNamedExpr
   (-> String (-> (List ProtossExpr) (Result String ProtossExpr)))
@@ -2430,9 +2545,12 @@
                       (case ((String.eqString name) "record")
                         (true (Protoss.finishRecordExpr args))
                         (false
-                          (case ((String.eqString name) "variant")
-                            (true (Protoss.finishVariantExpr args))
-                            (false ((Protoss.finishExtendedNamedExpr name) args))))))))))))))))
+                          (case ((String.eqString name) "tuple")
+                            (true (Protoss.finishTupleExpr args))
+                            (false
+                              (case ((String.eqString name) "variant")
+                                (true (Protoss.finishVariantExpr args))
+                                (false ((Protoss.finishExtendedNamedExpr name) args))))))))))))))))))
 
 (def Protoss.finishExprList (-> (List ProtossExpr) (Result String ProtossExpr))
   (lambda (items (List ProtossExpr))
@@ -3659,6 +3777,14 @@
         (Nil String))))
   (PERequest request
     (Protoss.renderRequest request))
+  (PESendToBackend payload
+    (Protoss.renderForm "sendToBackend"
+      (Cons String (recur payload)
+        (Nil String))))
+  (PEBroadcast payload
+    (Protoss.renderForm "broadcast"
+      (Cons String (recur payload)
+        (Nil String))))
   (PEString value
     (Sexp.renderFlatString value))
   (PEUnit
@@ -4098,6 +4224,10 @@
     (recur value))
   (PERequest request
     (Nil String))
+  (PESendToBackend payload
+    (recur payload))
+  (PEBroadcast payload
+    (recur payload))
   (PEString value
     (Nil String))
   (PEUnit
@@ -4186,6 +4316,10 @@
     (recur value))
   (PERequest request
     (Nil String))
+  (PESendToBackend payload
+    (recur payload))
+  (PEBroadcast payload
+    (recur payload))
   (PEString value
     (Nil String))
   (PEUnit
@@ -4793,6 +4927,10 @@
     (recur value))
   (PERequest request
     (Nil ProtossTypeArityUse))
+  (PESendToBackend payload
+    (recur payload))
+  (PEBroadcast payload
+    (recur payload))
   (PEString value
     (Nil ProtossTypeArityUse))
   (PEUnit
@@ -5148,6 +5286,11 @@
     (recur value))
   (PERequest request
     (Cons String (Protoss.requestCapability request) (Nil String)))
+  (PESendToBackend payload
+    ((Protoss.nameSetUnion (Cons String "Server.request" (Nil String)))
+      (recur payload)))
+  (PEBroadcast payload
+    (recur payload))
   (PEString value
     (Nil String))
   (PEUnit
@@ -7745,7 +7888,15 @@
                               ((((Protoss.tcMismatch Protoss.tcNoDef)
                                 targetType)
                                 actualType)
-                                (Protoss.renderExpr value)))))))))))))))))
+                                (Protoss.renderExpr value))))))))))))))))
+  (PESendToBackend payload
+    (lambda (typeEnv TypeEnv)
+      (lambda (termEnv TermEnv)
+        ((Protoss.tcUnsupported Protoss.tcNoDef) "sendToBackend"))))
+  (PEBroadcast payload
+    (lambda (typeEnv TypeEnv)
+      (lambda (termEnv TermEnv)
+        ((Protoss.tcUnsupported Protoss.tcNoDef) "broadcast")))))
 
 (def Protoss.tcExpr
   (-> TypeEnv (-> TermEnv (-> Expr (Result TypeError TypeExpr))))
@@ -8558,7 +8709,17 @@
                                 (Protoss.renderExpr value))
                                 "recur argument is not a direct structural subterm")))
                           (Some targetType
-                            (((valueCheck typeEnv) termEnv) targetType)))))))))))))))
+                            (((valueCheck typeEnv) termEnv) targetType))))))))))))))
+  (PESendToBackend payload
+    (lambda (typeEnv TypeEnv)
+      (lambda (termEnv TermEnv)
+        (lambda (expected TypeExpr)
+          ((Protoss.tcUnsupported Protoss.tcNoDef) "sendToBackend")))))
+  (PEBroadcast payload
+    (lambda (typeEnv TypeEnv)
+      (lambda (termEnv TermEnv)
+        (lambda (expected TypeExpr)
+          ((Protoss.tcUnsupported Protoss.tcNoDef) "broadcast"))))))
 
 (def Protoss.tcCheckExprAs
   (-> TypeEnv (-> TermEnv (-> TypeExpr (-> Expr (Result TypeError TypeExpr)))))
@@ -10787,6 +10948,25 @@
 (def Protoss.canonProcessOf (-> ProtossType ProtossType) (Protoss.canonApply1 "Process"))
 (def Protoss.canonListOf (-> ProtossType ProtossType) (Protoss.canonApply1 "List"))
 
+(def Protoss.canonApply2 (-> String (-> ProtossType (-> ProtossType ProtossType)))
+  (lambda (head String)
+    (lambda (a ProtossType)
+      (lambda (b ProtossType)
+        (variant PTApply
+          (record (name head)
+            (args (Cons ProtossType a (Cons ProtossType b (Nil ProtossType))))))))))
+
+;; (Process (capabilities Server.request) model) -- the elaborated result type
+;; of a sendToBackend node (Kernel: TProcess (Some [Server.request], model)).
+;; Used only for internal type threading; never text-rendered for the node.
+(def Protoss.canonBackendSendResultType (-> ProtossType ProtossType)
+  (lambda (model ProtossType)
+    (((Protoss.canonApply2 "Process")
+      (variant PTApply
+        (record (name "capabilities")
+          (args (Cons ProtossType (variant PTName "Server.request") (Nil ProtossType))))))
+      model)))
+
 (def Protoss.canonNat2Type ProtossType
   ((Protoss.canonFun Protoss.canonTNat)
     ((Protoss.canonFun Protoss.canonTNat) Protoss.canonTNat)))
@@ -11382,8 +11562,166 @@
                     (get acc second)))))))
         second))))
 
+;; Typed full-stack transport (sendToBackend / broadcast): the kernel reads the
+;; program's ToBackend/BackendModel/ToFrontend/cmd-caps out of updateBackend's
+;; declared type (Kernel.backend_contract_types) and records the carried type in
+;; the canonical (backendSend payload BackendModel) / (broadcast payload
+;; ToFrontend) node. We mirror that read here. The kernel already validated the
+;; program (the component only runs on kernel-checked sources), so we read the
+;; expanded updateBackend signature positionally and Err on shapes outside the
+;; supported subset (inline (Tuple BackendModel (Cmd caps ToFrontend)) or the
+;; equivalent (Record (_1 ..) (_2 (Cmd ..))) result). updateBackend's result is
+;; ToBackend -> BackendModel -> (Tuple BackendModel (Cmd caps ToFrontend)).
+(def Protoss.canonCmdParts
+  (-> ProtossType (Result String CanonBackendContract))
+  (lambda (cmd ProtossType)
+    (case cmd
+      (PTApply app
+        (case ((String.eqString (get app name)) "Cmd")
+          (false (variant Err "updateBackend command slot must be a Cmd type"))
+          (true
+            (caseList (get app args)
+              (Nil (variant Err "updateBackend Cmd type missing capability scope"))
+              (Cons capsArg afterCaps
+                (caseList afterCaps
+                  (Nil (variant Err "updateBackend Cmd type missing message type"))
+                  (Cons msgArg afterMsg
+                    (caseList afterMsg
+                      (Nil
+                        (variant Ok
+                          (record
+                            (toBackend Protoss.canonTUnit)
+                            (backendModel Protoss.canonTUnit)
+                            (toFrontend msgArg)
+                            (cmdCaps capsArg))))
+                      (Cons extra extraRest
+                        (variant Err "updateBackend Cmd type has too many arguments"))))))))))
+      (_ (variant Err "updateBackend command slot must be a Cmd type")))))
+
+(def Protoss.canonTupleSecond (-> ProtossType (Result String ProtossType))
+  (lambda (result ProtossType)
+    (case result
+      (PTApply app
+        (case ((String.eqString (get app name)) "Tuple")
+          (true
+            (caseList (get app args)
+              (Nil (variant Err "updateBackend result Tuple is empty"))
+              (Cons firstArg afterFirst
+                (caseList afterFirst
+                  (Nil (variant Err "updateBackend result Tuple needs two components"))
+                  (Cons secondArg afterSecond
+                    (caseList afterSecond
+                      (Nil (variant Ok secondArg))
+                      (Cons extra extraRest
+                        (variant Err "updateBackend result Tuple has too many components"))))))))
+          (false
+            (case ((String.eqString (get app name)) "Record")
+              (true
+                (case (Protoss.canonConPayloads (get app args))
+                  (Err err (variant Err err))
+                  (Ok fields
+                    (case ((Protoss.canonBindingLookup fields) "_2")
+                      (Some second (variant Ok second))
+                      (None (variant Err "updateBackend result record missing _2 field"))))))
+              (false
+                (variant Err
+                  "updateBackend result must be (Tuple BackendModel (Cmd caps ToFrontend))"))))))
+      (_
+        (variant Err
+          "updateBackend result must be (Tuple BackendModel (Cmd caps ToFrontend))")))))
+
+(def Protoss.canonBackendContract (-> CanonCtx (Result String CanonBackendContract))
+  (lambda (ctx CanonCtx)
+    (case ((Protoss.canonSigLookup (get ctx sigs)) "updateBackend")
+      (None
+        (variant Err
+          "BACKEND010 typed transport requires a backend half: define updateBackend"))
+      (Some sig
+        (case ((Nat.eqNat (get sig arity)) 0)
+          (false
+            (variant Err
+              "BACKEND011 typed transport backend half must be monomorphic: updateBackend is polymorphic"))
+          (true
+            (case (get sig typ)
+              (PTFun outer
+                (case (get outer second)
+                  (PTFun inner
+                    (case (Protoss.canonTupleSecond (get inner second))
+                      (Err err (variant Err err))
+                      (Ok cmd
+                        (case (Protoss.canonCmdParts cmd)
+                          (Err err (variant Err err))
+                          (Ok parts
+                            (variant Ok
+                              (record
+                                (toBackend (get outer first))
+                                (backendModel (get inner first))
+                                (toFrontend (get parts toFrontend))
+                                (cmdCaps (get parts cmdCaps)))))))))
+                  (_
+                    (variant Err
+                      "BACKEND012 updateBackend must take ToBackend -> BackendModel -> result"))))
+              (_
+                (variant Err
+                  "BACKEND012 updateBackend must take ToBackend -> BackendModel -> result")))))))))
+
 (defrec Protoss.canonExprGo (-> ProtossExpr CanonExprK)
   (variant expr)
+  (PESendToBackend payload
+    (let (payloadK (recur payload))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (case (Protoss.canonBackendContract ctx)
+              (Err err (variant Err err))
+              (Ok contract
+                (case (((payloadK ctx) scope) (variant Some (get contract toBackend)))
+                  (Err err (variant Err err))
+                  (Ok payloadOut
+                    (case (Protoss.canonTypeText (get contract backendModel))
+                      (Err err (variant Err err))
+                      (Ok modelText
+                        (variant Ok
+                          (record
+                            (typ
+                              (case expected
+                                (Some e e)
+                                (None
+                                  (Protoss.canonBackendSendResultType
+                                    (get contract backendModel)))))
+                            (text
+                              ((String.concat "(backendSend ")
+                                ((String.concat (get payloadOut text))
+                                  ((String.concat " ")
+                                    ((String.concat modelText) ")"))))))))))))))))))
+  (PEBroadcast payload
+    (let (payloadK (recur payload))
+      (lambda (ctx CanonCtx)
+        (lambda (scope CanonScope)
+          (lambda (expected (Maybe ProtossType))
+            (case (Protoss.canonBackendContract ctx)
+              (Err err (variant Err err))
+              (Ok contract
+                (case (((payloadK ctx) scope) (variant Some (get contract toFrontend)))
+                  (Err err (variant Err err))
+                  (Ok payloadOut
+                    (case (Protoss.canonTypeText (get contract toFrontend))
+                      (Err err (variant Err err))
+                      (Ok frontendText
+                        (variant Ok
+                          (record
+                            (typ
+                              (case expected
+                                (Some e e)
+                                (None
+                                  (((Protoss.canonApply2 "Cmd")
+                                    (get contract cmdCaps))
+                                    (get contract toFrontend)))))
+                            (text
+                              ((String.concat "(broadcast ")
+                                ((String.concat (get payloadOut text))
+                                  ((String.concat " ")
+                                    ((String.concat frontendText) ")"))))))))))))))))))
   (PEUnit ignored
     (lambda (ctx CanonCtx)
       (lambda (scope CanonScope)
@@ -13015,7 +13353,9 @@
   (PERecur r (Protoss.nUnsupported "recur"))
   (PEBind b (Protoss.nUnsupported "bind"))
   (PEDone d (Protoss.nUnsupported "done"))
-  (PERequest r (Protoss.nUnsupported "request")))
+  (PERequest r (Protoss.nUnsupported "request"))
+  (PESendToBackend s (Protoss.nUnsupported "sendToBackend"))
+  (PEBroadcast b (Protoss.nUnsupported "broadcast")))
 
 (record NDef (name String) (expr ProtossExpr))
 

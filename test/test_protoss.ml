@@ -9346,6 +9346,59 @@ let () =
         (not (String.equal (strip_prefix "OK:" got) golden_expected));
       assert_true "self canonicalizer without def-ids falls back to names"
         (contains_substring got "(ref choose)"));
+  (* Typed full-stack transports (sendToBackend / broadcast): no example fixture
+     uses the backend half, so cover the new effect nodes explicitly here. The
+     self-hosted canonicalizer reads the program's ToBackend/BackendModel/
+     ToFrontend out of updateBackend (mirroring Kernel.backend_contract_types)
+     and must reproduce the dedicated (backendSend payload BackendModel) /
+     (broadcast payload ToFrontend) canonical nodes byte-for-byte. Payloads use
+     the explicit (variant ..) form: short ToBackend/ToFrontend constructors are
+     elaboration sugar the kernel resolves before canonicalization and stay out
+     of the self-hosted supported subset (covered as an Err below). *)
+  let backend_canon_defs =
+    "(capabilities Server.request)\n\
+     (def initBackend (Record (count Nat)) (record (count 0)))\n\
+     (def updateBackend (-> (Variant (Bump Unit)) (-> (Record (count Nat)) (Tuple (Record (count \
+      Nat)) (Cmd (capabilities) (Variant (Synced Nat)))))) (lambda (msg (Variant (Bump Unit))) \
+      (lambda (model (Record (count Nat))) (tuple (record (count (succ (get model count)))) \
+      (broadcast (variant (Variant (Synced Nat)) Synced (succ (get model count))))))))\n"
+  in
+  let backend_canon_source =
+    backend_canon_defs
+    ^ "(def go (Process (capabilities Server.request) (Record (count Nat))) (bind (sendToBackend \
+       (variant (Variant (Bump Unit)) Bump unit)) (lambda (m (Record (count Nat))) (done m))))\n"
+  in
+  let backend_canon_checked = Parser.parse_string backend_canon_source |> Kernel.check_program in
+  let backend_canon_expected = Kernel.serialize_checked_program backend_canon_checked in
+  (* The expected canonical text exercises both new nodes. *)
+  assert_true "backend canon golden contains (backendSend ...)"
+    (contains_substring backend_canon_expected
+       "(backendSend (variant (Variant (Bump Unit)) Bump unit) (Record (count Nat)))");
+  assert_true "backend canon golden contains (broadcast ...)"
+    (contains_substring backend_canon_expected
+       "(broadcast (variant (Variant (Synced Nat)) Synced (app (builtin succ) (field #0 count))) \
+        (Variant (Synced Nat)))");
+  register "__canon_backend_transports" "String"
+    (canon_expr (canon_def_ids backend_canon_checked) backend_canon_source)
+    (fun got ->
+      assert_equal "self canonicalizer parity for sendToBackend + broadcast"
+        ("OK:" ^ backend_canon_expected) got);
+  (* A short ToBackend constructor payload (Bump unit) is elaboration sugar the
+     self-hosted canonicalizer cannot resolve (constructors are not in scope as
+     names); it must fail explicitly, never emit unverified text. *)
+  let backend_canon_shortctor =
+    backend_canon_defs
+    ^ "(def go (Process (capabilities Server.request) (Record (count Nat))) (bind (sendToBackend \
+       (Bump unit)) (lambda (m (Record (count Nat))) (done m))))\n"
+  in
+  let backend_shortctor_checked =
+    Parser.parse_string backend_canon_shortctor |> Kernel.check_program
+  in
+  register "__canon_backend_shortctor_unsupported" "String"
+    (canon_expr (canon_def_ids backend_shortctor_checked) backend_canon_shortctor)
+    (fun got ->
+      assert_true "self canonicalizer rejects short-ctor sendToBackend payload explicitly"
+        (has_prefix "ERR:" got));
   (* ---- run everything in a single checked program ---- *)
   let checked = Parser.parse_string (Buffer.contents driver) |> Kernel.check_program in
   List.iter
