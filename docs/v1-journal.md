@@ -55,6 +55,15 @@ déterminisme (hash avant/après, sweep `examples/`) vérifiées avant intégrat
   → {count = 2} (ledger de prod persiste et fold) ; mal typé → 500 propre. DNS : pas de
   CLOUDFLARE_API_TOKEN en env → record à créer par le user : `A demo.charlon.dev → <hcloud server ip protoss-demo> (proxied)` ; avec le token exporté, le prochain `protoss deploy` le fera seul. Destruction :
   `hcloud server delete protoss-demo`.
+- **Scaffold full-stack FAIT** (commit 2b8f096, demande directe du user « comment je setup ça ? ») :
+  `protoss init` génère désormais frontend Protoss/H (compteur local + bouton « Bump shared » qui fait
+  `bind (Server.request "__backend" ...)`) + `src/backend.protoss` (initBackend/updateBackend, S-exp) +
+  capability Server.request au manifest. Boucle prouvée : init → app check (App OK + Backend OK) →
+  live → POST /__server → {count = 1}. DX port-occupé livrée aussi (d365c6e, WEB030 : nomme le
+  processus + suggère le port libre — demande directe du user). Découvert au passage : `Process {cap}`
+  APRÈS une flèche a le même bug de parsing que Cmd imbriqué (« expected :, got } ») ; et un scope
+  exact déclaré exige les capabilities exactes sur done (CAP001) → le scaffold utilise la forme
+  unconstrained `Process Model`.
 - Item DX en attente (mineur, repoussé) : nettoyer les messages d'erreur de type redondants (double
   « expression X, expression X » au wrapper de def kernel.ml:4151 ; « expected context: expected » via
   require_type_expr 1987/2003). Edit prêt, non appliqué.
