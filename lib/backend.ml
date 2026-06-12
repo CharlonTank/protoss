@@ -144,12 +144,77 @@ let world_messages root (b : Web.backend_contract) world =
              Some value
          | _ -> None)
 
-(* BackendModel of a world: the deterministic fold. *)
+(* --- Content-addressed fold snapshots (pure cache) ------------------------
+   `state`/`send` would otherwise refold the WHOLE event log on every call
+   (O(history)). A snapshot stores, per world ref, the folded BackendModel as
+   re-parseable source plus the hash of its canonical form. It is ONLY a cache:
+   determinism of the fold means a snapshot can never disagree with the refold;
+   any read failure (absent, corrupt, ref mismatch, value outside the data
+   fragment, stale model type after a program change) silently falls back to
+   the full refold, which rewrites it. Deleting `snapshots/` is always safe. *)
+
+let snapshot_path root world = Filename.concat (Filename.concat root "snapshots") world
+
+(* Reload a BackendModel value from snapshot source, kernel-typed against the
+   program's CURRENT BackendModel type (a snapshot written before a model-type
+   change re-types or is discarded -- never trusted blindly). *)
+let model_value (b : Web.backend_contract) text =
+  let source =
+    "(def __backendModel " ^ Ast.string_of_typ b.Web.backend_model_ty ^ " " ^ text ^ ")\n"
+  in
+  let checked = Parser.parse_string source |> Kernel.check_program in
+  fst (Runtime.normalize_def checked "__backendModel")
+
+let read_snapshot root (b : Web.backend_contract) world =
+  match
+    if Sys.file_exists (snapshot_path root world) then
+      Some (Ledger.read_file (snapshot_path root world))
+    else None
+  with
+  | None -> None
+  | Some content -> (
+      try
+        match String.split_on_char '\n' content with
+        | ref_line :: model_line :: _
+          when String.length ref_line > 10
+               && String.equal (String.sub ref_line 0 10) "model-ref="
+               && String.length model_line > 6
+               && String.equal (String.sub model_line 0 6) "model=" ->
+            let declared = String.sub ref_line 10 (String.length ref_line - 10) in
+            let source =
+              Scanf.unescaped (String.sub model_line 6 (String.length model_line - 6))
+            in
+            let value = model_value b source in
+            if String.equal declared (Hashcons.hash (Runtime.value_to_canonical value)) then
+              Some value
+            else None
+        | _ -> None
+      with _ -> None)
+
+let write_snapshot root (_b : Web.backend_contract) world model =
+  try
+    let source = value_to_source model in
+    let dir = Filename.concat root "snapshots" in
+    if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
+    Store.write_file_atomic (snapshot_path root world)
+      ("model-ref=" ^ Hashcons.hash (Runtime.value_to_canonical model) ^ "\nmodel="
+      ^ String.escaped source ^ "\n")
+  with _ -> () (* best-effort cache: a model outside the data fragment just isn't snapshotted *)
+
+(* BackendModel of a world: the deterministic fold, served from the snapshot
+   cache on hit (O(1)) and refolded + re-snapshotted on miss. *)
 let state root checked (b : Web.backend_contract) world =
-  List.fold_left
-    (fun model msg -> fst (step checked b model msg))
-    (initial_model checked b)
-    (world_messages root b world)
+  match read_snapshot root b world with
+  | Some model -> model
+  | None ->
+      let model =
+        List.fold_left
+          (fun model msg -> fst (step checked b model msg))
+          (initial_model checked b)
+          (world_messages root b world)
+      in
+      write_snapshot root b world model;
+      model
 
 let branch_world root =
   let path = Ledger.branch_path root backend_branch in
@@ -167,6 +232,8 @@ let send root checked (b : Web.backend_contract) world text =
       ~message_type:(Ast.string_of_typ b.Web.to_backend_ty) ~message_ref:(message_ref msg)
   in
   ignore (Ledger.fork root backend_branch next_world);
+  (* Snapshot the new world so the next send starts O(1) from here. *)
+  write_snapshot root b next_world model';
   (event, next_world, model', cmd)
 
 (* Typed transport entry (sendToBackend): the ToBackend message arrives as an

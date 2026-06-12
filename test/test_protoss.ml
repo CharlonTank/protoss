@@ -603,6 +603,20 @@ let () =
   assert_equal "independent ledgers converge to the same model canonical"
     (Runtime.value_to_canonical model_a)
     (Runtime.value_to_canonical (Backend.state ledger_b checked b world_b));
+  (* Fold snapshots are a PURE cache: state without them (deleted) and with a
+     corrupted one refold to the identical canonical model. *)
+  let canonical_with_snapshot = Runtime.value_to_canonical model_a in
+  let snapshots_dir = Filename.concat ledger_a "snapshots" in
+  assert_true "send wrote a fold snapshot for the current world"
+    (Sys.file_exists (Backend.snapshot_path ledger_a world_a));
+  Sys.readdir snapshots_dir |> Array.iter (fun f -> Sys.remove (Filename.concat snapshots_dir f));
+  assert_equal "state without snapshots refolds to the same canonical model"
+    canonical_with_snapshot
+    (Runtime.value_to_canonical (Backend.state ledger_a checked b world_a));
+  Store.write_file_atomic (Backend.snapshot_path ledger_a world_a) "garbage\n";
+  assert_equal "a corrupted snapshot silently falls back to the full refold"
+    canonical_with_snapshot
+    (Runtime.value_to_canonical (Backend.state ledger_a checked b world_a));
   (try
      ignore (Backend.send ledger_a checked b world_a "(Nope unit)");
      fail "maltyped ToBackend message should be rejected"
